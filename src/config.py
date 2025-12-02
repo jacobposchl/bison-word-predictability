@@ -57,6 +57,7 @@ class Config:
                 'min_sentence_words': 2
             },
             'output': {
+                'processed_data_dir': 'processed_data',
                 'csv_with_fillers': 'code_switching_WITH_fillers.csv',
                 'csv_without_fillers': 'code_switching_WITHOUT_fillers.csv',
                 'figures_dir': 'figures'
@@ -115,13 +116,27 @@ class Config:
         """Get minimum number of words required to keep a sentence."""
         return self.get('processing.min_sentence_words', 2)
     
+    def get_processed_data_dir(self) -> str:
+        """Get output directory for processed data (CSV files)."""
+        return self.get('output.processed_data_dir', 'processed_data')
+    
     def get_csv_with_fillers_path(self) -> str:
         """Get output path for CSV with fillers."""
-        return self.get('output.csv_with_fillers', 'code_switching_WITH_fillers.csv')
+        filename = self.get('output.csv_with_fillers', 'code_switching_WITH_fillers.csv')
+        processed_dir = self.get_processed_data_dir()
+        return os.path.join(processed_dir, filename)
     
     def get_csv_without_fillers_path(self) -> str:
         """Get output path for CSV without fillers."""
-        return self.get('output.csv_without_fillers', 'code_switching_WITHOUT_fillers.csv')
+        filename = self.get('output.csv_without_fillers', 'code_switching_WITHOUT_fillers.csv')
+        processed_dir = self.get_processed_data_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_all_sentences_path(self) -> str:
+        """Get output path for CSV with all sentences (monolingual + code-switched)."""
+        filename = self.get('output.csv_all_sentences', 'all_sentences.csv')
+        processed_dir = self.get_processed_data_dir()
+        return os.path.join(processed_dir, filename)
     
     def get_figures_dir(self) -> str:
         """Get output directory for figures."""

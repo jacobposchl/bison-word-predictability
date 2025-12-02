@@ -4,7 +4,7 @@
 data:
   # Path to directory containing EAF files
   # Update this to point to your data directory
-  path: "./data"
+  path: "./raw_data"
 
 # Processing settings
 processing:
@@ -18,11 +18,17 @@ processing:
 
 # Output settings
 output:
+  # Directory for saving processed data (CSV files)
+  processed_data_dir: "processed_data"
+  
   # Output filename for CSV with fillers included in pattern analysis
   csv_with_fillers: "code_switching_WITH_fillers.csv"
   
   # Output filename for CSV with fillers excluded from pattern analysis
   csv_without_fillers: "code_switching_WITHOUT_fillers.csv"
+  
+  # Output filename for CSV with ALL sentences (monolingual + code-switched)
+  csv_all_sentences: "all_sentences.csv"
   
   # Directory for saving visualization figures
   figures_dir: "figures"

@@ -8,6 +8,7 @@ for code-switching sentences.
 import pandas as pd
 from typing import List, Dict, Tuple
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,12 @@ def export_to_csv(
         'has_fillers': [s['has_fillers'] for s in without_fillers]
     })
     
+    # Create output directory if it doesn't exist
+    csv_dir = os.path.dirname(csv_with_fillers_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+        logger.info(f"Created output directory: {csv_dir}")
+    
     # Save both datasets
     csv_with_fillers.to_csv(csv_with_fillers_path, index=False, encoding='utf-8-sig')
     csv_without_fillers.to_csv(csv_without_fillers_path, index=False, encoding='utf-8-sig')
@@ -112,3 +119,50 @@ def export_to_csv(
     
     return csv_with_fillers, csv_without_fillers
 
+
+def export_all_sentences_to_csv(
+    all_sentences: List[Dict],
+    csv_all_sentences_path: str
+) -> pd.DataFrame:
+    """
+    Export ALL sentences (both monolingual and code-switched) to CSV.
+    
+    This includes sentences that were filtered out in the code-switching analysis.
+    Useful for exploratory analysis that needs monolingual sentences.
+    
+    Args:
+        all_sentences: List of all processed sentence data dictionaries
+        csv_all_sentences_path: Output path for CSV with all sentences
+        
+    Returns:
+        DataFrame with all sentences
+    """
+    logger.info(f"Exporting ALL sentences (monolingual + code-switched) to CSV...")
+    
+    # Create DataFrame with all sentences
+    # Use pattern_with_fillers for consistency
+    csv_all = pd.DataFrame({
+        'reconstructed_sentence': [s['reconstructed_text'] for s in all_sentences],
+        'sentence_original': [s['text'] for s in all_sentences],
+        'pattern': [s.get('pattern_with_fillers', s.get('pattern', '')) for s in all_sentences],
+        'matrix_language': [s.get('matrix_language', 'Unknown') for s in all_sentences],
+        'group_code': [s.get('group_code', '') for s in all_sentences],
+        'group': [s.get('group', '') for s in all_sentences],
+        'participant_id': [s.get('participant_id', '') for s in all_sentences],
+        'filler_count': [s.get('filler_count', 0) for s in all_sentences],
+        'has_fillers': [s.get('has_fillers', False) for s in all_sentences]
+    })
+    
+    # Create output directory if it doesn't exist
+    csv_dir = os.path.dirname(csv_all_sentences_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+        logger.info(f"Created output directory: {csv_dir}")
+    
+    # Save CSV
+    csv_all.to_csv(csv_all_sentences_path, index=False, encoding='utf-8-sig')
+    
+    logger.info(f"Saved all sentences dataset:")
+    logger.info(f"  '{csv_all_sentences_path}' - {len(csv_all)} sentences")
+    
+    return csv_all

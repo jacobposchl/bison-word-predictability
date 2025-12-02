@@ -4,12 +4,12 @@ A Python package for analyzing code-switching patterns in Cantonese-English bili
 
 ## Overview
 
-This package processes EAF annotation files to:
-- Extract and clean bilingual speech annotations
-- Identify code-switching patterns (transitions between Cantonese and English)
-- Determine matrix language (dominant language) for each sentence
-- Analyze the impact of filler words on code-switching patterns
-- Generate visualizations and export data to CSV
+This package preprocesses raw EAF annotation files into processed data for code-switching analysis:
+- Extracts and cleans bilingual speech annotations from EAF files
+- Identifies code-switching patterns (transitions between Cantonese and English)
+- Determines matrix language (dominant language) for each sentence
+- Analyzes the impact of filler words on code-switching patterns
+- Generates visualizations and exports processed data to CSV
 
 ## Features
 
@@ -56,6 +56,7 @@ processing:
   min_sentence_words: 2  # Minimum words to keep a sentence
 
 output:
+  processed_data_dir: "processed_data"  # Directory for saving CSV files
   csv_with_fillers: "code_switching_WITH_fillers.csv"
   csv_without_fillers: "code_switching_WITHOUT_fillers.csv"
   figures_dir: "figures"
@@ -75,16 +76,17 @@ Your EAF files should have the following tier structure:
 
 ### Basic Usage
 
-Run the analysis with default configuration:
+Run the analysis with default configuration using either method:
 
+**Option 1: As a module (recommended)**
 ```bash
-python -m src.main
+python -m src.preprocess
 ```
 
 ### Command-Line Options
 
 ```bash
-python -m src.main [OPTIONS]
+python -m src.preprocess [OPTIONS]
 ```
 
 Options:
@@ -98,16 +100,16 @@ Options:
 
 ```bash
 # Use custom config file
-python -m src.main --config my_config.yaml
+python -m src.preprocess --config my_config.yaml
 
 # Override data path
-python -m src.main --data-path /path/to/eaf/files
+python -m src.preprocess --data-path /path/to/eaf/files
 
 # Skip visualizations
-python -m src.main --no-plots
+python -m src.preprocess --no-plots
 
 # Verbose output
-python -m src.main --verbose
+python -m src.preprocess --verbose
 ```
 
 ## Output
@@ -115,6 +117,8 @@ python -m src.main --verbose
 The analysis generates:
 
 ### CSV Files
+
+Saved to the `processed_data/` directory (or custom output directory):
 
 1. **`code_switching_WITH_fillers.csv`**: Code-switching sentences with filler words included in pattern analysis
 2. **`code_switching_WITHOUT_fillers.csv`**: Code-switching sentences with filler words excluded
@@ -153,7 +157,7 @@ The script prints detailed analysis summaries including:
 code-switch-predictability-uc-irvine/
 ├── src/
 │   ├── __init__.py
-│   ├── main.py                    # Entry point
+│   ├── preprocess.py              # Data preprocessing script
 │   ├── config.py                  # Configuration management
 │   ├── eaf_processor.py           # EAF file processing
 │   ├── text_cleaning.py           # Text cleaning utilities

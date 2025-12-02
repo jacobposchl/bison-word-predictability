@@ -1,0 +1,55 @@
+================================================================================
+CALVILLO ET AL. (2020) METHODOLOGY FEASIBILITY REPORT
+================================================================================
+
+1. DATASET OVERVIEW
+--------------------------------------------------------------------------------
+Total sentences: 8863
+  - Pure Cantonese: 2351
+  - Pure English: 3561
+  - Code-switched: 2951
+
+2. MONOLINGUAL SENTENCE AVAILABILITY
+--------------------------------------------------------------------------------
+Cantonese monolingual sentences: 2351
+English monolingual sentences: 3561
+
+Assessment:
+  ✓ SUFFICIENT: Both languages have enough monolingual sentences
+
+3. POS TAGGING QUALITY
+--------------------------------------------------------------------------------
+Error rate: 0.0%
+Average sequence length: 18.4
+
+Assessment:
+  ✓ GOOD: POS tagging is reliable
+
+4. MATCHING SUCCESS RATES
+--------------------------------------------------------------------------------
+Sentences with matches: 100.0%
+Average matches per sentence: 28.24
+Average similarity: 0.684
+
+Assessment:
+  ✓ FEASIBLE: Majority of sentences can find matches
+
+5. DATA DISTRIBUTION INSIGHTS
+--------------------------------------------------------------------------------
+Switch directions: {'C→E': 237, 'E→C': 611, 'Multiple': 2103}
+Average sentence length: 20.7 words
+
+6. POTENTIAL ISSUES
+--------------------------------------------------------------------------------
+  No major issues identified
+
+7. RECOMMENDATIONS
+--------------------------------------------------------------------------------
+✓ PROCEED: Methodology appears feasible with current data
+
+Suggested next steps:
+  1. Implement full matching algorithm
+  2. Conduct full analysis on all code-switched sentences
+  3. Validate results with manual inspection
+
+================================================================================
