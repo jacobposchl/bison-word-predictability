@@ -1,0 +1,29 @@
+# Configuration file for code-switching predictability analysis
+
+# Data settings
+data:
+  # Path to directory containing EAF files
+  # Update this to point to your data directory
+  path: "./data"
+
+# Processing settings
+processing:
+  # Time buffer in milliseconds for sentence overlap detection
+  # This accounts for slight timing inconsistencies in annotations
+  buffer_ms: 50
+  
+  # Minimum number of words required to keep a sentence
+  # Sentences with fewer words will be filtered out
+  min_sentence_words: 2
+
+# Output settings
+output:
+  # Output filename for CSV with fillers included in pattern analysis
+  csv_with_fillers: "code_switching_WITH_fillers.csv"
+  
+  # Output filename for CSV with fillers excluded from pattern analysis
+  csv_without_fillers: "code_switching_WITHOUT_fillers.csv"
+  
+  # Directory for saving visualization figures
+  figures_dir: "figures"
+
