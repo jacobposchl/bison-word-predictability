@@ -11,14 +11,6 @@ This package preprocesses raw EAF annotation files into processed data for code-
 - Analyzes the impact of filler words on code-switching patterns
 - Generates visualizations and exports processed data to CSV
 
-## Features
-
-- **Modular Architecture**: Clean separation of concerns with dedicated modules for processing, analysis, and visualization
-- **Configuration Management**: YAML-based configuration for easy customization
-- **Filler Detection**: Analyzes code-switching patterns both with and without filler words
-- **Comprehensive Analysis**: Matrix language identification, pattern building, and statistical summaries
-- **Visualization**: Multiple plots showing distribution and impact analysis
-
 ## Installation
 
 ### Prerequisites
@@ -29,6 +21,8 @@ This package preprocesses raw EAF annotation files into processed data for code-
 ### Setup
 
 1. Clone or download this repository
+
+**Virtual Environment is recommended**
 
 2. Install dependencies:
 ```bash
@@ -52,7 +46,7 @@ data:
   path: "./data"  # Path to directory containing EAF files
 
 processing:
-  buffer_ms: 50  # Time buffer for sentence overlap detection
+  buffer_ms: 50  # Time buffer for sentence overlap detection -> implemented for small displacements in the EAF files transcriptions
   min_sentence_words: 2  # Minimum words to keep a sentence
 
 output:
@@ -143,14 +137,6 @@ Saved to the `figures/` directory (or custom output directory):
 3. **`equal_matrix_prevalence.png`**: Prevalence of equal matrix cases across groups
 4. **`filler_impact.png`**: Impact of filler removal on matrix language percentages
 
-### Console Output
-
-The script prints detailed analysis summaries including:
-- Dataset statistics
-- Group distributions
-- Matrix language distributions
-- Impact of filler removal
-
 ## Project Structure
 
 ```
@@ -204,9 +190,9 @@ code-switch-predictability-uc-irvine/
    - Generates statistics and visualizations
    - Exports to CSV
 
-## Citation
+## Citations
 
-If you use `pympi-ling` in your research, please cite:
+`pympi-ling` citation:
 
 ```
 @misc{pympi-1.71,
@@ -215,6 +201,23 @@ If you use `pympi-ling` in your research, please cite:
 	howpublished={\url{https://pypi.python.org/pypi/pympi-ling}},
 	year={2013-2025},
 	note={Version 1.71}
+}
+```
+
+`pycantonese` citation:
+```
+@inproceedings{lee-etal-2022-pycantonese,
+   title = "PyCantonese: Cantonese Linguistics and NLP in Python",
+   author = "Lee, Jackson L.  and
+      Chen, Litong  and
+      Lam, Charles  and
+      Lau, Chaak Ming  and
+      Tsui, Tsz-Him",
+   booktitle = "Proceedings of The 13th Language Resources and Evaluation Conference",
+   month = june,
+   year = "2022",
+   publisher = "European Language Resources Association",
+   language = "English",
 }
 ```
 
