@@ -90,7 +90,7 @@ def extract_tiers(eaf: pympi.Eaf, main_tier: str) -> Tuple[List[Tuple[int, int, 
         Each is a list of (start_time, end_time, text) tuples
     """
     # Get annotations from the language-specific tiers
-    cant_tier_name = f"{main_tier}-Cantonese-Spaced"
+    cant_tier_name = f"{main_tier}-Cantonese-Spaced" #using the spaced tier to avoid issues with punctuation and annotation markers
     eng_tier_name = f"{main_tier}-English"
     
     try:

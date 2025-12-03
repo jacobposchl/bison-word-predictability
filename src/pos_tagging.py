@@ -37,13 +37,19 @@ def pos_tag_cantonese(sentence: str) -> List[Tuple[str, str]]:
     """
     Tag Cantonese text using PyCantonese.
     
+    Uses PyCantonese's word segmentation to properly segment the text
+    before POS tagging, ensuring correct word boundaries regardless of
+    whether the input is space-separated or not.
+    
     Args:
-        sentence: Cantonese text string
+        sentence: Cantonese text string (may be space-separated or unsegmented)
         
     Returns:
         List of (word, pos_tag) tuples
         
     Example:
+        >>> pos_tag_cantonese("我係香港人")
+        [('我', 'PRON'), ('係', 'VERB'), ('香港人', 'NOUN')]
         >>> pos_tag_cantonese("我 係 香港人")
         [('我', 'PRON'), ('係', 'VERB'), ('香港人', 'NOUN')]
     """
@@ -51,9 +57,9 @@ def pos_tag_cantonese(sentence: str) -> List[Tuple[str, str]]:
         return []
     
     try:
-        # PyCantonese pos_tag expects a list of segmented words, not a string
-        # Our data is already space-segmented, so we split it first
-        words = sentence.split()
+        # Use PyCantonese's segmentation to properly segment Cantonese text
+        # This ensures correct word boundaries regardless of input format
+        words = pycantonese.segment(sentence)
         if not words:
             return []
         tagged = pycantonese.pos_tag(words)

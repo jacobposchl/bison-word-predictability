@@ -66,19 +66,29 @@ Your EAF files should have the following tier structure:
 - Cantonese tier: `{ParticipantID}-Cantonese-Spaced`
 - English tier: `{ParticipantID}-English`
 
-## Usage
+## Main Scripts
 
-### Basic Usage
+This package has two main scripts that should be run in sequence:
 
-Run the analysis with default configuration using either method:
+### 1. `src.preprocess` - Data Preprocessing
 
-**Option 1: As a module (recommended)**
+**What it does:**
+- Loads raw EAF annotation files from `raw_data/` directory
+- Extracts and cleans bilingual speech annotations
+- Identifies code-switching patterns (e.g., `C5-E3-C2`)
+- Determines matrix language (dominant language) for each sentence
+- Analyzes impact of filler words
+- Generates visualizations
+- Exports processed data to CSV files in `processed_data/`
+
+**When to run:** First step - processes raw EAF files into analyzable CSV data.
+
+**Basic usage:**
 ```bash
 python -m src.preprocess
 ```
 
-### Command-Line Options
-
+**Command-line options:**
 ```bash
 python -m src.preprocess [OPTIONS]
 ```
@@ -90,25 +100,96 @@ Options:
 - `--no-plots`: Skip generating visualization plots
 - `--verbose`: Enable verbose logging
 
-### Examples
-
+**Examples:**
 ```bash
+# Use default settings
+python -m src.preprocess
+
 # Use custom config file
 python -m src.preprocess --config my_config.yaml
 
 # Override data path
 python -m src.preprocess --data-path /path/to/eaf/files
 
-# Skip visualizations
+# Skip visualizations (faster processing)
 python -m src.preprocess --no-plots
 
-# Verbose output
+# Verbose output for debugging
 python -m src.preprocess --verbose
 ```
 
-## Output
+### 2. `src.exploratory_analysis` - Feasibility Analysis
 
-The analysis generates:
+**What it does:**
+- Loads processed CSV data from `processed_data/`
+- Extracts monolingual sentences (pure Cantonese and pure English)
+- Analyzes POS tagging quality and accuracy
+- Tests matching algorithm (finds similar monolingual sentences for code-switched sentences)
+- Analyzes code-switching distributions
+- Generates comprehensive feasibility report
+- Saves results to `exploratory_results/`
+
+**When to run:** Second step - analyzes processed data to assess methodology feasibility.
+
+**Basic usage:**
+```bash
+python -m src.exploratory_analysis
+```
+
+**Command-line options:**
+```bash
+python -m src.exploratory_analysis [OPTIONS]
+```
+
+Options:
+- `--dataset {ALL,WITH,WITHOUT}`: Which dataset to analyze (default: `ALL`)
+  - `ALL`: All sentences (monolingual + code-switched)
+  - `WITH`: Code-switched sentences with fillers
+  - `WITHOUT`: Code-switched sentences without fillers
+- `--sample-size N`: Number of sentences to sample for testing (default: 100, use 0 for full dataset)
+- `--full-dataset`: Process full dataset instead of sampling (overrides `--sample-size`)
+- `--output-dir PATH`: Output directory (default: `exploratory_results`)
+- `--verbose`: Enable verbose logging
+
+**Examples:**
+```bash
+# Quick analysis with sample (default)
+python -m src.exploratory_analysis
+
+# Analyze full dataset (may take longer)
+python -m src.exploratory_analysis --full-dataset
+
+# Analyze only code-switched sentences without fillers
+python -m src.exploratory_analysis --dataset WITHOUT
+
+# Custom sample size
+python -m src.exploratory_analysis --sample-size 500
+
+# Verbose output
+python -m src.exploratory_analysis --verbose
+```
+
+## Workflow
+
+The typical workflow is:
+
+1. **Preprocess raw data:**
+   ```bash
+   python -m src.preprocess
+   ```
+   This creates CSV files in `processed_data/` directory.
+
+2. **Run feasibility analysis:**
+   ```bash
+   python -m src.exploratory_analysis
+   ```
+   This analyzes the processed data and generates a feasibility report in `exploratory_results/`.
+
+## Output Files
+
+### Preprocessing Output (`processed_data/`)
+
+The preprocessing script generates:
 
 ### CSV Files
 
@@ -128,7 +209,7 @@ Both CSV files contain:
 - `filler_count`: Number of filler words detected
 - `has_fillers`: Boolean indicating presence of fillers
 
-### Visualizations
+### Preprocessing Visualizations
 
 Saved to the `figures/` directory (or custom output directory):
 
@@ -137,26 +218,45 @@ Saved to the `figures/` directory (or custom output directory):
 3. **`equal_matrix_prevalence.png`**: Prevalence of equal matrix cases across groups
 4. **`filler_impact.png`**: Impact of filler removal on matrix language percentages
 
+### Exploratory Analysis Output (`exploratory_results/`)
+
+The exploratory analysis script generates:
+
+1. **`monolingual_sentences.csv`**: Extracted monolingual sentences (pure Cantonese and English)
+2. **`pos_tagged_sample.csv`**: Sample of POS-tagged sentences with sequences
+3. **`matching_results_sample.csv`**: Results of matching algorithm tests
+4. **`feasibility_report.txt`**: Comprehensive feasibility assessment report
+
 ## Project Structure
 
 ```
 code-switch-predictability-uc-irvine/
 ├── src/
 │   ├── __init__.py
-│   ├── preprocess.py              # Data preprocessing script
+│   ├── preprocess.py              # Main script: Data preprocessing
+│   ├── exploratory_analysis.py    # Main script: Feasibility analysis
+│   ├── calvillo_feasibility.py     # Calvillo methodology implementation
+│   ├── matching_algorithm.py      # Matching algorithm for code-switching
+│   ├── pos_tagging.py             # POS tagging utilities
 │   ├── config.py                  # Configuration management
 │   ├── eaf_processor.py           # EAF file processing
 │   ├── text_cleaning.py           # Text cleaning utilities
 │   ├── tokenization.py            # Tokenization functions
 │   ├── pattern_analysis.py        # Pattern building and analysis
-│   ├── data_export.py              # CSV export
+│   ├── data_export.py             # CSV export
 │   └── visualization.py           # Plotting functions
+├── tests/                         # Test and validation scripts
+│   ├── test_cantonese_segmentation.py
+│   ├── deep_validation.py
+│   └── validate_analysis.py
 ├── config/
 │   └── config.yaml                # Configuration file
+├── raw_data/                      # Input: EAF annotation files
+├── processed_data/                # Output: Processed CSV files
+├── exploratory_results/           # Output: Analysis results
+├── figures/                      # Output: Visualization plots
 ├── requirements.txt               # Python dependencies
-├── README.md                      # This file
-└── notebook/                      # Original Jupyter notebook
-    └── word_predictability_data_analysis (1).ipynb
+└── README.md                      # This file
 ```
 
 ## How It Works
@@ -238,4 +338,3 @@ code-switch-predictability-uc-irvine/
 ## License
 
 This project is for research purposes. Please ensure you have appropriate permissions to use the data files.
-

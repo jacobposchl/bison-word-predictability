@@ -7,27 +7,12 @@ import pandas as pd
 import sys
 from pathlib import Path
 from collections import Counter
-import re
 
-def parse_pattern(pattern: str):
-    """Parse pattern to extract segments."""
-    if not pattern or pd.isna(pattern):
-        return []
-    matches = re.findall(r'([CE])(\d+)', pattern)
-    return [(lang, int(count)) for lang, count in matches]
+# Add parent directory to path to import from src
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-def is_monolingual(pattern: str):
-    """Check if pattern is monolingual."""
-    segments = parse_pattern(pattern)
-    languages = {lang for lang, _ in segments}
-    
-    if len(languages) == 0:
-        return None
-    elif len(languages) == 1:
-        lang = languages.pop()
-        return 'Cantonese' if lang == 'C' else 'English'
-    else:
-        return None
+from src.calvillo_feasibility import is_monolingual
+from src.pos_tagging import parse_pattern_segments
 
 def validate_pattern_parsing():
     """Validate that pattern parsing is correct."""
@@ -61,7 +46,7 @@ def validate_data_consistency():
     print("=" * 80)
     
     # Load all sentences
-    all_sentences_path = Path("processed_data/all_sentences.csv")
+    all_sentences_path = Path(__file__).parent.parent / "processed_data" / "all_sentences.csv"
     if not all_sentences_path.exists():
         print("[FAIL] all_sentences.csv not found")
         return False
@@ -109,7 +94,7 @@ def validate_matching_results():
     print("VALIDATION 3: Matching Results")
     print("=" * 80)
     
-    matching_path = Path("exploratory_results/matching_results_sample.csv")
+    matching_path = Path(__file__).parent.parent / "exploratory_results" / "matching_results_sample.csv"
     if not matching_path.exists():
         print("[FAIL] matching_results_sample.csv not found")
         return False
@@ -168,7 +153,7 @@ def validate_switch_detection():
     print("VALIDATION 4: Switch Point Detection")
     print("=" * 80)
     
-    matching_path = Path("exploratory_results/matching_results_sample.csv")
+    matching_path = Path(__file__).parent.parent / "exploratory_results" / "matching_results_sample.csv"
     if not matching_path.exists():
         print("[FAIL] matching_results_sample.csv not found")
         return False
@@ -188,7 +173,7 @@ def validate_switch_detection():
     errors = 0
     for idx, row in df.head(100).iterrows():  # Check first 100
         pattern = row['pattern']
-        segments = parse_pattern(pattern)
+        segments = parse_pattern_segments(pattern)
         
         has_c_to_e_actual = False
         has_e_to_c_actual = False
@@ -218,7 +203,7 @@ def validate_pos_tagging():
     print("VALIDATION 5: POS Tagging")
     print("=" * 80)
     
-    pos_path = Path("exploratory_results/pos_tagged_sample.csv")
+    pos_path = Path(__file__).parent.parent / "exploratory_results" / "pos_tagged_sample.csv"
     if not pos_path.exists():
         print("[FAIL] pos_tagged_sample.csv not found")
         return False
@@ -250,7 +235,7 @@ def check_potential_confounds():
     print("VALIDATION 6: Potential Confounds")
     print("=" * 80)
     
-    matching_path = Path("exploratory_results/matching_results_sample.csv")
+    matching_path = Path(__file__).parent.parent / "exploratory_results" / "matching_results_sample.csv"
     if not matching_path.exists():
         return False
     
@@ -281,7 +266,7 @@ def check_potential_confounds():
     
     # Check for potential data leakage (same sentences matching themselves)
     # This would be a major confound
-    all_sentences_path = Path("processed_data/all_sentences.csv")
+    all_sentences_path = Path(__file__).parent.parent / "processed_data" / "all_sentences.csv"
     if all_sentences_path.exists():
         all_df = pd.read_csv(all_sentences_path)
         print("\n  Checking for potential data leakage...")

@@ -5,7 +5,6 @@ This module implements exploratory analysis to assess whether the Calvillo
 matching methodology is feasible with Cantonese-English code-switching data.
 """
 
-import re
 import logging
 import pandas as pd
 import random
@@ -25,30 +24,6 @@ from .matching_algorithm import find_matches, precompute_monolingual_pos_sequenc
 logger = logging.getLogger(__name__)
 
 
-def parse_pattern(pattern: str) -> List[Tuple[str, int]]:
-    """
-    Parse a pattern string to extract language segments.
-    
-    Examples:
-        "C10" -> [('C', 10)]
-        "E8" -> [('E', 8)]
-        "C5-E3-C2" -> [('C', 5), ('E', 3), ('C', 2)]
-        "E1-C6" -> [('E', 1), ('C', 6)]
-    
-    Args:
-        pattern: Pattern string like "C5-E3-C2"
-        
-    Returns:
-        List of (language_code, count) tuples
-    """
-    if not pattern or pd.isna(pattern):
-        return []
-    
-    # Match pattern like C10, E5, etc.
-    matches = re.findall(r'([CE])(\d+)', pattern)
-    return [(lang, int(count)) for lang, count in matches]
-
-
 def is_monolingual(pattern: str) -> Optional[str]:
     """
     Determine if a pattern represents a monolingual sentence.
@@ -60,7 +35,7 @@ def is_monolingual(pattern: str) -> Optional[str]:
         'Cantonese' if pure Cantonese, 'English' if pure English,
         None if code-switched
     """
-    segments = parse_pattern(pattern)
+    segments = parse_pattern_segments(pattern)
     languages = {lang for lang, _ in segments}
     
     if len(languages) == 0:
@@ -330,23 +305,27 @@ def test_matching_algorithm(
     e_to_c_sentences = 0
     
     # Use tqdm for progress bar
-    for idx, (row_idx, row) in enumerate(tqdm(sample_df.iterrows(), total=len(sample_df), desc="Matching")):
+    for row_idx, row in tqdm(sample_df.iterrows(), total=len(sample_df), desc="Matching"):
         
         cs_sentence = row.to_dict()
         pattern = row.get('pattern', '')
         
         # Determine switch direction
-        segments = parse_pattern(pattern)
+        segments = parse_pattern_segments(pattern)
         has_c_to_e = False
         has_e_to_c = False
         
         for i in range(len(segments) - 1):
             if segments[i][0] == 'C' and segments[i+1][0] == 'E':
                 has_c_to_e = True
-                c_to_e_sentences += 1
             elif segments[i][0] == 'E' and segments[i+1][0] == 'C':
                 has_e_to_c = True
-                e_to_c_sentences += 1
+        
+        # Count sentences (not switches) - each sentence counted once per direction
+        if has_c_to_e:
+            c_to_e_sentences += 1
+        if has_e_to_c:
+            e_to_c_sentences += 1
         
         # Find matches
         matches = find_matches(
@@ -446,7 +425,7 @@ def analyze_distributions(df: pd.DataFrame) -> Dict:
     
     for idx, row in df.iterrows():
         pattern = row.get('pattern', '')
-        segments = parse_pattern(pattern)
+        segments = parse_pattern_segments(pattern)
         
         # Sentence length
         total_words = sum(count for _, count in segments)

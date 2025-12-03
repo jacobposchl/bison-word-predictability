@@ -5,9 +5,11 @@ Deep validation of the matching algorithm and similarity calculations.
 import pandas as pd
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to import from src
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.matching_algorithm import levenshtein_similarity
+from src.pos_tagging import pos_tag_cantonese, extract_pos_sequence
 
 def test_levenshtein_similarity():
     """Test if Levenshtein similarity calculation is correct."""
@@ -83,7 +85,7 @@ def check_matching_logic():
     print("DEEP VALIDATION: Matching Logic")
     print("=" * 80)
     
-    matching_path = "exploratory_results/matching_results_sample.csv"
+    matching_path = Path(__file__).parent.parent / "exploratory_results" / "matching_results_sample.csv"
     df = pd.read_csv(matching_path)
     
     # Check: Are there sentences that should have matches but don't?
@@ -122,13 +124,89 @@ def check_matching_logic():
     
     return True
 
+def test_cantonese_segmentation():
+    """Test that Cantonese segmentation works correctly using pycantonese."""
+    print("=" * 80)
+    print("DEEP VALIDATION: Cantonese Segmentation")
+    print("=" * 80)
+    
+    try:
+        # Test cases: (input, description, should_produce_words)
+        test_cases = [
+            ("我係香港人", "Unsegmented Cantonese", True),
+            ("我 係 香港人", "Space-separated (should re-segment)", True),
+            ("你好", "Simple greeting", True),
+        ]
+        
+        print("\nTesting Cantonese segmentation:")
+        all_pass = True
+        
+        for text, description, should_work in test_cases:
+            try:
+                tagged = pos_tag_cantonese(text)
+                pos_seq = extract_pos_sequence(tagged)
+                
+                if should_work and len(tagged) > 0:
+                    status = "[PASS]"
+                    print(f"{status} {description}:")
+                    print(f"         Input: '{text}'")
+                    print(f"         Segmented: {[w for w, _ in tagged]}")
+                    print(f"         POS tags: {pos_seq}")
+                    print()
+                elif not should_work and len(tagged) == 0:
+                    status = "[PASS]"
+                    print(f"{status} {description}: Correctly returned empty")
+                    print()
+                else:
+                    status = "[FAIL]"
+                    all_pass = False
+                    print(f"{status} {description}: Expected {'words' if should_work else 'empty'}, got {len(tagged)} words")
+                    print(f"         Input: '{text}'")
+                    print()
+            except Exception as e:
+                status = "[FAIL]"
+                all_pass = False
+                print(f"{status} {description}: Error - {e}")
+                print(f"         Input: '{text}'")
+                print()
+        
+        # Test consistency: same meaning, different spacing should produce similar results
+        print("\nTesting segmentation consistency:")
+        try:
+            tagged1 = pos_tag_cantonese("我係香港人")
+            tagged2 = pos_tag_cantonese("我 係 香港人")
+            
+            pos1 = extract_pos_sequence(tagged1)
+            pos2 = extract_pos_sequence(tagged2)
+            
+            # They should produce similar POS sequences (may differ slightly in segmentation)
+            if len(pos1) > 0 and len(pos2) > 0:
+                print(f"[PASS] Both produce valid POS sequences")
+                print(f"         Unsegmented: {pos1}")
+                print(f"         Segmented:   {pos2}")
+                print()
+            else:
+                print(f"[FAIL] One or both failed to produce POS tags")
+                all_pass = False
+        except Exception as e:
+            print(f"[FAIL] Consistency test error: {e}")
+            all_pass = False
+        
+        return all_pass
+        
+    except ImportError as e:
+        print(f"[SKIP] Cannot test Cantonese segmentation: {e}")
+        print("        (pycantonese may not be installed)")
+        return True  # Don't fail if module not available
+
+
 def check_statistics_consistency():
     """Verify that reported statistics are consistent with data."""
     print("\n" + "=" * 80)
     print("DEEP VALIDATION: Statistics Consistency")
     print("=" * 80)
     
-    matching_path = "exploratory_results/matching_results_sample.csv"
+    matching_path = Path(__file__).parent.parent / "exploratory_results" / "matching_results_sample.csv"
     df = pd.read_csv(matching_path)
     
     # Recalculate statistics
@@ -165,6 +243,7 @@ def main():
     
     results.append(("Levenshtein Similarity", test_levenshtein_similarity()))
     results.append(("Window Extraction", validate_window_extraction()))
+    results.append(("Cantonese Segmentation", test_cantonese_segmentation()))
     results.append(("Matching Logic", check_matching_logic()))
     results.append(("Statistics Consistency", check_statistics_consistency()))
     
