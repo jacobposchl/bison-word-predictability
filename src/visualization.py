@@ -134,7 +134,7 @@ def print_analysis_summary(
 def plot_matrix_language_distribution(
     with_fillers: List[Dict],
     without_fillers: List[Dict],
-    output_dir: str = "figures"
+    output_dir: str = "figures/preprocessing"
 ) -> None:
     """
     Create stacked bar charts showing matrix language distribution.
@@ -219,7 +219,7 @@ def plot_matrix_language_distribution(
 def plot_equal_matrix_cases(
     with_fillers: List[Dict],
     without_fillers: List[Dict],
-    output_dir: str = "figures"
+    output_dir: str = "figures/preprocessing"
 ) -> None:
     """
     Create visualization comparing equal matrix language cases across groups.
@@ -371,7 +371,7 @@ def plot_equal_matrix_cases(
 def plot_filler_impact(
     with_fillers: List[Dict],
     without_fillers: List[Dict],
-    output_dir: str = "figures"
+    output_dir: str = "figures/preprocessing"
 ) -> None:
     """
     Create visualization showing the impact of filler removal on matrix language.

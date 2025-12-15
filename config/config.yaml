@@ -18,8 +18,27 @@ processing:
 
 # Output settings
 output:
-  # Directory for saving processed data (CSV files)
-  processed_data_dir: "processed_data"
+  # Base directory for all results
+  results_dir: "results"
+  
+  # Base directory for all figures
+  figures_dir: "figures"
+  
+  # Results subdirectories
+  results:
+    # Directory for preprocessing CSV files
+    preprocessing_dir: "results/preprocessing"
+    # Directory for exploratory analysis results
+    exploratory_dir: "results/exploratory"
+    # Directory for dash analysis results
+    dash_analysis_dir: "results/dash_analysis"
+  
+  # Figures subdirectories
+  figures:
+    # Directory for preprocessing figures
+    preprocessing_dir: "figures/preprocessing"
+    # Directory for exploratory analysis figures
+    exploratory_dir: "figures/exploratory"
   
   # Output filename for CSV with fillers included in pattern analysis
   csv_with_fillers: "code_switching_WITH_fillers.csv"
@@ -29,7 +48,4 @@ output:
   
   # Output filename for CSV with ALL sentences (monolingual + code-switched)
   csv_all_sentences: "all_sentences.csv"
-  
-  # Directory for saving visualization figures
-  figures_dir: "figures"
 

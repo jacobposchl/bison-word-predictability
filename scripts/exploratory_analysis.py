@@ -17,7 +17,12 @@ import sys
 from pathlib import Path
 import pandas as pd
 
-from .calvillo_feasibility import (
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.config import Config
+from src.calvillo_feasibility import (
     extract_monolingual_sentences,
     analyze_pos_tagging,
     test_matching_algorithm,
@@ -38,20 +43,23 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def load_data(dataset: str = 'ALL') -> pd.DataFrame:
+def load_data(dataset: str = 'ALL', config: Config = None) -> pd.DataFrame:
     """
     Load the appropriate CSV dataset.
     
     Args:
         dataset: 'ALL' (all sentences), 'WITH' (code-switched with fillers), 
                  or 'WITHOUT' (code-switched without fillers)
+        config: Config object (optional, will create one if not provided)
         
     Returns:
         Loaded DataFrame
     """
-    # Get project root (parent of src directory)
-    project_root = Path(__file__).parent.parent
-    data_dir = project_root / "processed_data"
+    if config is None:
+        config = Config()
+    
+    # Get preprocessing results directory from config
+    data_dir = Path(config.get_preprocessing_results_dir())
     
     if dataset.upper() == 'ALL':
         csv_path = data_dir / "all_sentences.csv"
@@ -81,11 +89,24 @@ def save_outputs(
     pos_results: dict,
     matching_results: dict,
     distributions: dict,
-    report: str
+    report: str,
+    figures_dir: Path = None
 ):
-    """Save all output files."""
+    """
+    Save all output files.
+    
+    Args:
+        output_dir: Directory for CSV and report files
+        monolingual: Monolingual sentence data
+        pos_results: POS tagging results
+        matching_results: Matching algorithm results
+        distributions: Distribution analysis results
+        report: Feasibility report text
+        figures_dir: Directory for figures (if None, uses output_dir/figures)
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
-    figures_dir = output_dir / "figures"
+    if figures_dir is None:
+        figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Saving outputs to {output_dir}...")
@@ -168,8 +189,14 @@ def main():
     parser.add_argument(
         '--output-dir',
         type=str,
-        default='exploratory_results',
-        help='Output directory (default: exploratory_results)'
+        default=None,
+        help='Override output directory from config file (default: from config)'
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='Path to configuration YAML file (default: config/config.yaml)'
     )
     parser.add_argument(
         '--verbose',
@@ -182,6 +209,18 @@ def main():
     # Setup logging
     setup_logging(verbose=args.verbose)
     
+    # Load configuration
+    config = Config(config_path=args.config)
+    
+    # Determine output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = Path(config.get_exploratory_results_dir())
+    
+    # Determine figures directory
+    figures_dir = Path(config.get_exploratory_figures_dir())
+    
     logger.info("=" * 80)
     logger.info("CALVILLO METHODOLOGY FEASIBILITY ANALYSIS")
     logger.info("=" * 80)
@@ -190,14 +229,15 @@ def main():
         logger.info(f"Mode: FULL DATASET (processing all sentences)")
     else:
         logger.info(f"Sample size: {args.sample_size}")
-    logger.info(f"Output directory: {args.output_dir}")
+    logger.info(f"Output directory: {output_dir}")
+    logger.info(f"Figures directory: {figures_dir}")
     logger.info("=" * 80)
     logger.info("")
     
     try:
         # Step 1: Load data
         logger.info("Step 1: Loading data...")
-        df = load_data(args.dataset)
+        df = load_data(args.dataset, config=config)
         
         # Step 2: Extract monolingual sentences
         logger.info("\nStep 2: Extracting monolingual sentences...")
@@ -249,14 +289,14 @@ def main():
         
         # Step 7: Save outputs
         logger.info("\nStep 7: Saving outputs...")
-        output_dir = Path(args.output_dir)
         save_outputs(
             output_dir,
             monolingual,
             pos_results,
             matching_results,
             distributions,
-            report
+            report,
+            figures_dir=figures_dir
         )
         
         # Print report to console
@@ -272,7 +312,8 @@ def main():
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
-        logger.error("Please ensure the CSV files exist in processed_data/ directory")
+        logger.error(f"Please ensure the CSV files exist in {config.get_preprocessing_results_dir()}/ directory")
+        logger.error("Run preprocessing first: python -m src.preprocess")
         sys.exit(1)
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")

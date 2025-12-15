@@ -57,10 +57,20 @@ class Config:
                 'min_sentence_words': 2
             },
             'output': {
-                'processed_data_dir': 'processed_data',
+                'results_dir': 'results',
+                'figures_dir': 'figures',
+                'results': {
+                    'preprocessing_dir': 'results/preprocessing',
+                    'exploratory_dir': 'results/exploratory',
+                    'dash_analysis_dir': 'results/dash_analysis'
+                },
+                'figures': {
+                    'preprocessing_dir': 'figures/preprocessing',
+                    'exploratory_dir': 'figures/exploratory'
+                },
                 'csv_with_fillers': 'code_switching_WITH_fillers.csv',
                 'csv_without_fillers': 'code_switching_WITHOUT_fillers.csv',
-                'figures_dir': 'figures'
+                'csv_all_sentences': 'all_sentences.csv'
             }
         }
     
@@ -116,29 +126,53 @@ class Config:
         """Get minimum number of words required to keep a sentence."""
         return self.get('processing.min_sentence_words', 2)
     
+    def get_results_dir(self) -> str:
+        """Get base directory for all results."""
+        return self.get('output.results_dir', 'results')
+    
+    def get_figures_dir(self) -> str:
+        """Get base directory for all figures."""
+        return self.get('output.figures_dir', 'figures')
+    
+    def get_preprocessing_results_dir(self) -> str:
+        """Get directory for preprocessing results (CSV files)."""
+        return self.get('output.results.preprocessing_dir', 'results/preprocessing')
+    
+    def get_exploratory_results_dir(self) -> str:
+        """Get directory for exploratory analysis results."""
+        return self.get('output.results.exploratory_dir', 'results/exploratory')
+    
+    def get_dash_analysis_results_dir(self) -> str:
+        """Get directory for dash analysis results."""
+        return self.get('output.results.dash_analysis_dir', 'results/dash_analysis')
+    
+    def get_preprocessing_figures_dir(self) -> str:
+        """Get directory for preprocessing figures."""
+        return self.get('output.figures.preprocessing_dir', 'figures/preprocessing')
+    
+    def get_exploratory_figures_dir(self) -> str:
+        """Get directory for exploratory analysis figures."""
+        return self.get('output.figures.exploratory_dir', 'figures/exploratory')
+    
     def get_processed_data_dir(self) -> str:
-        """Get output directory for processed data (CSV files)."""
-        return self.get('output.processed_data_dir', 'processed_data')
+        """Get output directory for processed data (CSV files). Alias for get_preprocessing_results_dir()."""
+        return self.get_preprocessing_results_dir()
     
     def get_csv_with_fillers_path(self) -> str:
         """Get output path for CSV with fillers."""
         filename = self.get('output.csv_with_fillers', 'code_switching_WITH_fillers.csv')
-        processed_dir = self.get_processed_data_dir()
+        processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
     
     def get_csv_without_fillers_path(self) -> str:
         """Get output path for CSV without fillers."""
         filename = self.get('output.csv_without_fillers', 'code_switching_WITHOUT_fillers.csv')
-        processed_dir = self.get_processed_data_dir()
+        processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
     
     def get_csv_all_sentences_path(self) -> str:
         """Get output path for CSV with all sentences (monolingual + code-switched)."""
         filename = self.get('output.csv_all_sentences', 'all_sentences.csv')
-        processed_dir = self.get_processed_data_dir()
+        processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
-    
-    def get_figures_dir(self) -> str:
-        """Get output directory for figures."""
-        return self.get('output.figures_dir', 'figures')
 

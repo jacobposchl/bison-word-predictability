@@ -118,27 +118,27 @@ python -m src.preprocess --no-plots
 python -m src.preprocess --verbose
 ```
 
-### 2. `src.exploratory_analysis` - Feasibility Analysis
+### 2. `scripts/exploratory_analysis.py` - Feasibility Analysis
 
 **What it does:**
-- Loads processed CSV data from `processed_data/`
+- Loads processed CSV data from `results/preprocessing/`
 - Extracts monolingual sentences (pure Cantonese and pure English)
 - Analyzes POS tagging quality and accuracy
 - Tests matching algorithm (finds similar monolingual sentences for code-switched sentences)
 - Analyzes code-switching distributions
 - Generates comprehensive feasibility report
-- Saves results to `exploratory_results/`
+- Saves results to `results/exploratory/`
 
 **When to run:** Second step - analyzes processed data to assess methodology feasibility.
 
 **Basic usage:**
 ```bash
-python -m src.exploratory_analysis
+python scripts/exploratory_analysis.py
 ```
 
 **Command-line options:**
 ```bash
-python -m src.exploratory_analysis [OPTIONS]
+python scripts/exploratory_analysis.py [OPTIONS]
 ```
 
 Options:
@@ -148,25 +148,26 @@ Options:
   - `WITHOUT`: Code-switched sentences without fillers
 - `--sample-size N`: Number of sentences to sample for testing (default: 100, use 0 for full dataset)
 - `--full-dataset`: Process full dataset instead of sampling (overrides `--sample-size`)
-- `--output-dir PATH`: Output directory (default: `exploratory_results`)
+- `--output-dir PATH`: Override output directory from config file (default: from config)
+- `--config PATH`: Path to configuration YAML file (default: `config/config.yaml`)
 - `--verbose`: Enable verbose logging
 
 **Examples:**
 ```bash
 # Quick analysis with sample (default)
-python -m src.exploratory_analysis
+python scripts/exploratory_analysis.py
 
 # Analyze full dataset (may take longer)
-python -m src.exploratory_analysis --full-dataset
+python scripts/exploratory_analysis.py --full-dataset
 
 # Analyze only code-switched sentences without fillers
-python -m src.exploratory_analysis --dataset WITHOUT
+python scripts/exploratory_analysis.py --dataset WITHOUT
 
 # Custom sample size
-python -m src.exploratory_analysis --sample-size 500
+python scripts/exploratory_analysis.py --sample-size 500
 
 # Verbose output
-python -m src.exploratory_analysis --verbose
+python scripts/exploratory_analysis.py --verbose
 ```
 
 ## Workflow
@@ -181,24 +182,25 @@ The typical workflow is:
 
 2. **Run feasibility analysis:**
    ```bash
-   python -m src.exploratory_analysis
+   python scripts/exploratory_analysis.py
    ```
-   This analyzes the processed data and generates a feasibility report in `exploratory_results/`.
+   This analyzes the processed data and generates a feasibility report in `results/exploratory/`.
 
 ## Output Files
 
-### Preprocessing Output (`processed_data/`)
+### Preprocessing Output (`results/preprocessing/`)
 
 The preprocessing script generates:
 
-### CSV Files
+#### CSV Files
 
-Saved to the `processed_data/` directory (or custom output directory):
+Saved to the `results/preprocessing/` directory:
 
 1. **`code_switching_WITH_fillers.csv`**: Code-switching sentences with filler words included in pattern analysis
 2. **`code_switching_WITHOUT_fillers.csv`**: Code-switching sentences with filler words excluded
+3. **`all_sentences.csv`**: All sentences (monolingual + code-switched) for exploratory analysis
 
-Both CSV files contain:
+Both code-switching CSV files contain:
 - `reconstructed_sentence`: Cleaned sentence text
 - `sentence_original`: Original sentence from EAF file
 - `pattern`: Code-switching pattern (e.g., `E3-C5-E2`)
@@ -209,16 +211,16 @@ Both CSV files contain:
 - `filler_count`: Number of filler words detected
 - `has_fillers`: Boolean indicating presence of fillers
 
-### Preprocessing Visualizations
+#### Preprocessing Visualizations
 
-Saved to the `figures/` directory (or custom output directory):
+Saved to the `figures/preprocessing/` directory:
 
 1. **`matrix_language_distribution.png`**: Stacked bar charts showing matrix language distribution across speaker groups
 2. **`equal_matrix_cases.png`**: Analysis of equal matrix language cases
 3. **`equal_matrix_prevalence.png`**: Prevalence of equal matrix cases across groups
 4. **`filler_impact.png`**: Impact of filler removal on matrix language percentages
 
-### Exploratory Analysis Output (`exploratory_results/`)
+### Exploratory Analysis Output (`results/exploratory/`)
 
 The exploratory analysis script generates:
 
@@ -227,36 +229,44 @@ The exploratory analysis script generates:
 3. **`matching_results_sample.csv`**: Results of matching algorithm tests
 4. **`feasibility_report.txt`**: Comprehensive feasibility assessment report
 
+Figures (if any) are saved to `figures/exploratory/`.
+
 ## Project Structure
 
 ```
 code-switch-predictability-uc-irvine/
-├── src/
+├── scripts/                       # Executable scripts
+│   ├── exploratory_analysis.py   # Feasibility analysis script
+│   └── analyze_dash_splitting.py  # Dash splitting analysis script
+├── src/                           # Source modules
 │   ├── __init__.py
-│   ├── preprocess.py              # Main script: Data preprocessing
-│   ├── exploratory_analysis.py    # Main script: Feasibility analysis
-│   ├── calvillo_feasibility.py     # Calvillo methodology implementation
-│   ├── matching_algorithm.py      # Matching algorithm for code-switching
-│   ├── pos_tagging.py             # POS tagging utilities
-│   ├── config.py                  # Configuration management
-│   ├── eaf_processor.py           # EAF file processing
-│   ├── text_cleaning.py           # Text cleaning utilities
-│   ├── tokenization.py            # Tokenization functions
-│   ├── pattern_analysis.py        # Pattern building and analysis
-│   ├── data_export.py             # CSV export
-│   └── visualization.py           # Plotting functions
-├── tests/                         # Test and validation scripts
+│   ├── preprocess.py              # Data preprocessing module
+│   ├── calvillo_feasibility.py    # Calvillo methodology implementation
+│   ├── matching_algorithm.py     # Matching algorithm for code-switching
+│   ├── pos_tagging.py            # POS tagging utilities
+│   ├── config.py                 # Configuration management
+│   ├── eaf_processor.py          # EAF file processing
+│   ├── text_cleaning.py          # Text cleaning utilities
+│   ├── tokenization.py           # Tokenization functions
+│   ├── pattern_analysis.py       # Pattern building and analysis
+│   ├── data_export.py            # CSV export
+│   └── visualization.py         # Plotting functions
+├── tests/                        # Test and validation scripts
 │   ├── test_cantonese_segmentation.py
 │   ├── deep_validation.py
 │   └── validate_analysis.py
 ├── config/
-│   └── config.yaml                # Configuration file
-├── raw_data/                      # Input: EAF annotation files
-├── processed_data/                # Output: Processed CSV files
-├── exploratory_results/           # Output: Analysis results
-├── figures/                      # Output: Visualization plots
-├── requirements.txt               # Python dependencies
-└── README.md                      # This file
+│   └── config.yaml               # Configuration file
+├── raw_data/                     # INPUT: EAF annotation files
+├── results/                      # OUTPUT: All analysis results
+│   ├── preprocessing/            # CSV files from preprocessing
+│   ├── exploratory/              # Results from exploratory analysis
+│   └── dash_analysis/            # Results from dash splitting analysis
+├── figures/                      # OUTPUT: All visualization plots
+│   ├── preprocessing/            # Figures from preprocessing
+│   └── exploratory/              # Figures from exploratory analysis
+├── requirements.txt              # Python dependencies
+└── README.md                     # This file
 ```
 
 ## How It Works

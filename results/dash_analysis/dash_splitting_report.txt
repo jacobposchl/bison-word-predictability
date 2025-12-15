@@ -1,0 +1,81 @@
+================================================================================
+DASH SPLITTING ANALYSIS REPORT
+================================================================================
+
+Total EAF files processed: 41
+
+--------------------------------------------------------------------------------
+ENGLISH ANNOTATIONS
+--------------------------------------------------------------------------------
+Total tokens with dashes: 1351
+
+Examples of English tokens with dashes:
+
+  1. Original context: 'J-O-J-O....'
+     Cleaned context: 'J O J O...'
+
+  2. Original context: ' British, so spell color with U-R that sort of thing....'
+     Cleaned context: 'British so spell color with U R that sort of thing...'
+
+  3. Original context: 'But -...'
+     Cleaned context: 'But...'
+
+  4. Original context: 'uh-huh....'
+     Cleaned context: 'uh huh...'
+
+  5. Original context: 'uh-huh, ...'
+     Cleaned context: 'uh huh...'
+
+  6. Original context: 'uh-huh....'
+     Cleaned context: 'uh huh...'
+
+  7. Original context: 'her than that, oh well I mean accent-wise,...'
+     Cleaned context: 'her than that oh well I mean accent wise...'
+
+  8. Original context: 'al of Hong Kong is that it is multi-ethnic and, if you are from if you a...'
+     Cleaned context: 'al of Hong Kong is that it is multi ethnic and if you are from if you a...'
+
+  9. Original context: '-- ehh...'
+     Cleaned context: 'ehh...'
+
+  10. Original context: '-- eh...'
+     Cleaned context: 'eh...'
+
+--------------------------------------------------------------------------------
+CANTONESE ANNOTATIONS
+--------------------------------------------------------------------------------
+Total tokens with dashes: 1453
+
+Examples of Cantonese tokens with dashes:
+
+  1. Original context: '— 八 七...'
+     Cleaned context: '八 七...'
+
+  2. Original context: '咁 你 –...'
+     Cleaned context: '咁 你...'
+
+  3. Original context: '–...'
+     Cleaned context: '...'
+
+  4. Original context: '即 係 —...'
+     Cleaned context: '即係...'
+
+  5. Original context: '佢 噉 樣 — , 呢 幾 個...'
+     Cleaned context: '佢 噉樣 呢 幾 個...'
+
+  6. Original context: '咁 要 —...'
+     Cleaned context: '咁 要...'
+
+  7. Original context: '即 係 我 食 — , 成 日 食 螺 絲 咁 , 就 , 係 減 弱 左 ,...'
+     Cleaned context: '即係 我 食 成日 食螺絲 咁 就 係 減弱 左...'
+
+  8. Original context: '咁 我 可 能 會 問 係 咪 — —   咁 我 可 能 會 問 係 咪 — —   問 佢...'
+     Cleaned context: '咁 我 可能 會 問 係咪 咁 我 可能 會 問 係咪 問 佢...'
+
+  9. Original context: '咁 我 可 能 會 問 係 咪 — —   咁 我 可 能 會 問 係 咪 — —   問 佢...'
+     Cleaned context: '咁 我 可能 會 問 係咪 咁 我 可能 會 問 係咪 問 佢...'
+
+  10. Original context: '咁 我 可 能 會 問 係 咪 — —   咁 我 可 能 會 問 係 咪 — —   問 佢...'
+     Cleaned context: '咁 我 可能 會 問 係咪 咁 我 可能 會 問 係咪 問 佢...'
+
+================================================================================

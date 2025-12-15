@@ -90,7 +90,7 @@ def main():
         csv_with_fillers_path = config.get_csv_with_fillers_path()
         csv_without_fillers_path = config.get_csv_without_fillers_path()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
-        figures_dir = args.output_dir or config.get_figures_dir()
+        figures_dir = args.output_dir or config.get_preprocessing_figures_dir()
         
         logger.info("="*80)
         logger.info("Code-Switching Data Preprocessing")
@@ -98,7 +98,7 @@ def main():
         logger.info(f"Raw data path: {data_path}")
         logger.info(f"Buffer: {buffer_ms*1000:.0f} ms")
         logger.info(f"Min sentence words: {min_sentence_words}")
-        logger.info(f"Processed data output: processed_data/")
+        logger.info(f"Processed data output: {config.get_preprocessing_results_dir()}/")
         logger.info(f"Figures output: {figures_dir}")
         logger.info("="*80)
         
@@ -157,7 +157,7 @@ def main():
         logger.info("\n" + "="*80)
         logger.info("Preprocessing complete!")
         logger.info("="*80)
-        logger.info(f"Processed data saved to processed_data/:")
+        logger.info(f"Processed data saved to {config.get_preprocessing_results_dir()}/:")
         logger.info(f"  - {csv_with_fillers_path}")
         logger.info(f"  - {csv_without_fillers_path}")
         logger.info(f"  - {csv_all_sentences_path} (all sentences)")
