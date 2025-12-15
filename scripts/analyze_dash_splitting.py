@@ -22,9 +22,9 @@ from src.config import Config
 from src.eaf_processor import (
     get_all_eaf_files,
     load_eaf_file,
-    get_main_tier,
-    extract_tiers
+    get_main_tier
 )
+from src.text_cleaning import has_content
 from src.text_cleaning import (
     split_on_internal_dashes,
     normalize_dashes,
@@ -33,6 +33,43 @@ from src.text_cleaning import (
     UNICODE_DASHES,
     DASH_RE
 )
+
+
+def extract_tiers_non_spaced(eaf, main_tier):
+    """
+    Extract Cantonese and English tier annotations using the non-spaced Cantonese tier.
+    
+    This is a custom version for the dash splitting analysis script that uses
+    the regular Cantonese tier (not the Spaced version).
+    
+    Args:
+        eaf: EAF object
+        main_tier: Name of the main participant tier
+        
+    Returns:
+        Tuple of (cantonese_annotations, english_annotations)
+        Each is a list of (start_time, end_time, text) tuples
+    """
+    # Get annotations from the language-specific tiers
+    # Use non-spaced Cantonese tier
+    cant_tier_name = f"{main_tier}-Cantonese"
+    eng_tier_name = f"{main_tier}-English"
+    
+    try:
+        cant_c = eaf.get_annotation_data_for_tier(cant_tier_name)
+        eng_c = eaf.get_annotation_data_for_tier(eng_tier_name)
+    except KeyError as e:
+        raise ValueError(f"Required tier not found: {e}")
+    
+    # Remove duplicates
+    cant_c = list(set(cant_c))
+    eng_c = list(set(eng_c))
+    
+    # Filter out punctuation-only and annotation marker annotations
+    cant_c = [item for item in cant_c if has_content(item[2])]
+    eng_c = [item for item in eng_c if has_content(item[2])]
+    
+    return cant_c, eng_c
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -95,33 +132,52 @@ def get_cleaned_annotation_text(annotation_text: str, lang: str) -> str:
     return ' '.join(cleaned_tokens)
 
 
-def get_token_context(token: str, annotation_text: str, context_chars: int = 30) -> str:
+def get_token_context(token: str, annotation_text: str, search_start: int = 0, context_chars: int = 5) -> str:
     """
     Get the token with surrounding context from the annotation text.
+    Always tries to include characters before and after when available.
     
     Args:
         token: Token to find
         annotation_text: Full annotation text
-        context_chars: Number of characters to include before and after
+        search_start: Position in text to start searching from (for finding specific occurrence)
+        context_chars: Target number of characters to include before and after
         
     Returns:
         String with token and surrounding context
     """
-    # Find the token in the text (handle multiple occurrences by using the first)
-    token_pos = annotation_text.find(token)
+    # Find the token starting from search_start (to handle multiple occurrences)
+    token_pos = annotation_text.find(token, search_start)
     if token_pos == -1:
-        # If exact match not found, return just the token
-        return token
+        # Fallback: try finding it from the beginning
+        token_pos = annotation_text.find(token)
+        if token_pos == -1:
+            return token
     
-    # Get context before and after
-    start = max(0, token_pos - context_chars)
-    end = min(len(annotation_text), token_pos + len(token) + context_chars)
+    # Calculate available space on each side
+    available_before = token_pos
+    available_after = len(annotation_text) - (token_pos + len(token))
+    
+    # Try to get context_chars on each side, but use what's available
+    # If we're near the start, get more after; if near the end, get more before
+    if available_before < context_chars:
+        # Near the start - get as much before as possible, more after
+        start = 0
+        end = min(len(annotation_text), token_pos + len(token) + context_chars + (context_chars - available_before))
+    elif available_after < context_chars:
+        # Near the end - get as much after as possible, more before
+        start = max(0, token_pos - context_chars - (context_chars - available_after))
+        end = len(annotation_text)
+    else:
+        # Enough space on both sides - get context_chars on each side
+        start = token_pos - context_chars
+        end = token_pos + len(token) + context_chars
     
     context = annotation_text[start:end]
     return context
 
 
-def get_cleaned_context(token: str, annotation_text: str, cleaned_text: str, lang: str, context_chars: int = 30) -> str:
+def get_cleaned_context(token: str, annotation_text: str, cleaned_text: str, lang: str, search_start: int = 0, context_chars: int = 5) -> str:
     """
     Get the cleaned version of the token with surrounding context.
     
@@ -130,19 +186,33 @@ def get_cleaned_context(token: str, annotation_text: str, cleaned_text: str, lan
         annotation_text: Original annotation text
         cleaned_text: Cleaned annotation text
         lang: Language code
+        search_start: Position in text to start searching from (for finding specific occurrence)
         context_chars: Number of characters to include before and after
         
     Returns:
         String with cleaned token parts and surrounding context
     """
-    # Find the token position in original text
-    token_pos = annotation_text.find(token)
+    # Find the token position (same logic as get_token_context)
+    token_pos = annotation_text.find(token, search_start)
     if token_pos == -1:
-        return ""
+        token_pos = annotation_text.find(token)
+        if token_pos == -1:
+            return ""
     
-    # Get the context area in original text (same as original context)
-    orig_start = max(0, token_pos - context_chars)
-    orig_end = min(len(annotation_text), token_pos + len(token) + context_chars)
+    # Calculate available space on each side (same logic as get_token_context)
+    available_before = token_pos
+    available_after = len(annotation_text) - (token_pos + len(token))
+    
+    if available_before < context_chars:
+        orig_start = 0
+        orig_end = min(len(annotation_text), token_pos + len(token) + context_chars + (context_chars - available_before))
+    elif available_after < context_chars:
+        orig_start = max(0, token_pos - context_chars - (context_chars - available_after))
+        orig_end = len(annotation_text)
+    else:
+        orig_start = token_pos - context_chars
+        orig_end = token_pos + len(token) + context_chars
+    
     orig_context = annotation_text[orig_start:orig_end]
     
     # Clean this context area to show how it would appear after cleaning
@@ -192,13 +262,22 @@ def analyze_annotation(annotation_text: str, lang: str) -> list:
     else:  # English
         raw_tokens = annotation_text.split()
     
-    # Analyze each token
+    # Analyze each token, tracking position to handle multiple occurrences
+    search_start = 0
     for token in raw_tokens:
         analysis = analyze_token_dash_splitting(token, lang)
         if analysis:
-            # Get context around the token
-            original_context = get_token_context(token, annotation_text)
-            cleaned_context = get_cleaned_context(token, annotation_text, cleaned_text, lang)
+            # Get context around the token (pass search_start to find this specific occurrence)
+            original_context = get_token_context(token, annotation_text, search_start)
+            cleaned_context = get_cleaned_context(token, annotation_text, cleaned_text, lang, search_start)
+            
+            # Update search_start to after this token for next iteration
+            token_pos = annotation_text.find(token, search_start)
+            if token_pos != -1:
+                search_start = token_pos + len(token)
+            else:
+                # If not found, increment search_start to avoid infinite loop
+                search_start += 1
             
             analysis['original'] = original_context
             analysis['cleaned'] = cleaned_context
@@ -207,6 +286,13 @@ def analyze_annotation(annotation_text: str, lang: str) -> list:
             # Remove the temporary 'token' key
             del analysis['token']
             results.append(analysis)
+        else:
+            # Even if no dash, update search_start for accurate positioning
+            token_pos = annotation_text.find(token, search_start)
+            if token_pos != -1:
+                search_start = token_pos + len(token)
+            else:
+                search_start += 1
     
     return results
 
@@ -238,8 +324,8 @@ def process_eaf_file(file_path: str) -> dict:
         
         results['participant_id'] = main_tier
         
-        # Extract tier annotations
-        cant_annotations, eng_annotations = extract_tiers(eaf, main_tier)
+        # Extract tier annotations using non-spaced Cantonese tier
+        cant_annotations, eng_annotations = extract_tiers_non_spaced(eaf, main_tier)
         
         # Analyze Cantonese annotations
         for start_time, end_time, text in cant_annotations:
@@ -347,13 +433,87 @@ def generate_report(stats: dict) -> str:
     return "\n".join(report_lines)
 
 
-def export_to_csv(stats: dict, output_dir: Path):
+def is_important_case(case: dict) -> bool:
+    """
+    Check if a case is "important" - meaning it should be included when filtering.
+    
+    A case is important if:
+    1. The sentence has content beyond just dashes
+    2. The dash token is not only at the beginning or end of the sentence
+    
+    Args:
+        case: Case dictionary with annotation_text_before and original fields
+        
+    Returns:
+        True if the case is important, False otherwise
+    """
+    annotation_text = case.get('annotation_text_before', '')
+    original_context = case.get('original', '')
+    
+    if not annotation_text or not original_context:
+        return False
+    
+    # Check 1: Sentence should have content beyond just dashes
+    # Remove all dashes and whitespace, check if anything remains
+    text_without_dashes = DASH_RE.sub('', annotation_text)
+    text_without_dashes = text_without_dashes.replace(' ', '').replace('\t', '').replace('\n', '')
+    if not text_without_dashes or len(text_without_dashes.strip()) == 0:
+        # Sentence is only dashes
+        return False
+    
+    # Check 2: Dash should not be only at the beginning or end
+    # Find dash characters in the original context
+    dash_match = DASH_RE.search(original_context)
+    if not dash_match:
+        return False
+    
+    dash_start = dash_match.start()
+    dash_end = dash_match.end()
+    
+    # Get content before and after the dash in the context
+    before_dash = original_context[:dash_start].strip()
+    after_dash = original_context[dash_end:].strip()
+    
+    # Remove dashes from before/after to see if there's real content
+    before_no_dashes = DASH_RE.sub('', before_dash).strip()
+    after_no_dashes = DASH_RE.sub('', after_dash).strip()
+    
+    # If there's no content on either side (after removing dashes), it's at an edge
+    if not before_no_dashes and not after_no_dashes:
+        return False
+    
+    # Also check if the annotation text starts or ends with only dashes
+    annotation_stripped = annotation_text.strip()
+    if annotation_stripped:
+        # Check if the annotation, when stripped of leading/trailing dashes, still has the dash in middle
+        # Find the dash position in the full annotation
+        annotation_dash_match = DASH_RE.search(annotation_stripped)
+        if annotation_dash_match:
+            dash_pos = annotation_dash_match.start()
+            # Check if there's non-dash content before and after in the full annotation
+            before_in_annotation = annotation_stripped[:dash_pos].strip()
+            after_in_annotation = annotation_stripped[annotation_dash_match.end():].strip()
+            
+            before_clean = DASH_RE.sub('', before_in_annotation).strip()
+            after_clean = DASH_RE.sub('', after_in_annotation).strip()
+            
+            # If no content on either side in the full annotation, it's at edge
+            if not before_clean and not after_clean:
+                return False
+    
+    # If we got here, the sentence has content and the dash has content on at least one side
+    return True
+
+
+def export_to_csv(stats: dict, output_dir: Path, show_important_only: bool = False):
     """
     Export analysis results to CSV files.
     
     Args:
         stats: Statistics dictionary
         output_dir: Output directory path
+        show_important_only: If True, filter out cases where dashes are only at beginning/end
+                            or where sentence contains only dashes
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -362,27 +522,37 @@ def export_to_csv(stats: dict, output_dir: Path):
     
     # Export all English cases
     if stats['english']['all_cases']:
+        eng_cases = stats['english']['all_cases']
+        if show_important_only:
+            eng_cases = [case for case in eng_cases if is_important_case(case)]
+            logging.info(f"Filtered to {len(eng_cases)} important English cases (from {len(stats['english']['all_cases'])} total)")
+        
         eng_path = output_dir / "dash_splitting_english.csv"
         with open(eng_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            for case in stats['english']['all_cases']:
+            for case in eng_cases:
                 # Only write the fields we want
                 row = {field: case.get(field, '') for field in fieldnames}
                 writer.writerow(row)
-        logging.info(f"Exported {len(stats['english']['all_cases'])} English cases to {eng_path}")
+        logging.info(f"Exported {len(eng_cases)} English cases to {eng_path}")
     
     # Export all Cantonese cases
     if stats['cantonese']['all_cases']:
+        cant_cases = stats['cantonese']['all_cases']
+        if show_important_only:
+            cant_cases = [case for case in cant_cases if is_important_case(case)]
+            logging.info(f"Filtered to {len(cant_cases)} important Cantonese cases (from {len(stats['cantonese']['all_cases'])} total)")
+        
         cant_path = output_dir / "dash_splitting_cantonese.csv"
         with open(cant_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            for case in stats['cantonese']['all_cases']:
+            for case in cant_cases:
                 # Only write the fields we want
                 row = {field: case.get(field, '') for field in fieldnames}
                 writer.writerow(row)
-        logging.info(f"Exported {len(stats['cantonese']['all_cases'])} Cantonese cases to {cant_path}")
+        logging.info(f"Exported {len(cant_cases)} Cantonese cases to {cant_path}")
 
 
 def main():
@@ -412,6 +582,11 @@ def main():
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
+    )
+    parser.add_argument(
+        '--show-important',
+        action='store_true',
+        help='Filter out cases where dashes are only at beginning/end of sentence or sentence contains only dashes'
     )
     
     args = parser.parse_args()
@@ -482,7 +657,7 @@ def main():
         
         # Export CSV files
         logger.info("Exporting results to CSV...")
-        export_to_csv(stats, output_dir)
+        export_to_csv(stats, output_dir, show_important_only=args.show_important)
         
         # Print report to console
         logger.info("")
