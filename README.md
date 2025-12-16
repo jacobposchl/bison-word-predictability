@@ -1,33 +1,14 @@
 # Code-Switching Predictability Analysis
 
-A Python package for analyzing code-switching patterns in Cantonese-English bilingual speech data from ELAN Annotation Format (EAF) files.
-
 ## Overview
 
 This package preprocesses raw EAF annotation files into processed data for code-switching analysis:
 - Extracts and cleans bilingual speech annotations from EAF files
 - Identifies code-switching patterns (transitions between Cantonese and English)
 - Determines matrix language (dominant language) for each sentence
-- Analyzes the impact of filler words on code-switching patterns
 - Generates visualizations and exports processed data to CSV
 
 ## Installation
-
-### Prerequisites
-
-- Python 3.8 or higher
-- pip package manager
-
-### Setup
-
-1. Clone or download this repository
-
-**Virtual Environment is recommended**
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
 
 The required packages are:
 - `pympi-ling` - For processing EAF files
@@ -36,6 +17,7 @@ The required packages are:
 - `numpy` - For numerical operations
 - `matplotlib` - For visualization
 - `pyyaml` - For configuration file parsing
+- `seaborn` - For plotting
 
 ## Configuration
 
@@ -330,21 +312,3 @@ code-switch-predictability-uc-irvine/
    language = "English",
 }
 ```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **FileNotFoundError**: Check that your data path in `config.yaml` is correct
-2. **No participant tier found**: Ensure your EAF files follow the naming convention (ACH*, ACHE*, ACI*)
-3. **Import errors**: Make sure all dependencies are installed: `pip install -r requirements.txt`
-
-### Getting Help
-
-- Check that your EAF files have the required tier structure
-- Enable verbose logging with `--verbose` flag for detailed error messages
-- Verify that the data path in your config file is correct
-
-## License
-
-This project is for research purposes. Please ensure you have appropriate permissions to use the data files.
