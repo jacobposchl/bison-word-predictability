@@ -322,19 +322,7 @@ def export_translated_sentences(
         logger.warning("No Cantonese matrix language sentences found!")
         return pd.DataFrame()
     
-    # Create base DataFrame
-    df = pd.DataFrame({
-        'start_time': [s['start_time'] for s in cantonese_matrix],
-        'end_time': [s['end_time'] for s in cantonese_matrix],
-        'reconstructed_sentence': [s['reconstructed_text'] for s in cantonese_matrix],
-        'sentence_original': [s['text'] for s in cantonese_matrix],
-        'pattern': [s.get('pattern_content_only', '') for s in cantonese_matrix],
-        'matrix_language': [s.get('matrix_language', 'Unknown') for s in cantonese_matrix],
-        'group': [s.get('group', '') for s in cantonese_matrix],
-        'participant_id': [s.get('participant_id', '') for s in cantonese_matrix]
-    })
-    
-    # Add translation column
+    # Add translation column FIRST
     # Use NLLB (free, local translator)
     from src.experiments.nllb_translator import NLLBTranslator
     
@@ -364,9 +352,20 @@ def export_translated_sentences(
     
     # Extract just the translated sentences
     translations = [result['translated_sentence'] for result in translation_results]
-    
-    df['cantonese_translation'] = translations
     logger.info(f"✓ Translation complete! Translated {len(translations)} sentences")
+    
+    # Create DataFrame with cantonese_translation BEFORE code_switch_original
+    df = pd.DataFrame({
+        'start_time': [s['start_time'] for s in cantonese_matrix],
+        'end_time': [s['end_time'] for s in cantonese_matrix],
+        'cantonese_translation': translations,
+        'code_switch_original': [s['reconstructed_text'] for s in cantonese_matrix],
+        'sentence_original': [s['text'] for s in cantonese_matrix],
+        'pattern': [s.get('pattern_content_only', '') for s in cantonese_matrix],
+        'matrix_language': [s.get('matrix_language', 'Unknown') for s in cantonese_matrix],
+        'group': [s.get('group', '') for s in cantonese_matrix],
+        'participant_id': [s.get('participant_id', '') for s in cantonese_matrix]
+    })
     
     # Save CSV
     csv_path = config.get_csv_cantonese_translated_path()
