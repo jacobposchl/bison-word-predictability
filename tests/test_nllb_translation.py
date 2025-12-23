@@ -230,7 +230,7 @@ def run_integration_test(results: TestResult, verbose: bool = False):
             original_csv_method = config.get_csv_cantonese_translated_path
             config.get_csv_cantonese_translated_path = lambda: str(Path(tmpdir) / "test_output.csv")
             
-            df = export_translated_sentences(all_sentences, config, api_key=None)
+            df = export_translated_sentences(all_sentences, config)
             
             config.get_csv_cantonese_translated_path = original_csv_method
             

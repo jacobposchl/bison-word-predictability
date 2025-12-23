@@ -115,9 +115,12 @@ class NLLBTranslator:
         
         # Generate translation
         with torch.no_grad():
+            # Get the token ID for Cantonese language code
+            cantonese_token_id = self.tokenizer.convert_tokens_to_ids(self.CANTONESE_CODE)
+            
             translated = self.model.generate(
                 **inputs,
-                forced_bos_token_id=self.tokenizer.lang_code_to_id[self.CANTONESE_CODE],
+                forced_bos_token_id=cantonese_token_id,
                 max_length=max_length,
                 num_beams=5,  # Beam search for better quality
                 early_stopping=True

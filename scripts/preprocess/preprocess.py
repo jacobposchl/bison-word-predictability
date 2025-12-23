@@ -59,6 +59,11 @@ def main():
         help='Skip generating visualization plots'
     )
     parser.add_argument(
+        '--no-translation',
+        action='store_true',
+        help='Skip translation process'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -137,11 +142,15 @@ def main():
         )
         
         # Export translated code-switched sentences
-        logger.info("\nStep 3d: Exporting translated sentences...")
-        translated_df = export_translated_sentences(
-            all_sentences,
-            config
-        )
+        translated_df = None
+        if not args.no_translation:
+            logger.info("\nStep 3d: Exporting translated sentences...")
+            translated_df = export_translated_sentences(
+                all_sentences,
+                config
+            )
+        else:
+            logger.info("\nStep 3d: Skipping translation process (--no-translation flag set)")
         
         # Step 4: Generate visualizations
         if not args.no_plots:
@@ -172,8 +181,9 @@ def main():
         logger.info(f"  - {config.get_csv_cantonese_mono_without_fillers_path()} ({len(cant_without)} sentences)")
         logger.info(f"  - {config.get_csv_english_mono_with_fillers_path()} ({len(eng_with)} sentences)")
         logger.info(f"  - {config.get_csv_english_mono_without_fillers_path()} ({len(eng_without)} sentences)")
-        logger.info("\nTranslated sentences:")
-        logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")
+        if not args.no_translation:
+            logger.info("\nTranslated sentences:")
+            logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")
         if not args.no_plots:
             logger.info(f"\nFigures saved to: {figures_dir}")
         
