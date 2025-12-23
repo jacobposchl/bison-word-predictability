@@ -53,8 +53,8 @@ class Config:
                 'path': './data'
             },
             'processing': {
-                'buffer_ms': 50,
-                'min_sentence_words': 2
+                'min_sentence_words': 2,
+                'time_gap_threshold_ms': 1000
             },
             'translation': {
                 'model': 'gpt-4',
@@ -77,7 +77,12 @@ class Config:
                 },
                 'csv_with_fillers': 'code_switching_WITH_fillers.csv',
                 'csv_without_fillers': 'code_switching_WITHOUT_fillers.csv',
-                'csv_all_sentences': 'all_sentences.csv'
+                'csv_all_sentences': 'all_sentences.csv',
+                'csv_cantonese_mono_with_fillers': 'cantonese_monolingual_WITH_fillers.csv',
+                'csv_cantonese_mono_without_fillers': 'cantonese_monolingual_WITHOUT_fillers.csv',
+                'csv_english_mono_with_fillers': 'english_monolingual_WITH_fillers.csv',
+                'csv_english_mono_without_fillers': 'english_monolingual_WITHOUT_fillers.csv',
+                'csv_cantonese_translated': 'cantonese_translated_WITHOUT_fillers.csv'
             }
         }
     
@@ -89,10 +94,6 @@ class Config:
             logger.warning(f"Data path does not exist: {data_path}")
         
         # Validate processing settings
-        buffer_ms = self.get('processing.buffer_ms')
-        if buffer_ms < 0:
-            raise ValueError("buffer_ms must be non-negative")
-        
         min_words = self.get('processing.min_sentence_words')
         if min_words < 1:
             raise ValueError("min_sentence_words must be at least 1")
@@ -125,13 +126,13 @@ class Config:
         """Get the data directory path."""
         return self.get('data.path', './data')
     
-    def get_buffer_ms(self) -> float:
-        """Get the time buffer in milliseconds for sentence overlap detection."""
-        return self.get('processing.buffer_ms', 50) / 1000.0  # Convert to seconds
-    
     def get_min_sentence_words(self) -> int:
         """Get minimum number of words required to keep a sentence."""
         return self.get('processing.min_sentence_words', 2)
+    
+    def get_time_gap_threshold_ms(self) -> int:
+        """Get time gap threshold in milliseconds for grouping annotations into sentences."""
+        return self.get('processing.time_gap_threshold_ms', 1000)
     
     def get_results_dir(self) -> str:
         """Get base directory for all results."""
@@ -176,6 +177,36 @@ class Config:
     def get_csv_all_sentences_path(self) -> str:
         """Get output path for CSV with all sentences (monolingual + code-switched)."""
         filename = self.get('output.csv_all_sentences', 'all_sentences.csv')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_cantonese_mono_with_fillers_path(self) -> str:
+        """Get output path for Cantonese monolingual sentences WITH fillers."""
+        filename = self.get('output.csv_cantonese_mono_with_fillers', 'cantonese_monolingual_WITH_fillers.csv')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_cantonese_mono_without_fillers_path(self) -> str:
+        """Get output path for Cantonese monolingual sentences WITHOUT fillers."""
+        filename = self.get('output.csv_cantonese_mono_without_fillers', 'cantonese_monolingual_WITHOUT_fillers.csv')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_english_mono_with_fillers_path(self) -> str:
+        """Get output path for English monolingual sentences WITH fillers."""
+        filename = self.get('output.csv_english_mono_with_fillers', 'english_monolingual_WITH_fillers.csv')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_english_mono_without_fillers_path(self) -> str:
+        """Get output path for English monolingual sentences WITHOUT fillers."""
+        filename = self.get('output.csv_english_mono_without_fillers', 'english_monolingual_WITHOUT_fillers.csv')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
+    def get_csv_cantonese_translated_path(self) -> str:
+        """Get output path for Cantonese-translated code-switched sentences WITHOUT fillers."""
+        filename = self.get('output.csv_cantonese_translated', 'cantonese_translated_WITHOUT_fillers.csv')
         processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
     

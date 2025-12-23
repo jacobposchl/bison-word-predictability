@@ -21,10 +21,13 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.core.config import Config
-from src.data.data_loading import load_dataset
+from src.data.data_loading import (
+    load_dataset,
+    load_code_switched_sentences,
+    load_monolingual_csvs
+)
 from src.data.data_export import save_exploratory_outputs
 from src.analysis.feasibility import (
-    extract_monolingual_sentences,
     analyze_pos_tagging,
     test_matching_algorithm,
     analyze_distributions,
@@ -50,34 +53,10 @@ def main():
         description='Calvillo methodology feasibility analysis'
     )
     parser.add_argument(
-        '--dataset',
-        type=str,
-        default='ALL',
-        choices=['ALL', 'WITH', 'WITHOUT'],
-        help='Which dataset to analyze (ALL=all sentences, WITH/WITHOUT=code-switched only, default: ALL)'
-    )
-    parser.add_argument(
         '--sample-size',
         type=int,
-        default=100,
-        help='Number of sentences for POS tagging and matching tests (default: 100, use 0 for full dataset)'
-    )
-    parser.add_argument(
-        '--full-dataset',
-        action='store_true',
-        help='Process full dataset instead of sampling (overrides --sample-size)'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
         default=None,
-        help='Override output directory from config file (default: from config)'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        default=None,
-        help='Path to configuration YAML file (default: config/config.yaml)'
+        help='Number of sentences for POS tagging and matching tests (default: process full dataset)'
     )
     parser.add_argument(
         '--verbose',
@@ -91,23 +70,17 @@ def main():
     setup_logging(verbose=args.verbose)
     
     # Load configuration
-    config = Config(config_path=args.config)
+    config = Config()
     
-    # Determine output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        output_dir = Path(config.get_exploratory_results_dir())
-    
-    # Determine figures directory
+    # Get output and figures directories from config
+    output_dir = Path(config.get_exploratory_results_dir())
     figures_dir = Path(config.get_exploratory_figures_dir())
     
     logger.info("=" * 80)
     logger.info("CALVILLO METHODOLOGY ANALYSIS")
     logger.info("=" * 80)
-    logger.info(f"Dataset: {args.dataset}")
-    if args.full_dataset:
-        logger.info(f"Mode: FULL DATASET (processing all sentences)")
+    if args.sample_size is None:
+        logger.info("Mode: FULL DATASET (processing all sentences)")
     else:
         logger.info(f"Sample size: {args.sample_size}")
     logger.info(f"Output directory: {output_dir}")
@@ -116,37 +89,40 @@ def main():
     logger.info("")
     
     try:
-        # Step 1: Load data
-        logger.info("Step 1: Loading data...")
-        df = load_dataset(args.dataset, config=config)
+        # Step 1: Load code-switched sentences (WITHOUT fillers for cleaner matching)
+        logger.info("Step 1: Loading code-switched sentences...")
+        code_switched = load_code_switched_sentences(config, use_fillers=False)
         
-        # Step 2: Extract monolingual sentences
-        logger.info("\nStep 2: Extracting monolingual sentences...")
-        monolingual = extract_monolingual_sentences(df)
+        # Step 2: Load monolingual sentences (WITHOUT fillers for consistent matching)
+        logger.info("\nStep 2: Loading monolingual sentences...")
+        monolingual = load_monolingual_csvs(config, use_fillers=False)
+        
+        # Combine for overall stats (use code_switched for general analysis)
+        df = code_switched
         
         # Step 3: Analyze POS tagging
         logger.info("\nStep 3: Analyzing POS tagging...")
         # Sample from all sentences for POS analysis (or use full dataset)
-        pos_sample_size = 0 if args.full_dataset else args.sample_size
+        pos_sample_size = 0 if args.sample_size is None else args.sample_size
         pos_results = analyze_pos_tagging(df, sample_size=pos_sample_size)
         
         # Step 4: Test matching algorithm
         logger.info("\nStep 4: Testing matching algorithm...")
-        code_switched = monolingual['code_switched']
+        # code_switched is already loaded above
         
         # Determine sample size for matching
-        if args.full_dataset:
+        if args.sample_size is None:
             matching_sample_size = 0  # 0 means use all sentences
             logger.info("Processing FULL dataset for matching (this may take a while)...")
         else:
             matching_sample_size = args.sample_size
             logger.info(f"Processing sample of {matching_sample_size} code-switched sentences...\n")
-            logger.info("If you want to process the full dataset, use the --full-dataset flag\n")
+            logger.info("To process the full dataset, omit the --sample-size flag\n")
         
         # Limit monolingual sentences to 500 per language for faster matching
         # (can be adjusted based on dataset size)
         # For full dataset, use all monolingual sentences
-        max_mono = None if args.full_dataset else 500
+        max_mono = None if args.sample_size is None else 500
         matching_results = test_matching_algorithm(
             code_switched,
             monolingual,
@@ -160,8 +136,14 @@ def main():
         
         # Step 6: Generate report
         logger.info("\nStep 6: Generating report...")
+        # Build monolingual dict for report (add code_switched for compatibility)
+        monolingual_dict = {
+            'cantonese': monolingual['cantonese'],
+            'english': monolingual['english'],
+            'code_switched': code_switched
+        }
         all_results = {
-            'monolingual': monolingual,
+            'monolingual': monolingual_dict,
             'pos_tagging': pos_results,
             'matching': matching_results,
             'distributions': distributions
@@ -172,7 +154,7 @@ def main():
         logger.info("\nStep 7: Saving outputs...")
         save_exploratory_outputs(
             output_dir,
-            monolingual,
+            monolingual_dict,
             pos_results,
             matching_results,
             distributions,

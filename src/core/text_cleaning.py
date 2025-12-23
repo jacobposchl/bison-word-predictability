@@ -27,12 +27,13 @@ DASH_RE = re.compile(DASH_CLASS)
 # Common filler words in English
 ENGLISH_FILLERS = {
     'uh', 'um', 'er', 'err', 'ah', 'eh', 'mm', 'hmm', 'mhm',
-    'uh-huh', 'mm-hmm', 'uh-uh', 'mm-mm', 'em', 'emm', 'ehh'
+    'uh-huh', 'mm-hmm', 'uh-uh', 'mm-mm', 'em', 'emm', 'ehh',
+    'umm', 'uhh', 'mmm', 'huh', 'oh'
 }
 
 # Common filler words in Cantonese
 CANTONESE_FILLERS = {
-    '呃', '嗯', '啊', '哦', '唔',  # Common Cantonese hesitation sounds
+    '呃', '嗯', '啊', '哦', '唔', '吖', '哎', '咦'
 }
 
 
@@ -235,4 +236,38 @@ def is_filler(word: str, lang: str) -> bool:
         return word in CANTONESE_FILLERS
     
     return False
+
+
+def remove_fillers_from_text(text: str, lang: str = None) -> str:
+    """
+    Remove filler words from a sentence.
+    
+    Args:
+        text: The sentence text to clean
+        lang: Language code ('C' for Cantonese, 'E' for English).
+              If None, removes both English and Cantonese fillers.
+    
+    Returns:
+        Text with filler words removed
+    """
+    if not text:
+        return text
+    
+    # Determine which fillers to remove
+    if lang == 'C':
+        fillers_to_remove = CANTONESE_FILLERS
+    elif lang == 'E':
+        fillers_to_remove = ENGLISH_FILLERS
+    else:
+        # Remove both if language not specified
+        fillers_to_remove = ENGLISH_FILLERS | CANTONESE_FILLERS
+    
+    # Split, filter, and rejoin
+    words = text.split()
+    filtered_words = [
+        w for w in words 
+        if w.lower() not in fillers_to_remove and w not in fillers_to_remove
+    ]
+    
+    return ' '.join(filtered_words)
 

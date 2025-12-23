@@ -28,7 +28,6 @@ data:
   path: "./data"  # Path to directory containing EAF files
 
 processing:
-  buffer_ms: 50  # Time buffer for sentence overlap detection -> implemented for small displacements in the EAF files transcriptions
   min_sentence_words: 2  # Minimum words to keep a sentence
 
 output:

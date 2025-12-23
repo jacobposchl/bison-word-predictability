@@ -121,3 +121,45 @@ def load_dataset(dataset: str = 'ALL', config=None) -> pd.DataFrame:
     logger.info(f"Loaded {len(df)} sentences")
     
     return df
+
+def load_monolingual_csvs(config, use_fillers: bool = False) -> Dict[str, pd.DataFrame]:
+    """
+    Load pre-filtered monolingual sentences from CSV files.
+    
+    Args:
+        config: Config object
+        use_fillers: If True, load sentences with fillers; else without
+        
+    Returns:
+        Dictionary with 'cantonese' and 'english' DataFrames
+    """
+    if use_fillers:
+        cant_path = Path(config.get_csv_cantonese_mono_with_fillers_path())
+        eng_path = Path(config.get_csv_english_mono_with_fillers_path())
+    else:
+        cant_path = Path(config.get_csv_cantonese_mono_without_fillers_path())
+        eng_path = Path(config.get_csv_english_mono_without_fillers_path())
+    
+    if not cant_path.exists():
+        raise FileNotFoundError(
+            f"Cantonese monolingual CSV not found: {cant_path}\\n"
+            f"Please run preprocessing first: python scripts/preprocess/preprocess.py"
+        )
+    
+    if not eng_path.exists():
+        raise FileNotFoundError(
+            f"English monolingual CSV not found: {eng_path}\\n"
+            f"Please run preprocessing first: python scripts/preprocess/preprocess.py"
+        )
+    
+    logger.info(f"Loading monolingual sentences from CSVs...")
+    cantonese_df = pd.read_csv(cant_path)
+    english_df = pd.read_csv(eng_path)
+    
+    logger.info(f"Loaded {len(cantonese_df)} Cantonese monolingual sentences")
+    logger.info(f"Loaded {len(english_df)} English monolingual sentences")
+    
+    return {
+        'cantonese': cantonese_df,
+        'english': english_df
+    }

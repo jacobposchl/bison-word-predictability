@@ -80,28 +80,26 @@ def export_to_csv(
     
     # Create the first CSV - WITH fillers
     csv_with_fillers = pd.DataFrame({
+        'start_time': [s['start_time'] for s in with_fillers],
+        'end_time': [s['end_time'] for s in with_fillers],
         'reconstructed_sentence': [s['reconstructed_text'] for s in with_fillers],
         'sentence_original': [s['text'] for s in with_fillers],
         'pattern': [s['pattern_with_fillers'] for s in with_fillers],
         'matrix_language': [s['matrix_language'] for s in with_fillers],
-        'group_code': [s['group_code'] for s in with_fillers],
         'group': [s['group'] for s in with_fillers],
-        'participant_id': [s['participant_id'] for s in with_fillers],
-        'filler_count': [s['filler_count'] for s in with_fillers],
-        'has_fillers': [s['has_fillers'] for s in with_fillers]
+        'participant_id': [s['participant_id'] for s in with_fillers]
     })
     
     # Create the second CSV - WITHOUT fillers
     csv_without_fillers = pd.DataFrame({
+        'start_time': [s['start_time'] for s in without_fillers],
+        'end_time': [s['end_time'] for s in without_fillers],
         'reconstructed_sentence': [s['reconstructed_text'] for s in without_fillers],
         'sentence_original': [s['text'] for s in without_fillers],
         'pattern': [s['pattern_content_only'] for s in without_fillers],
         'matrix_language': [s['matrix_language'] for s in without_fillers],
-        'group_code': [s['group_code'] for s in without_fillers],
         'group': [s['group'] for s in without_fillers],
-        'participant_id': [s['participant_id'] for s in without_fillers],
-        'filler_count': [s['filler_count'] for s in without_fillers],
-        'has_fillers': [s['has_fillers'] for s in without_fillers]
+        'participant_id': [s['participant_id'] for s in without_fillers]
     })
     
     # Create output directory if it doesn't exist
@@ -143,15 +141,14 @@ def export_all_sentences_to_csv(
     # Create DataFrame with all sentences
     # Use pattern_with_fillers for consistency
     csv_all = pd.DataFrame({
+        'start_time': [s['start_time'] for s in all_sentences],
+        'end_time': [s['end_time'] for s in all_sentences],
         'reconstructed_sentence': [s['reconstructed_text'] for s in all_sentences],
         'sentence_original': [s['text'] for s in all_sentences],
         'pattern': [s.get('pattern_with_fillers', s.get('pattern', '')) for s in all_sentences],
         'matrix_language': [s.get('matrix_language', 'Unknown') for s in all_sentences],
-        'group_code': [s.get('group_code', '') for s in all_sentences],
         'group': [s.get('group', '') for s in all_sentences],
-        'participant_id': [s.get('participant_id', '') for s in all_sentences],
-        'filler_count': [s.get('filler_count', 0) for s in all_sentences],
-        'has_fillers': [s.get('has_fillers', False) for s in all_sentences]
+        'participant_id': [s.get('participant_id', '') for s in all_sentences]
     })
     
     # Create output directory if it doesn't exist
@@ -167,6 +164,205 @@ def export_all_sentences_to_csv(
     logger.info(f"  '{csv_all_sentences_path}' - {len(csv_all)} sentences")
     
     return csv_all
+
+
+def export_monolingual_sentences(
+    all_sentences: List[Dict],
+    config
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Export monolingual sentences (Cantonese and English) to separate CSVs.
+    
+    Creates 4 CSV files:
+    - Cantonese monolingual WITH fillers
+    - Cantonese monolingual WITHOUT fillers  
+    - English monolingual WITH fillers
+    - English monolingual WITHOUT fillers
+    
+    Args:
+        all_sentences: List of all processed sentence data dictionaries
+        config: Config object with CSV path methods
+        
+    Returns:
+        Tuple of (cantonese_with, cantonese_without, english_with, english_without) DataFrames
+    """
+    from src.core.text_cleaning import remove_fillers_from_text
+    
+    logger.info("Exporting monolingual sentences to CSVs...")
+    
+    # Helper function to determine if sentence is monolingual
+    def is_monolingual_cantonese(pattern: str) -> bool:
+        """Check if pattern represents pure Cantonese (only C, no E)."""
+        return 'C' in pattern and 'E' not in pattern and pattern != 'FILLER_ONLY'
+    
+    def is_monolingual_english(pattern: str) -> bool:
+        """Check if pattern represents pure English (only E, no C)."""
+        return 'E' in pattern and 'C' not in pattern and pattern != 'FILLER_ONLY'
+    
+    # Filter sentences by language
+    cantonese_with_fillers = []
+    cantonese_without_fillers = []
+    english_with_fillers = []
+    english_without_fillers = []
+    
+    for s in all_sentences:
+        pattern_with = s.get('pattern_with_fillers', '')
+        pattern_without = s.get('pattern_content_only', '')
+        
+        # For WITH fillers: use pattern_with_fillers
+        # For WITHOUT fillers: use pattern_content_only
+        # IMPORTANT: Only include if monolingual in BOTH patterns to avoid code-switched sentences
+        # that become "monolingual" after filler removal
+        
+        is_cant_with = is_monolingual_cantonese(pattern_with)
+        is_cant_without = is_monolingual_cantonese(pattern_without)
+        is_eng_with = is_monolingual_english(pattern_with)
+        is_eng_without = is_monolingual_english(pattern_without)
+        
+        # Cantonese monolingual WITH fillers (must be monolingual in WITH pattern)
+        if is_cant_with:
+            cantonese_with_fillers.append(s)
+        
+        # Cantonese monolingual WITHOUT fillers (must be monolingual in BOTH patterns)
+        if is_cant_with and is_cant_without:
+            cantonese_without_fillers.append(s)
+        
+        # English monolingual WITH fillers (must be monolingual in WITH pattern)
+        if is_eng_with:
+            english_with_fillers.append(s)
+        
+        # English monolingual WITHOUT fillers (must be monolingual in BOTH patterns)
+        if is_eng_with and is_eng_without:
+            english_without_fillers.append(s)
+    
+    # Create DataFrames
+    def create_df(sentences: List[Dict], use_pattern_with_fillers: bool, lang: str) -> pd.DataFrame:
+        """Create DataFrame from sentence list."""
+        pattern_field = 'pattern_with_fillers' if use_pattern_with_fillers else 'pattern_content_only'
+        
+        # For WITHOUT fillers datasets, remove fillers from text
+        if use_pattern_with_fillers:
+            reconstructed_sentences = [s['reconstructed_text'] for s in sentences]
+        else:
+            reconstructed_sentences = [
+                remove_fillers_from_text(s['reconstructed_text'], lang=lang) 
+                for s in sentences
+            ]
+        
+        return pd.DataFrame({
+            'start_time': [s['start_time'] for s in sentences],
+            'end_time': [s['end_time'] for s in sentences],
+            'reconstructed_sentence': reconstructed_sentences,
+            'sentence_original': [s['text'] for s in sentences],
+            'pattern': [s.get(pattern_field, '') for s in sentences],
+            'matrix_language': [s.get('matrix_language', 'Unknown') for s in sentences],
+            'group': [s.get('group', '') for s in sentences],
+            'participant_id': [s.get('participant_id', '') for s in sentences]
+        })
+    
+    cant_with_df = create_df(cantonese_with_fillers, use_pattern_with_fillers=True, lang='C')
+    cant_without_df = create_df(cantonese_without_fillers, use_pattern_with_fillers=False, lang='C')
+    eng_with_df = create_df(english_with_fillers, use_pattern_with_fillers=True, lang='E')
+    eng_without_df = create_df(english_without_fillers, use_pattern_with_fillers=False, lang='E')
+    
+    # Save CSVs
+    csv_paths = [
+        (cant_with_df, config.get_csv_cantonese_mono_with_fillers_path(), 'Cantonese WITH fillers'),
+        (cant_without_df, config.get_csv_cantonese_mono_without_fillers_path(), 'Cantonese WITHOUT fillers'),
+        (eng_with_df, config.get_csv_english_mono_with_fillers_path(), 'English WITH fillers'),
+        (eng_without_df, config.get_csv_english_mono_without_fillers_path(), 'English WITHOUT fillers')
+    ]
+    
+    for df, path, desc in csv_paths:
+        # Create output directory if it doesn't exist
+        csv_dir = os.path.dirname(path)
+        if csv_dir and not os.path.exists(csv_dir):
+            os.makedirs(csv_dir, exist_ok=True)
+        
+        df.to_csv(path, index=False, encoding='utf-8-sig')
+        logger.info(f"  '{path}' - {len(df)} {desc} sentences")
+    
+    logger.info("Monolingual sentence export complete!")
+    
+    return cant_with_df, cant_without_df, eng_with_df, eng_without_df
+
+
+def export_translated_sentences(
+    all_sentences: List[Dict],
+    config,
+    api_key: Optional[str] = None,
+    skip_translation: bool = False
+) -> pd.DataFrame:
+    """
+    Export code-switched sentences with full Cantonese translations.
+    
+    Translates English portions to Cantonese and exports to CSV.
+    Only processes sentences WITHOUT fillers for cleaner translation.
+    
+    Args:
+        all_sentences: List of all processed sentence data dictionaries
+        config: Config object with CSV path methods
+        api_key: OpenAI API key for translation (optional if skip_translation=True)
+        skip_translation: If True, skip translation and just add empty column
+        
+    Returns:
+        DataFrame with translated sentences
+    """
+    logger.info("Exporting translated code-switched sentences...")
+    
+    # Filter to code-switched sentences WITHOUT fillers
+    code_switched = filter_code_switching_sentences(all_sentences, include_fillers=False)
+    
+    if not code_switched:
+        logger.warning("No code-switched sentences found!")
+        return pd.DataFrame()
+    
+    # Create base DataFrame
+    df = pd.DataFrame({
+        'start_time': [s['start_time'] for s in code_switched],
+        'end_time': [s['end_time'] for s in code_switched],
+        'reconstructed_sentence': [s['reconstructed_text'] for s in code_switched],
+        'sentence_original': [s['text'] for s in code_switched],
+        'pattern': [s.get('pattern_content_only', '') for s in code_switched],
+        'matrix_language': [s.get('matrix_language', 'Unknown') for s in code_switched],
+        'group': [s.get('group', '') for s in code_switched],
+        'participant_id': [s.get('participant_id', '') for s in code_switched]
+    })
+    
+    # Add translation column
+    if skip_translation or api_key is None:
+        logger.warning("Skipping translation (no API key provided or skip_translation=True)")
+        df['cantonese_translation'] = ''
+    else:
+        # Import translation service
+        from src.translation.translator import TranslationService
+        
+        logger.info(f"Translating {len(code_switched)} sentences to Cantonese...")
+        translator = TranslationService(
+            api_key=api_key,
+            model=config.get_translation_model(),
+            use_cache=config.get_translation_use_cache(),
+            cache_dir=config.get_translation_cache_dir()
+        )
+        
+        # Batch translate
+        translations = translator.batch_translate_to_cantonese(
+            [s['reconstructed_text'] for s in code_switched]
+        )
+        
+        df['cantonese_translation'] = translations
+        logger.info("Translation complete!")
+    
+    # Save CSV
+    csv_path = config.get_csv_cantonese_translated_path()
+    csv_dir = os.path.dirname(csv_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+    
+    df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+    logger.info(f"Saved translated sentences: '{csv_path}' - {len(df)} sentences")
+    
+    return df
 
 
 def save_exploratory_outputs(

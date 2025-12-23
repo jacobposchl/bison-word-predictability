@@ -8,13 +8,14 @@ data:
 
 # Processing settings
 processing:
-  # Time buffer in milliseconds for sentence overlap detection
-  # This accounts for slight timing inconsistencies in annotations
-  buffer_ms: 50
-  
   # Minimum number of words required to keep a sentence
   # Sentences with fewer words will be filtered out
   min_sentence_words: 2
+  
+  # Time gap threshold (in milliseconds) for grouping annotations into sentences
+  # Consecutive annotations within this time gap will be merged into one sentence
+  # Default: 1000ms (1 second)
+  time_gap_threshold_ms: 3000
 
 # Translation settings
 translation:

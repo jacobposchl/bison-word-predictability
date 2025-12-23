@@ -21,7 +21,13 @@ sys.path.insert(0, str(project_root))
 
 from src.core.config import Config
 from src.analysis.pattern_analysis import process_all_files
-from src.data.data_export import export_to_csv, filter_code_switching_sentences, export_all_sentences_to_csv
+from src.data.data_export import (
+    export_to_csv,
+    filter_code_switching_sentences,
+    export_all_sentences_to_csv,
+    export_monolingual_sentences,
+    export_translated_sentences
+)
 from scripts.plots.plot_preprocessing import (
     print_analysis_summary,
     plot_matrix_language_distribution,
@@ -53,6 +59,17 @@ def main():
         help='Skip generating visualization plots'
     )
     parser.add_argument(
+        '--skip-translation',
+        action='store_true',
+        help='Skip translating code-switched sentences (saves API costs)'
+    )
+    parser.add_argument(
+        '--api-key',
+        type=str,
+        default=None,
+        help='OpenAI API key for translation (can also use OPENAI_API_KEY env var)'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -69,8 +86,8 @@ def main():
         config = Config()
         
         data_path = config.get_data_path()
-        buffer_ms = config.get_buffer_ms()
         min_sentence_words = config.get_min_sentence_words()
+        time_gap_threshold_ms = config.get_time_gap_threshold_ms()
         csv_with_fillers_path = config.get_csv_with_fillers_path()
         csv_without_fillers_path = config.get_csv_without_fillers_path()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
@@ -80,8 +97,8 @@ def main():
         logger.info("Code-Switching Data Preprocessing")
         logger.info("="*80)
         logger.info(f"Raw data path: {data_path}")
-        logger.info(f"Buffer: {buffer_ms*1000:.0f} ms")
         logger.info(f"Min sentence words: {min_sentence_words}")
+        logger.info(f"Time gap threshold: {time_gap_threshold_ms}ms")
         logger.info(f"Processed data output: {config.get_preprocessing_results_dir()}/")
         logger.info(f"Figures output: {figures_dir}")
         logger.info("="*80)
@@ -90,8 +107,8 @@ def main():
         logger.info("\nStep 1: Processing EAF files...")
         all_sentences = process_all_files(
             data_path=data_path,
-            buffer_ms=buffer_ms,
-            min_sentence_words=min_sentence_words
+            min_sentence_words=min_sentence_words,
+            time_gap_threshold_ms=time_gap_threshold_ms
         )
         
         if not all_sentences:
@@ -123,6 +140,25 @@ def main():
             csv_all_sentences_path
         )
         
+        # Export monolingual sentences (Cantonese and English, with/without fillers)
+        logger.info("\nStep 3c: Exporting monolingual sentences...")
+        cant_with, cant_without, eng_with, eng_without = export_monolingual_sentences(
+            all_sentences,
+            config
+        )
+        
+        # Export translated code-switched sentences
+        logger.info("\nStep 3d: Exporting translated sentences...")
+        # Get API key from args or environment
+        import os
+        api_key = args.api_key or os.getenv('OPENAI_API_KEY')
+        translated_df = export_translated_sentences(
+            all_sentences,
+            config,
+            api_key=api_key,
+            skip_translation=args.skip_translation
+        )
+        
         # Step 4: Generate visualizations
         if not args.no_plots:
             logger.info("\nStep 4: Generating visualizations...")
@@ -141,12 +177,21 @@ def main():
         logger.info("\n" + "="*80)
         logger.info("Preprocessing complete!")
         logger.info("="*80)
-        logger.info(f"Processed data saved to {config.get_preprocessing_results_dir()}/:")
+        logger.info(f"Processed data saved to {config.get_preprocessing_results_dir()}/")
+        logger.info("\nCode-switching datasets:")
         logger.info(f"  - {csv_with_fillers_path}")
         logger.info(f"  - {csv_without_fillers_path}")
-        logger.info(f"  - {csv_all_sentences_path} (all sentences)")
+        logger.info("\nAll sentences:")
+        logger.info(f"  - {csv_all_sentences_path}")
+        logger.info("\nMonolingual sentences:")
+        logger.info(f"  - {config.get_csv_cantonese_mono_with_fillers_path()} ({len(cant_with)} sentences)")
+        logger.info(f"  - {config.get_csv_cantonese_mono_without_fillers_path()} ({len(cant_without)} sentences)")
+        logger.info(f"  - {config.get_csv_english_mono_with_fillers_path()} ({len(eng_with)} sentences)")
+        logger.info(f"  - {config.get_csv_english_mono_without_fillers_path()} ({len(eng_without)} sentences)")
+        logger.info("\nTranslated sentences:")
+        logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")
         if not args.no_plots:
-            logger.info(f"Figures saved to: {figures_dir}")
+            logger.info(f"\nFigures saved to: {figures_dir}")
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

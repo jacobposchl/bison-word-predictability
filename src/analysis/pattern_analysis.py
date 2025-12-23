@@ -15,6 +15,101 @@ from ..core.text_cleaning import is_filler
 logger = logging.getLogger(__name__)
 
 
+def group_annotations_by_time_gap(
+    cant_annotations: List[Tuple[int, int, str]],
+    eng_annotations: List[Tuple[int, int, str]],
+    time_gap_threshold_ms: int = 1000
+) -> List[Dict]:
+    """
+    Group Cantonese and English annotations into logical sentences based on time gaps.
+    
+    Consecutive annotations (from either language) are merged into one sentence if
+    the time gap between them is less than the threshold.
+    
+    Args:
+        cant_annotations: List of (start, end, text) tuples for Cantonese tier
+        eng_annotations: List of (start, end, text) tuples for English tier
+        time_gap_threshold_ms: Maximum time gap (ms) to merge annotations (default: 1000ms)
+        
+    Returns:
+        List of grouped annotation dictionaries containing:
+        - 'start_time': Earliest start time in group
+        - 'end_time': Latest end time in group
+        - 'cant_annotations': List of Cantonese annotations in this group
+        - 'eng_annotations': List of English annotations in this group
+        - 'original_text': Combined text from all annotations
+    """
+    # Combine all annotations with language labels
+    all_annotations = []
+    for start, end, text in cant_annotations:
+        all_annotations.append({'start': start, 'end': end, 'text': text, 'lang': 'C'})
+    for start, end, text in eng_annotations:
+        all_annotations.append({'start': start, 'end': end, 'text': text, 'lang': 'E'})
+    
+    # Sort by start time
+    all_annotations.sort(key=lambda x: x['start'])
+    
+    if not all_annotations:
+        return []
+    
+    # Group annotations based on time gaps
+    grouped_sentences = []
+    current_group = {
+        'start_time': all_annotations[0]['start'],
+        'end_time': all_annotations[0]['end'],
+        'cant_annotations': [],
+        'eng_annotations': [],
+        'texts': []
+    }
+    
+    # Add first annotation to current group
+    first = all_annotations[0]
+    if first['lang'] == 'C':
+        current_group['cant_annotations'].append((first['start'], first['end'], first['text']))
+    else:
+        current_group['eng_annotations'].append((first['start'], first['end'], first['text']))
+    current_group['texts'].append(first['text'])
+    
+    # Process remaining annotations
+    for ann in all_annotations[1:]:
+        # Check time gap from end of current group to start of this annotation
+        time_gap = ann['start'] - current_group['end_time']
+        
+        if time_gap <= time_gap_threshold_ms:
+            # Merge into current group
+            current_group['end_time'] = max(current_group['end_time'], ann['end'])
+            if ann['lang'] == 'C':
+                current_group['cant_annotations'].append((ann['start'], ann['end'], ann['text']))
+            else:
+                current_group['eng_annotations'].append((ann['start'], ann['end'], ann['text']))
+            current_group['texts'].append(ann['text'])
+        else:
+            # Finalize current group
+            current_group['original_text'] = ' '.join(current_group['texts'])
+            del current_group['texts']
+            grouped_sentences.append(current_group)
+            
+            # Start new group
+            current_group = {
+                'start_time': ann['start'],
+                'end_time': ann['end'],
+                'cant_annotations': [],
+                'eng_annotations': [],
+                'texts': [ann['text']]
+            }
+            if ann['lang'] == 'C':
+                current_group['cant_annotations'].append((ann['start'], ann['end'], ann['text']))
+            else:
+                current_group['eng_annotations'].append((ann['start'], ann['end'], ann['text']))
+    
+    # Don't forget the last group
+    current_group['original_text'] = ' '.join(current_group['texts'])
+    del current_group['texts']
+    grouped_sentences.append(current_group)
+    
+    return grouped_sentences
+
+
 def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
     """
     Identify the matrix language based on the MLF (Matrix Language Framework) model.
@@ -43,44 +138,41 @@ def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
     return "Equal"
 
 
-def process_sentence_with_reconstruction(
-    ach_sentence: Tuple[int, int, str],
-    cant_annotations: List[Tuple[int, int, str]],
-    eng_annotations: List[Tuple[int, int, str]],
-    buffer: float = 0.050
+def process_sentence_from_grouped_annotations(
+    grouped_annotation: Dict
 ) -> Optional[Dict]:
     """
-    Process a sentence and create both the original text and reconstructed text.
+    Process a grouped annotation set and create sentence data.
     
-    How it works:
-    1. Use the main tier sentence's start/end times as boundaries
-    2. Collect all annotation words that fall within those boundaries
-    3. Sort them by timestamp to preserve order
-    4. Concatenate to build the reconstructed sentence
+    This function processes sentences derived from subtier annotations grouped by time gaps,
+    rather than using main tier sentence boundaries.
     
     Args:
-        ach_sentence: Tuple of (start_time, end_time, original_text)
-        cant_annotations: List of (start, end, text) tuples for Cantonese tier
-        eng_annotations: List of (start, end, text) tuples for English tier
-        buffer: Time buffer in seconds for overlap detection
+        grouped_annotation: Dictionary containing:
+            - 'start_time': Earliest start time
+            - 'end_time': Latest end time
+            - 'cant_annotations': List of (start, end, text) tuples for Cantonese
+            - 'eng_annotations': List of (start, end, text) tuples for English
+            - 'original_text': Combined text from all annotations
         
     Returns:
         Dictionary with sentence data, or None if no words found
     """
-    start, end, original_text = ach_sentence
+    start = grouped_annotation['start_time']
+    end = grouped_annotation['end_time']
+    original_text = grouped_annotation['original_text']
+    cant_annotations = grouped_annotation['cant_annotations']
+    eng_annotations = grouped_annotation['eng_annotations']
     
-    def overlaps(a0: float, a1: float, b0: float, b1: float) -> bool:
-        """Check if two time intervals overlap."""
-        return (a1 > b0) and (a0 < b1)
-    
-    s0, s1 = start - buffer, end + buffer
     sentence_words = []
     
-    # Collect per-word tokens from overlapping annotations
-    for tier, lang in ((cant_annotations, 'C'), (eng_annotations, 'E')):
-        for a_start, a_end, a_text in tier:
-            if overlaps(a_start, a_end, s0, s1):
-                sentence_words.extend(tokenize_annotation(a_start, a_end, a_text, lang))
+    # Tokenize all Cantonese annotations
+    for a_start, a_end, a_text in cant_annotations:
+        sentence_words.extend(tokenize_annotation(a_start, a_end, a_text, 'C'))
+    
+    # Tokenize all English annotations
+    for a_start, a_end, a_text in eng_annotations:
+        sentence_words.extend(tokenize_annotation(a_start, a_end, a_text, 'E'))
     
     # Sort by time to preserve spoken order
     sentence_words.sort(key=lambda x: x[0])
@@ -210,16 +302,19 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
 
 def process_all_files(
     data_path: str,
-    buffer_ms: float = 0.050,
-    min_sentence_words: int = 2
+    min_sentence_words: int = 2,
+    time_gap_threshold_ms: int = 1000
 ) -> List[Dict]:
     """
-    Process all EAF files in the data directory.
+    Process all EAF files in the data directory using subtier-based sentence grouping.
+    
+    This function groups Cantonese and English annotations by time gaps rather than
+    using main tier boundaries, which prevents duplicate sentences.
     
     Args:
         data_path: Path to directory containing EAF files
-        buffer_ms: Time buffer in seconds for sentence overlap detection
         min_sentence_words: Minimum number of words to keep a sentence
+        time_gap_threshold_ms: Time gap threshold (ms) for grouping annotations into sentences
         
     Returns:
         List of sentence data dictionaries
@@ -228,6 +323,7 @@ def process_all_files(
     all_sentence_patterns = []
     
     logger.info(f"Found {len(eaf_files)} EAF files to process")
+    logger.info(f"Using time gap threshold: {time_gap_threshold_ms}ms for sentence grouping")
     
     for file_idx, eaf_file in enumerate(eaf_files, 1):
         file_path = os.path.join(data_path, eaf_file)
@@ -247,16 +343,18 @@ def process_all_files(
             group_code = participant_info['group_code']
             group = participant_info['group']
             
-            # Get annotations
-            ach_sentences = eaf.get_annotation_data_for_tier(main_tier)
+            # Get language tier annotations
             cant_c, eng_c = extract_tiers(eaf, main_tier)
             
-            # Process each sentence
+            # Group annotations by time gaps (subtier-based approach)
+            grouped_annotations = group_annotations_by_time_gap(
+                cant_c, eng_c, time_gap_threshold_ms
+            )
+            
+            # Process each grouped annotation set as a sentence
             file_sentence_count = 0
-            for ach_sentence in ach_sentences:
-                sentence_data = process_sentence_with_reconstruction(
-                    ach_sentence, cant_c, eng_c, buffer=buffer_ms
-                )
+            for grouped_annotation in grouped_annotations:
+                sentence_data = process_sentence_from_grouped_annotations(grouped_annotation)
                 
                 # Only keep sentences with multiple words
                 if sentence_data and len(sentence_data['items']) >= min_sentence_words:
@@ -282,6 +380,7 @@ def process_all_files(
             continue
     
     logger.info(f"Total sentences collected: {len(all_sentence_patterns)}")
+    
     return all_sentence_patterns
 
 
