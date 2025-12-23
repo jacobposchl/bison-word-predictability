@@ -1,14 +1,16 @@
 '''
 Main goal is to translate from code-switch (Matrix: Cantonese + Embedded: English) to pure Cantonese.
 
-1. Take full code switch sentence as input
-2. Use GPT to translate english parts to Cantonese
-3. Return full Cantonese sentence as output
-'''
+Workflow:
+1. Take code-switched sentence from CSV (reconstructed_sentence field)
+2. Parse the pattern field (e.g., "C5-E2-C3") to identify language segments
+3. Use GPT to translate English segments to Cantonese
+4. Return full Cantonese sentence
 
-# ***IMPORTANT*** | NEEDS TO BE REFACTORED TO USE CONFIG FILE NOT HARDCODED
-# ***IMPORTANT*** | NEEDS TO ALLOW FOR OPENAI API KEY TO INPUT AS AN ARGUMENT
-# ***IMPORTANT*** | NEEDS TO ACTUALLY WORK IN CONGRUENCY WITH MY CSV FILES FROM PREPROCESSING
+Example:
+  Input: reconstructed_sentence="我哋 go 咗 公園", pattern="C2-E1-C2"
+  Output: translated_sentence="我哋去咗公園" (English "go" translated to Cantonese)
+'''
 
 import os
 import json
@@ -22,19 +24,16 @@ logger = logging.getLogger(__name__)
 
 class TranslationCache:
     '''
-    File-based cache for translations to avoid reundant API calls
+    File-based cache for translations to avoid redundant API calls
     '''
 
-    def __init__(self,
-                cache_dir: str = "cache/translations"):
+    def __init__(self, cache_dir: str):
         '''
-        Docstring for __init__
+        Initialize translation cache.
         
-        :param self: self
-        :param cache_dir: dir to store cache files
-        :type cache_dir: str
+        Args:
+            cache_dir: Directory to store cache files
         '''
-
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "translation_cache.json"
@@ -79,35 +78,46 @@ class CodeSwitchTranslator:
     '''
     Translator for code-switched sentences.
 
-    Translates English segments into Cantonese-English code-switched sentences to produce a monolingual Cantonese version
-
+    Translates English segments in Cantonese-English code-switched sentences to produce monolingual Cantonese versions.
+    Works with CSV data structure containing 'reconstructed_sentence' and 'pattern' fields.
     '''
 
     def __init__(self,
-                 api_key: Optional[str] = None,
+                 api_key: str,
                  model: str = "gpt-4",
                  use_cache: bool = True,
-                 cache_dir: str = "cache/translations"
-                ):
+                 cache_dir: str = "cache/translations",
+                 temperature: float = 0.3,
+                 max_tokens: int = 200):
         '''
-        Docstring for __init__
+        Initialize translator.
         
-        :param api_key: OpenAI API key
-        :type api_key: Optional[str]
-        :param model: which model for translation
-        :type model: str
+        Args:
+            api_key: OpenAI API key (REQUIRED)
+            model: OpenAI model to use (default: "gpt-4")
+            use_cache: Whether to cache translations (default: True)
+            cache_dir: Directory for translation cache (default: "cache/translations")
+            temperature: Temperature for API calls (default: 0.3)
+            max_tokens: Max tokens for responses (default: 200)
         '''
-        if api_key:
-            openai.api_key = api_key
-        else:
-            logger.warning("NO API KEY FOUND!")
-
-
+        # Validate API key
+        if not api_key:
+            raise ValueError("API key is required. Pass it as an argument for security.")
+        
+        # Set API key
+        openai.api_key = api_key
+        logger.info("Initialized with provided API key")
+        
+        # Set translation parameters
         self.model = model
         self.use_cache = use_cache
-        self.cache = TranslationCache(cache_dir) if use_cache else None
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        
+        # Initialize cache
+        self.cache = TranslationCache(cache_dir) if self.use_cache else None
 
-        logger.info(f"Initialized translator with model: {model}")
+        logger.info(f"Translator ready: model={self.model}, cache={self.use_cache}")
 
     def _parse_pattern(self, pattern: str) -> List[Tuple[str, int]]:
         """
@@ -198,8 +208,8 @@ Provide ONLY the Cantonese translation, no explanations or additional text."""
                     {"role": "system", "content": "You are a professional translator specializing in English to Cantonese translation. Provide natural, colloquial translations."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,  # Lower temperature for more consistent translations
-                max_tokens=200
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
             
             translation = response.choices[0].message.content.strip()

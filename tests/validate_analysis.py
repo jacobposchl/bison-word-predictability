@@ -11,8 +11,8 @@ from collections import Counter
 # Add parent directory to path to import from src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.calvillo_feasibility import is_monolingual
-from src.pos_tagging import parse_pattern_segments
+from src.analysis.feasibility import is_monolingual
+from src.analysis.pos_tagging import parse_pattern_segments
 
 def validate_pattern_parsing():
     """Validate that pattern parsing is correct."""

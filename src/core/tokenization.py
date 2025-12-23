@@ -73,3 +73,28 @@ def tokenize_annotation(start: float, end: float, text: str, lang: str) -> List[
     times = per_word_times(start, end, len(toks))
     return [(t, tok, lang) for t, tok in zip(times, toks)]
 
+
+def segment_cantonese_sentence(sentence: str) -> List[str]:
+    """
+    Segment Cantonese sentence into words using PyCantonese.
+    
+    Args:
+        sentence: Cantonese sentence string
+        
+    Returns:
+        List of words
+    """
+    # Parse with PyCantonese
+    parsed = pycantonese.parse_text(sentence)
+    
+    # Extract words
+    words = []
+    for token in parsed:
+        if hasattr(token, 'word'):
+            words.append(token.word)
+        else:
+            # Fallback for simple tokens
+            words.append(str(token))
+    
+    return words
+

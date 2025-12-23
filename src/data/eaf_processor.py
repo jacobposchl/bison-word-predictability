@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import pympi
-from .text_cleaning import has_content
+from ..core.text_cleaning import has_content
 
 
 def parse_participant_info(tier_name: str) -> Dict[str, str]:

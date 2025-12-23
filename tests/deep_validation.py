@@ -8,8 +8,8 @@ from pathlib import Path
 # Add parent directory to path to import from src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.matching_algorithm import levenshtein_similarity
-from src.pos_tagging import pos_tag_cantonese, extract_pos_sequence
+from src.analysis.matching_algorithm import levenshtein_similarity
+from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence
 
 def test_levenshtein_similarity():
     """Test if Levenshtein similarity calculation is correct."""

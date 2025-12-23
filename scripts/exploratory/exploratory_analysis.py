@@ -18,11 +18,11 @@ from pathlib import Path
 import pandas as pd
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.config import Config
-from src.calvillo_feasibility import (
+from src.core.config import Config
+from src.analysis.feasibility import (
     extract_monolingual_sentences,
     analyze_pos_tagging,
     test_matching_algorithm,

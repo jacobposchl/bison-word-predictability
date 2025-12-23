@@ -8,9 +8,9 @@ and building code-switching patterns with and without fillers.
 from typing import List, Dict, Tuple, Optional
 import os
 import logging
-from .eaf_processor import load_eaf_file, get_main_tier, extract_tiers, parse_participant_info, get_all_eaf_files
-from .tokenization import tokenize_annotation
-from .text_cleaning import is_filler
+from ..data.eaf_processor import load_eaf_file, get_main_tier, extract_tiers, parse_participant_info, get_all_eaf_files
+from ..core.tokenization import tokenize_annotation
+from ..core.text_cleaning import is_filler
 
 logger = logging.getLogger(__name__)
 
@@ -283,4 +283,27 @@ def process_all_files(
     
     logger.info(f"Total sentences collected: {len(all_sentence_patterns)}")
     return all_sentence_patterns
+
+
+def find_switch_positions(pattern: str) -> List[int]:
+    """
+    Find word indices where code-switches occur.
+    
+    Args:
+        pattern: Pattern like "C5-E2-C3"
+        
+    Returns:
+        List of switch positions (word indices where switch happens)
+    """
+    segments = pattern.split('-')
+    positions = []
+    current_pos = 0
+    
+    for i in range(len(segments) - 1):
+        lang, count = segments[i][0], int(segments[i][1:])
+        current_pos += count
+        positions.append(current_pos)
+    
+    return positions
+
 

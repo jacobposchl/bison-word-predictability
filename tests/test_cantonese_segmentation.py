@@ -13,8 +13,8 @@ from pathlib import Path
 # Add parent directory to path to import from src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.pos_tagging import pos_tag_cantonese, pos_tag_mixed_sentence, extract_pos_sequence
-from src.matching_algorithm import levenshtein_similarity, _sequence_edit_distance
+from src.analysis.pos_tagging import pos_tag_cantonese, pos_tag_mixed_sentence, extract_pos_sequence
+from src.analysis.matching_algorithm import levenshtein_similarity, _sequence_edit_distance
 
 def explain_levenshtein_similarity():
     """

@@ -15,10 +15,14 @@ import logging
 import sys
 from pathlib import Path
 
-from .config import Config
-from .pattern_analysis import process_all_files
-from .data_export import export_to_csv, filter_code_switching_sentences, export_all_sentences_to_csv
-from .visualization import (
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.core.config import Config
+from src.analysis.pattern_analysis import process_all_files
+from src.data.data_export import export_to_csv, filter_code_switching_sentences, export_all_sentences_to_csv
+from scripts.plots.plot_preprocessing import (
     print_analysis_summary,
     plot_matrix_language_distribution,
     plot_equal_matrix_cases,

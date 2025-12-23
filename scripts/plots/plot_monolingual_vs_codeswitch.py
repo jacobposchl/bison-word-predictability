@@ -15,11 +15,11 @@ import sys
 import os
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.config import Config
-from src.calvillo_feasibility import is_monolingual
+from src.core.config import Config
+from src.analysis.feasibility import is_monolingual
 
 def setup_style():
     """Set professional matplotlib style"""

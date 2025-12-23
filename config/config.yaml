@@ -16,6 +16,24 @@ processing:
   # Sentences with fewer words will be filtered out
   min_sentence_words: 2
 
+# Translation settings
+# NOTE: API key must be passed as command-line argument for security
+translation:
+  # OpenAI model to use for translation
+  model: "gpt-4"
+  
+  # Whether to use caching for translations
+  use_cache: true
+  
+  # Directory for translation cache
+  cache_dir: "cache/translations"
+  
+  # Temperature for translation (0.0-1.0, lower = more consistent)
+  temperature: 0.3
+  
+  # Maximum tokens for translation response
+  max_tokens: 200
+
 # Output settings
 output:
   # Base directory for all results

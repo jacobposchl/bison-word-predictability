@@ -56,6 +56,13 @@ class Config:
                 'buffer_ms': 50,
                 'min_sentence_words': 2
             },
+            'translation': {
+                'model': 'gpt-4',
+                'use_cache': True,
+                'cache_dir': 'cache/translations',
+                'temperature': 0.3,
+                'max_tokens': 200
+            },
             'output': {
                 'results_dir': 'results',
                 'figures_dir': 'figures',
@@ -175,4 +182,27 @@ class Config:
         filename = self.get('output.csv_all_sentences', 'all_sentences.csv')
         processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
+    
+    # Translation configuration methods
+    # NOTE: API key is NOT stored in config for security - must be passed as argument
+    
+    def get_translation_model(self) -> str:
+        """Get OpenAI model for translation."""
+        return self.get('translation.model', 'gpt-4')
+    
+    def get_translation_use_cache(self) -> bool:
+        """Get whether to use caching for translations."""
+        return self.get('translation.use_cache', True)
+    
+    def get_translation_cache_dir(self) -> str:
+        """Get directory for translation cache."""
+        return self.get('translation.cache_dir', 'cache/translations')
+    
+    def get_translation_temperature(self) -> float:
+        """Get temperature for translation API calls."""
+        return self.get('translation.temperature', 0.3)
+    
+    def get_translation_max_tokens(self) -> int:
+        """Get maximum tokens for translation responses."""
+        return self.get('translation.max_tokens', 200)
 
