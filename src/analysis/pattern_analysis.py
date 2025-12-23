@@ -284,10 +284,14 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
         
         # Determine matrix language based on CONTENT words only (excluding fillers)
         sentence_data['matrix_language'] = identify_matrix_language(content_items)
+        
+        # Build reconstructed text WITHOUT fillers
+        sentence_data['reconstructed_text_without_fillers'] = ' '.join(word for _, word, _ in content_items)
     else:
         # Edge case: the entire sentence was just fillers with no real content
         sentence_data['pattern_content_only'] = 'FILLER_ONLY'
         sentence_data['matrix_language'] = 'UNKNOWN'
+        sentence_data['reconstructed_text_without_fillers'] = ''
     
     # Store metadata about fillers for later analysis
     sentence_data['filler_count'] = len(filler_positions)

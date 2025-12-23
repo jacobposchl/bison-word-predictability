@@ -94,7 +94,7 @@ def export_to_csv(
     csv_without_fillers = pd.DataFrame({
         'start_time': [s['start_time'] for s in without_fillers],
         'end_time': [s['end_time'] for s in without_fillers],
-        'reconstructed_sentence': [s['reconstructed_text'] for s in without_fillers],
+        'reconstructed_sentence': [s['reconstructed_text_without_fillers'] for s in without_fillers],
         'sentence_original': [s['text'] for s in without_fillers],
         'pattern': [s['pattern_content_only'] for s in without_fillers],
         'matrix_language': [s['matrix_language'] for s in without_fillers],
@@ -240,14 +240,11 @@ def export_monolingual_sentences(
         """Create DataFrame from sentence list."""
         pattern_field = 'pattern_with_fillers' if use_pattern_with_fillers else 'pattern_content_only'
         
-        # For WITHOUT fillers datasets, remove fillers from text
+        # For WITHOUT fillers datasets, use pre-computed text without fillers
         if use_pattern_with_fillers:
             reconstructed_sentences = [s['reconstructed_text'] for s in sentences]
         else:
-            reconstructed_sentences = [
-                remove_fillers_from_text(s['reconstructed_text'], lang=lang) 
-                for s in sentences
-            ]
+            reconstructed_sentences = [s['reconstructed_text_without_fillers'] for s in sentences]
         
         return pd.DataFrame({
             'start_time': [s['start_time'] for s in sentences],
