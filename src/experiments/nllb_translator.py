@@ -1,8 +1,7 @@
 """
 NLLB (No Language Left Behind) translator for code-switching.
 
-Free, open-source alternative to OpenAI GPT for translation.
-Runs locally with no API costs.
+Free, open-source for translation.
 """
 
 import logging
@@ -22,7 +21,6 @@ class NLLBTranslator:
     Language codes:
     - English: eng_Latn
     - Cantonese (Traditional): yue_Hant
-    - Mandarin Chinese (Simplified): zho_Hans
     """
     
     # NLLB language codes
@@ -72,7 +70,12 @@ class NLLBTranslator:
             tgt_lang=self.CANTONESE_CODE
         )
         
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        # Load model - explicitly avoid safetensors due to meta tensor issues with torch 2.6.0.dev
+        # Regular loading works fine
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            use_safetensors=False  # Avoid meta tensor issues
+        )
         self.model.to(self.device)
         self.model.eval()  # Set to evaluation mode
         
