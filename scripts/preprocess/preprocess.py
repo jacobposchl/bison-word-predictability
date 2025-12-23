@@ -59,17 +59,6 @@ def main():
         help='Skip generating visualization plots'
     )
     parser.add_argument(
-        '--skip-translation',
-        action='store_true',
-        help='Skip translating code-switched sentences (saves API costs)'
-    )
-    parser.add_argument(
-        '--api-key',
-        type=str,
-        default=None,
-        help='OpenAI API key for translation (can also use OPENAI_API_KEY env var)'
-    )
-    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -149,14 +138,9 @@ def main():
         
         # Export translated code-switched sentences
         logger.info("\nStep 3d: Exporting translated sentences...")
-        # Get API key from args or environment
-        import os
-        api_key = args.api_key or os.getenv('OPENAI_API_KEY')
         translated_df = export_translated_sentences(
             all_sentences,
-            config,
-            api_key=api_key,
-            skip_translation=args.skip_translation
+            config
         )
         
         # Step 4: Generate visualizations

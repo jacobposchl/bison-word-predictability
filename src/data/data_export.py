@@ -286,21 +286,17 @@ def export_monolingual_sentences(
 
 def export_translated_sentences(
     all_sentences: List[Dict],
-    config,
-    api_key: Optional[str] = None,
-    skip_translation: bool = False
+    config
 ) -> pd.DataFrame:
     """
     Export code-switched sentences with full Cantonese translations.
     
-    Translates English portions to Cantonese and exports to CSV.
-    Only processes sentences WITHOUT fillers for cleaner translation.
+    Translates English portions to Cantonese using NLLB (free, local model).
+    Only processes sentences WITHOUT fillers AND with Cantonese matrix language.
     
     Args:
         all_sentences: List of all processed sentence data dictionaries
         config: Config object with CSV path methods
-        api_key: OpenAI API key for translation (optional if skip_translation=True)
-        skip_translation: If True, skip translation and just add empty column
         
     Returns:
         DataFrame with translated sentences
@@ -314,41 +310,63 @@ def export_translated_sentences(
         logger.warning("No code-switched sentences found!")
         return pd.DataFrame()
     
+    # Filter to ONLY Cantonese matrix language
+    # (sentences where Cantonese is dominant, with embedded English)
+    cantonese_matrix = [s for s in code_switched if s.get('matrix_language') == 'Cantonese']
+    
+    logger.info(f"Total code-switched sentences: {len(code_switched)}")
+    logger.info(f"Cantonese matrix language only: {len(cantonese_matrix)}")
+    logger.info(f"Filtered out {len(code_switched) - len(cantonese_matrix)} non-Cantonese matrix sentences")
+    
+    if not cantonese_matrix:
+        logger.warning("No Cantonese matrix language sentences found!")
+        return pd.DataFrame()
+    
     # Create base DataFrame
     df = pd.DataFrame({
-        'start_time': [s['start_time'] for s in code_switched],
-        'end_time': [s['end_time'] for s in code_switched],
-        'reconstructed_sentence': [s['reconstructed_text'] for s in code_switched],
-        'sentence_original': [s['text'] for s in code_switched],
-        'pattern': [s.get('pattern_content_only', '') for s in code_switched],
-        'matrix_language': [s.get('matrix_language', 'Unknown') for s in code_switched],
-        'group': [s.get('group', '') for s in code_switched],
-        'participant_id': [s.get('participant_id', '') for s in code_switched]
+        'start_time': [s['start_time'] for s in cantonese_matrix],
+        'end_time': [s['end_time'] for s in cantonese_matrix],
+        'reconstructed_sentence': [s['reconstructed_text'] for s in cantonese_matrix],
+        'sentence_original': [s['text'] for s in cantonese_matrix],
+        'pattern': [s.get('pattern_content_only', '') for s in cantonese_matrix],
+        'matrix_language': [s.get('matrix_language', 'Unknown') for s in cantonese_matrix],
+        'group': [s.get('group', '') for s in cantonese_matrix],
+        'participant_id': [s.get('participant_id', '') for s in cantonese_matrix]
     })
     
     # Add translation column
-    if skip_translation or api_key is None:
-        logger.warning("Skipping translation (no API key provided or skip_translation=True)")
-        df['cantonese_translation'] = ''
-    else:
-        # Import translation service
-        from src.translation.translator import TranslationService
-        
-        logger.info(f"Translating {len(code_switched)} sentences to Cantonese...")
-        translator = TranslationService(
-            api_key=api_key,
-            model=config.get_translation_model(),
-            use_cache=config.get_translation_use_cache(),
-            cache_dir=config.get_translation_cache_dir()
-        )
-        
-        # Batch translate
-        translations = translator.batch_translate_to_cantonese(
-            [s['reconstructed_text'] for s in code_switched]
-        )
-        
-        df['cantonese_translation'] = translations
-        logger.info("Translation complete!")
+    # Use NLLB (free, local translator)
+    from src.experiments.nllb_translator import NLLBTranslator
+    
+    logger.info(f"Translating {len(cantonese_matrix)} Cantonese matrix sentences to full Cantonese...")
+    logger.info(f"Using NLLB (free, local model) - {config.get_translation_model()}")
+    
+    translator = NLLBTranslator(
+        model_name=config.get_translation_model(),
+        device=config.get_translation_device(),
+        show_progress=True
+    )
+    
+    # Prepare data for batch translation
+    sentences = [s['reconstructed_text'] for s in cantonese_matrix]
+    patterns = [s.get('pattern_content_only', '') for s in cantonese_matrix]
+    
+    # Tokenize sentences into words (split by whitespace)
+    # Reconstructed text should already be space-separated
+    words_list = [sent.split() for sent in sentences]
+    
+    # Batch translate (with progress bar)
+    translation_results = translator.translate_batch(
+        sentences=sentences,
+        patterns=patterns,
+        words_list=words_list
+    )
+    
+    # Extract just the translated sentences
+    translations = [result['translated_sentence'] for result in translation_results]
+    
+    df['cantonese_translation'] = translations
+    logger.info(f"✓ Translation complete! Translated {len(translations)} sentences")
     
     # Save CSV
     csv_path = config.get_csv_cantonese_translated_path()

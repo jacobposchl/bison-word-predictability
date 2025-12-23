@@ -1,0 +1,257 @@
+"""
+NLLB (No Language Left Behind) translator for code-switching.
+
+Free, open-source alternative to OpenAI GPT for translation.
+Runs locally with no API costs.
+"""
+
+import logging
+import torch
+from typing import List, Dict, Tuple
+from pathlib import Path
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
+
+class NLLBTranslator:
+    """
+    Translator using Meta's NLLB model for English to Cantonese translation.
+    
+    Language codes:
+    - English: eng_Latn
+    - Cantonese (Traditional): yue_Hant
+    - Mandarin Chinese (Simplified): zho_Hans
+    """
+    
+    # NLLB language codes
+    ENGLISH_CODE = "eng_Latn"
+    CANTONESE_CODE = "yue_Hant"  # Traditional Cantonese
+    
+    def __init__(
+        self,
+        model_name: str = "facebook/nllb-200-distilled-600M",
+        device: str = "auto",
+        show_progress: bool = True
+    ):
+        """
+        Initialize NLLB translator.
+        
+        Args:
+            model_name: NLLB model variant
+                - facebook/nllb-200-distilled-600M (faster, ~2.4GB)
+                - facebook/nllb-200-1.3B (better quality, ~5GB)
+                - facebook/nllb-200-3.3B (best quality, ~13GB)
+            device: Device to run on ("auto", "cpu", "cuda")
+            show_progress: Whether to show progress bars
+        """
+        self.model_name = model_name
+        self.show_progress = show_progress
+        
+        # Determine device
+        if device == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+        
+        logger.info(f"Initializing NLLB translator: {model_name}")
+        logger.info(f"Device: {self.device}")
+        
+        # Suppress transformers logging during model loading
+        import transformers
+        transformers.logging.set_verbosity_error()
+        
+        # Load model and tokenizer
+        if show_progress:
+            print(f"Loading NLLB model (this may take a moment on first run)...")
+        
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            src_lang=self.ENGLISH_CODE,
+            tgt_lang=self.CANTONESE_CODE
+        )
+        
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        self.model.to(self.device)
+        self.model.eval()  # Set to evaluation mode
+        
+        # Restore normal logging
+        transformers.logging.set_verbosity_warning()
+        
+        logger.info("NLLB translator ready!")
+        if show_progress:
+            print(f"✓ NLLB model loaded successfully on {self.device}")
+    
+    def translate_english_to_cantonese(
+        self,
+        english_text: str,
+        max_length: int = 200
+    ) -> str:
+        """
+        Translate English text to Cantonese.
+        
+        Args:
+            english_text: English text to translate
+            max_length: Maximum length of translation
+            
+        Returns:
+            Cantonese translation
+        """
+        # Set source language
+        self.tokenizer.src_lang = self.ENGLISH_CODE
+        
+        # Tokenize input
+        inputs = self.tokenizer(
+            english_text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512
+        )
+        
+        # Move to device
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        # Generate translation
+        with torch.no_grad():
+            translated = self.model.generate(
+                **inputs,
+                forced_bos_token_id=self.tokenizer.lang_code_to_id[self.CANTONESE_CODE],
+                max_length=max_length,
+                num_beams=5,  # Beam search for better quality
+                early_stopping=True
+            )
+        
+        # Decode translation
+        translation = self.tokenizer.batch_decode(
+            translated,
+            skip_special_tokens=True
+        )[0]
+        
+        return translation.strip()
+    
+    def translate_code_switched_sentence(
+        self,
+        sentence: str,
+        pattern: str,
+        words: List[str]
+    ) -> Dict:
+        """
+        Translate a code-switched sentence to fully Cantonese.
+        
+        Args:
+            sentence: Original code-switched sentence
+            pattern: Pattern string like "C5-E2-C3"
+            words: List of words (should match pattern)
+            
+        Returns:
+            Dictionary with translation details
+        """
+        # Parse pattern
+        segments = self._parse_pattern(pattern)
+        
+        # Extract segments from words
+        word_segments = []
+        word_idx = 0
+        for lang, count in segments:
+            segment_words = words[word_idx:word_idx + count]
+            word_segments.append((lang, segment_words, word_idx, word_idx + count))
+            word_idx += count
+        
+        # Translate English segments
+        translated_words = []
+        segment_translations = []
+        
+        for lang, segment_words, start_idx, end_idx in word_segments:
+            if lang == 'C':
+                # Keep Cantonese as-is
+                translated_words.extend(segment_words)
+                segment_translations.append({
+                    'language': 'Cantonese',
+                    'original': ''.join(segment_words),
+                    'translated': ''.join(segment_words),
+                    'start_idx': start_idx,
+                    'end_idx': end_idx
+                })
+            else:  # lang == 'E'
+                # Translate English to Cantonese
+                english_text = ' '.join(segment_words)
+                cantonese_translation = self.translate_english_to_cantonese(english_text)
+                
+                # Add translation (without spaces for Cantonese)
+                translated_words.append(cantonese_translation)
+                
+                segment_translations.append({
+                    'language': 'English',
+                    'original': english_text,
+                    'translated': cantonese_translation,
+                    'start_idx': start_idx,
+                    'end_idx': end_idx
+                })
+        
+        # Combine into full sentence
+        translated_sentence = ''.join(translated_words)
+        
+        return {
+            'translated_sentence': translated_sentence,
+            'original_sentence': sentence,
+            'pattern': pattern,
+            'segments': segment_translations
+        }
+    
+    def translate_batch(
+        self,
+        sentences: List[str],
+        patterns: List[str],
+        words_list: List[List[str]]
+    ) -> List[Dict]:
+        """
+        Translate multiple code-switched sentences.
+        
+        Args:
+            sentences: List of code-switched sentences
+            patterns: List of pattern strings
+            words_list: List of word lists
+            
+        Returns:
+            List of translation dictionaries
+        """
+        if not (len(sentences) == len(patterns) == len(words_list)):
+            raise ValueError("sentences, patterns, and words_list must have same length")
+        
+        results = []
+        
+        # Create progress bar if enabled
+        iterator = zip(sentences, patterns, words_list)
+        if self.show_progress:
+            iterator = tqdm(
+                iterator,
+                total=len(sentences),
+                desc="Translating (NLLB)",
+                unit="sentence",
+                ncols=80
+            )
+        
+        for sentence, pattern, words in iterator:
+            result = self.translate_code_switched_sentence(sentence, pattern, words)
+            results.append(result)
+        
+        return results
+    
+    def _parse_pattern(self, pattern: str) -> List[Tuple[str, int]]:
+        """
+        Parse pattern string into segments.
+        
+        Args:
+            pattern: Pattern like "C5-E2-C3"
+            
+        Returns:
+            List of (language, count) tuples
+        """
+        segments = []
+        for segment in pattern.split('-'):
+            lang = segment[0]
+            count = int(segment[1:])
+            segments.append((lang, count))
+        return segments

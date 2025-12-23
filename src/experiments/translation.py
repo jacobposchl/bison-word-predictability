@@ -18,7 +18,8 @@ import hashlib
 import logging
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
-import openai
+from openai import OpenAI
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,8 @@ class CodeSwitchTranslator:
                  use_cache: bool = True,
                  cache_dir: str = "cache/translations",
                  temperature: float = 0.3,
-                 max_tokens: int = 200):
+                 max_tokens: int = 200,
+                 show_progress: bool = True):
         '''
         Initialize translator.
         
@@ -99,13 +101,19 @@ class CodeSwitchTranslator:
             cache_dir: Directory for translation cache (default: "cache/translations")
             temperature: Temperature for API calls (default: 0.3)
             max_tokens: Max tokens for responses (default: 200)
+            show_progress: Whether to show progress bar (default: True)
         '''
         # Validate API key
         if not api_key:
             raise ValueError("API key is required. Pass it as an argument for security.")
         
-        # Set API key
-        openai.api_key = api_key
+        # Suppress HTTP request logging from httpx (used by openai)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("openai").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        
+        # Initialize OpenAI client with API key
+        self.client = OpenAI(api_key=api_key)
         logger.info("Initialized with provided API key")
         
         # Set translation parameters
@@ -113,6 +121,7 @@ class CodeSwitchTranslator:
         self.use_cache = use_cache
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.show_progress = show_progress
         
         # Initialize cache
         self.cache = TranslationCache(cache_dir) if self.use_cache else None
@@ -202,7 +211,7 @@ English: {english_text}
 Provide ONLY the Cantonese translation, no explanations or additional text."""
         
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a professional translator specializing in English to Cantonese translation. Provide natural, colloquial translations."},
@@ -324,7 +333,19 @@ Provide ONLY the Cantonese translation, no explanations or additional text."""
             raise ValueError("sentences, patterns, and words_list must have same length")
         
         results = []
-        for sentence, pattern, words in zip(sentences, patterns, words_list):
+        
+        # Create progress bar if enabled
+        iterator = zip(sentences, patterns, words_list)
+        if self.show_progress:
+            iterator = tqdm(
+                iterator,
+                total=len(sentences),
+                desc="Translating",
+                unit="sentence",
+                ncols=80
+            )
+        
+        for sentence, pattern, words in iterator:
             result = self.translate_code_switched_sentence(sentence, pattern, words)
             results.append(result)
         

@@ -19,20 +19,15 @@ processing:
 
 # Translation settings
 translation:
-  # OpenAI model to use for translation
-  model: "gpt-4"
+  # NLLB model settings (free, local translation)
+  model: "facebook/nllb-200-distilled-600M"  # Options: 600M (faster), 1.3B, 3.3B (better)
+  device: "auto"  # "auto" (detect GPU/CPU), "cpu", or "cuda"
   
   # Whether to use caching for translations
   use_cache: true
   
   # Directory for translation cache
   cache_dir: "cache/translations"
-  
-  # Temperature for translation (0.0-1.0, lower = more consistent)
-  temperature: 0.3
-  
-  # Maximum tokens for translation response
-  max_tokens: 200
 
 # Output settings
 output:

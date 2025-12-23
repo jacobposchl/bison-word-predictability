@@ -211,11 +211,14 @@ class Config:
         return os.path.join(processed_dir, filename)
     
     # Translation configuration methods
-    # NOTE: API key is NOT stored in config for security - must be passed as argument
     
     def get_translation_model(self) -> str:
-        """Get OpenAI model for translation."""
-        return self.get('translation.model', 'gpt-4')
+        """Get NLLB model name."""
+        return self.get('translation.model', 'facebook/nllb-200-distilled-600M')
+    
+    def get_translation_device(self) -> str:
+        """Get device for NLLB (auto, cpu, cuda)."""
+        return self.get('translation.device', 'auto')
     
     def get_translation_use_cache(self) -> bool:
         """Get whether to use caching for translations."""
@@ -224,10 +227,6 @@ class Config:
     def get_translation_cache_dir(self) -> str:
         """Get directory for translation cache."""
         return self.get('translation.cache_dir', 'cache/translations')
-    
-    def get_translation_temperature(self) -> float:
-        """Get temperature for translation API calls."""
-        return self.get('translation.temperature', 0.3)
     
     def get_translation_max_tokens(self) -> int:
         """Get maximum tokens for translation responses."""
