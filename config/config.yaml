@@ -17,7 +17,6 @@ processing:
   min_sentence_words: 2
 
 # Translation settings
-# NOTE: API key must be passed as command-line argument for security
 translation:
   # OpenAI model to use for translation
   model: "gpt-4"
@@ -48,8 +47,6 @@ output:
     preprocessing_dir: "results/preprocessing"
     # Directory for exploratory analysis results
     exploratory_dir: "results/exploratory"
-    # Directory for dash analysis results
-    dash_analysis_dir: "results/dash_analysis"
   
   # Figures subdirectories
   figures:

@@ -504,7 +504,7 @@ def analyze_distributions(df: pd.DataFrame) -> Dict:
     return stats
 
 
-def generate_feasibility_report(all_results: Dict) -> str:
+def generate_report(all_results: Dict) -> str:
     """
     Generate comprehensive feasibility report.
     

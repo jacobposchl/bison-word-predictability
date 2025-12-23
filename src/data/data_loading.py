@@ -7,7 +7,7 @@ sentences from CSV files.
 
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -77,3 +77,47 @@ def load_monolingual_sentences(config) -> Dict[str, pd.DataFrame]:
         'cantonese': cantonese_df,
         'english': english_df
     }
+
+
+def load_dataset(dataset: str = 'ALL', config=None) -> pd.DataFrame:
+    """
+    Load the appropriate CSV dataset for analysis.
+    
+    Args:
+        dataset: 'ALL' (all sentences), 'WITH' (code-switched with fillers), 
+                 or 'WITHOUT' (code-switched without fillers)
+        config: Config object (optional, will create one if not provided)
+        
+    Returns:
+        Loaded DataFrame
+        
+    Raises:
+        ValueError: If dataset parameter is invalid
+        FileNotFoundError: If CSV file doesn't exist
+    """
+    if config is None:
+        from src.core.config import Config
+        config = Config()
+    
+    # Get CSV path from config
+    if dataset.upper() == 'ALL':
+        csv_path = config.get_csv_all_sentences_path()
+    elif dataset.upper() == 'WITH':
+        csv_path = config.get_csv_with_fillers_path()
+    elif dataset.upper() == 'WITHOUT':
+        csv_path = config.get_csv_without_fillers_path()
+    else:
+        raise ValueError(f"Invalid dataset: {dataset}. Must be 'ALL', 'WITH', or 'WITHOUT'")
+    
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"CSV file not found: {csv_path}\n"
+            f"Please run preprocessing first: python scripts/preprocess/preprocess.py"
+        )
+    
+    logger.info(f"Loading data from {csv_path}...")
+    df = pd.read_csv(csv_path)
+    logger.info(f"Loaded {len(df)} sentences")
+    
+    return df

@@ -41,27 +41,11 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 def main():
-    """Main entry point for the code-switching data preprocessing pipeline."""
+    """
+    Main entry point for the code-switching data preprocessing pipeline
+    """
     parser = argparse.ArgumentParser(
         description='Preprocess raw EAF files into processed code-switching data'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        default=None,
-        help='Path to configuration YAML file (default: config/config.yaml)'
-    )
-    parser.add_argument(
-        '--data-path',
-        type=str,
-        default=None,
-        help='Override data path from config file'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        default=None,
-        help='Override output directory from config file'
     )
     parser.add_argument(
         '--no-plots',
@@ -82,11 +66,7 @@ def main():
     
     try:
         # Load configuration
-        config = Config(config_path=args.config)
-        
-        # Override config with command-line arguments if provided
-        if args.data_path:
-            config._config['data']['path'] = args.data_path
+        config = Config()
         
         data_path = config.get_data_path()
         buffer_ms = config.get_buffer_ms()
@@ -94,7 +74,7 @@ def main():
         csv_with_fillers_path = config.get_csv_with_fillers_path()
         csv_without_fillers_path = config.get_csv_without_fillers_path()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
-        figures_dir = args.output_dir or config.get_preprocessing_figures_dir()
+        figures_dir = config.get_preprocessing_figures_dir()
         
         logger.info("="*80)
         logger.info("Code-Switching Data Preprocessing")

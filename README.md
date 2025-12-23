@@ -76,9 +76,6 @@ python -m src.preprocess [OPTIONS]
 ```
 
 Options:
-- `--config PATH`: Path to configuration YAML file (default: `config/config.yaml`)
-- `--data-path PATH`: Override data path from config file
-- `--output-dir PATH`: Override output directory from config file
 - `--no-plots`: Skip generating visualization plots
 - `--verbose`: Enable verbose logging
 
@@ -86,12 +83,6 @@ Options:
 ```bash
 # Use default settings
 python -m src.preprocess
-
-# Use custom config file
-python -m src.preprocess --config my_config.yaml
-
-# Override data path
-python -m src.preprocess --data-path /path/to/eaf/files
 
 # Skip visualizations (faster processing)
 python -m src.preprocess --no-plots

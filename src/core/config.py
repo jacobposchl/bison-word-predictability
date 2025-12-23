@@ -25,7 +25,7 @@ class Config:
         """
         if config_path is None:
             # Default to config/config.yaml relative to project root
-            project_root = Path(__file__).parent.parent
+            project_root = Path(__file__).parent.parent.parent
             config_path = project_root / "config" / "config.yaml"
         
         self.config_path = Path(config_path)
@@ -148,10 +148,6 @@ class Config:
     def get_exploratory_results_dir(self) -> str:
         """Get directory for exploratory analysis results."""
         return self.get('output.results.exploratory_dir', 'results/exploratory')
-    
-    def get_dash_analysis_results_dir(self) -> str:
-        """Get directory for dash analysis results."""
-        return self.get('output.results.dash_analysis_dir', 'results/dash_analysis')
     
     def get_preprocessing_figures_dir(self) -> str:
         """Get directory for preprocessing figures."""
