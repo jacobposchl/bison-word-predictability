@@ -29,6 +29,12 @@ translation:
   # Directory for translation cache
   cache_dir: "cache/translations"
 
+# Analysis settings
+analysis:
+  # Minimum number of Cantonese words required at sentence start
+  # for inclusion in analysis dataset
+  min_cantonese_words: 3
+
 # Output settings
 output:
   # Base directory for all results

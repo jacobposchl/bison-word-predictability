@@ -27,6 +27,7 @@ from src.data.data_loading import (
     load_monolingual_csvs
 )
 from src.data.data_export import save_exploratory_outputs
+from src.data.analysis_dataset import create_analysis_dataset
 from src.analysis.feasibility import (
     analyze_pos_tagging,
     test_matching_algorithm,
@@ -150,8 +151,18 @@ def main():
         }
         report = generate_report(all_results)
         
-        # Step 7: Save outputs
-        logger.info("\nStep 7: Saving outputs...")
+        # Step 7: Create analysis dataset
+        logger.info("\nStep 7: Creating analysis dataset...")
+        analysis_df = create_analysis_dataset(config)
+        
+        # Save analysis dataset
+        output_dir.mkdir(parents=True, exist_ok=True)
+        analysis_csv_path = output_dir / "analysis_dataset.csv"
+        analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
+        logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
+        
+        # Step 8: Save outputs
+        logger.info("\nStep 8: Saving outputs...")
         save_exploratory_outputs(
             output_dir,
             monolingual_dict,

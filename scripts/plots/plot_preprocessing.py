@@ -300,7 +300,8 @@ def plot_equal_matrix_cases(
                         ha='center', va='bottom', fontsize=9, fontweight='bold'
                     )
     
-    putput_path = os.path.join(plo
+    plt.tight_layout()
+    
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, 'equal_matrix_cases.png')
@@ -367,7 +368,7 @@ def plot_equal_matrix_cases(
     
     # Save figure
     output_path = os.path.join(output_dir, 'equal_matrix_prevalence.png')
-    plt.savefig(output_path, dpplo, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     logger.info(f"Saved figure to {output_path}")
     plt.close()
 
@@ -385,9 +386,6 @@ def plot_filler_impact(
         without_fillers: List of sentences with fillers excluded
         output_dir: Directory to save figures
     """
-    # Create organized subfolder for these plots
-    plot_dir = os.path.join(output_dir, "matrix_language_analysis")
-    os.makedirs(plot_dir, exist_ok=True)
     groups = ['Homeland', 'Heritage', 'Immersed']
     
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -438,7 +436,8 @@ def plot_filler_impact(
             fontweight='bold', fontsize=10
         )
     
-    putput_path = os.path.join(plo
+    plt.tight_layout()
+    
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, 'filler_impact.png')

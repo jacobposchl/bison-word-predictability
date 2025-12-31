@@ -26,9 +26,9 @@ DASH_RE = re.compile(DASH_CLASS)
 
 # Common filler words in English
 ENGLISH_FILLERS = {
-    'uh', 'um', 'er', 'err', 'ah', 'eh', 'mm', 'hmm', 'mhm',
+    'uh', 'um', 'uhm', 'er', 'err', 'ah', 'eh', 'mm', 'hm', 'hmm', 'mhm', 'ehm',
     'uh-huh', 'mm-hmm', 'uh-uh', 'mm-mm', 'em', 'emm', 'ehh',
-    'umm', 'uhh', 'mmm', 'huh', 'oh'
+    'umm', 'ummm', 'uhh', 'mmm', 'huh', 'oh', 'ohh', 'ohhh', 'ummmm', 'uhmm'
 }
 
 # Common filler words in Cantonese
@@ -200,6 +200,15 @@ def clean_word(word: str) -> Optional[str]:
     # Removes colons from anywhere within the word
     # We replace them with empty string, so "lo::cal" becomes "local"
     cleaned = cleaned.replace(':', '')
+    
+    # Remove ellipses (three dots or Unicode ellipsis) from anywhere
+    # This handles cases like "Um...uh" where ellipsis is in the middle
+    # Replace with space so it can be split later, but for now just remove it
+    # to get the word part for filler detection
+    cleaned = cleaned.replace('...', '')
+    cleaned = cleaned.replace('…', '')  # Unicode ellipsis
+    
+    cleaned = cleaned.strip()
     
     if not cleaned or is_annotation_marker(cleaned):
         return None

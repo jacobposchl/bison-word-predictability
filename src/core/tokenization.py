@@ -58,14 +58,40 @@ def tokenize_annotation(start: float, end: float, text: str, lang: str) -> List[
     toks = []
     
     for w in raw_tokens:
-        # Normalize and split on internal dashes/en-dashes/em-dashes
-        subparts = split_on_internal_dashes(w)
-        if not subparts:  # either pure dash or empty after split
-            continue
-        for piece in subparts:
-            cw = clean_word(piece)
-            if cw and has_content(cw):  # keep only real content
-                toks.append(cw)
+        # First, split on ellipses (three dots or Unicode ellipsis)
+        # This handles cases like "Um...uh" which should be split into "Um" and "uh"
+        ellipsis_parts = []
+        if '...' in w:
+            ellipsis_parts = w.split('...')
+        elif '…' in w:  # Unicode ellipsis
+            ellipsis_parts = w.split('…')
+        else:
+            ellipsis_parts = [w]
+        
+        # Process each part (after ellipsis split)
+        for part in ellipsis_parts:
+            if not part.strip():
+                continue
+            
+            # Split on commas in the middle of tokens
+            # This handles cases like "eh,eh" which should be split into "eh" and "eh"
+            comma_parts = []
+            if ',' in part:
+                comma_parts = part.split(',')
+            else:
+                comma_parts = [part]
+            
+            for comma_part in comma_parts:
+                if not comma_part.strip():
+                    continue
+                # Normalize and split on internal dashes/en-dashes/em-dashes
+                subparts = split_on_internal_dashes(comma_part)
+                if not subparts:  # either pure dash or empty after split
+                    continue
+                for piece in subparts:
+                    cw = clean_word(piece)
+                    if cw and has_content(cw):  # keep only real content
+                        toks.append(cw)
     
     if not toks:
         return []
@@ -79,22 +105,13 @@ def segment_cantonese_sentence(sentence: str) -> List[str]:
     Segment Cantonese sentence into words using PyCantonese.
     
     Args:
-        sentence: Cantonese sentence string
+        sentence: Cantonese sentence string (may be space-separated)
         
     Returns:
         List of words
     """
-    # Parse with PyCantonese
-    parsed = pycantonese.parse_text(sentence)
-    
-    # Extract words
-    words = []
-    for token in parsed:
-        if hasattr(token, 'word'):
-            words.append(token.word)
-        else:
-            # Fallback for simple tokens
-            words.append(str(token))
-    
-    return words
+    # Use PyCantonese's segment function (same as used in tokenize_annotation)
+    # This properly segments Cantonese text regardless of input format
+    words = pycantonese.segment(sentence)
+    return words if words else []
 

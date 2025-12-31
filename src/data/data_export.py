@@ -10,8 +10,104 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _is_english_word(word: str) -> bool:
+    """
+    Check if a word is likely English (contains only ASCII letters).
+    
+    Args:
+        word: Word to check
+        
+    Returns:
+        True if word appears to be English, False otherwise
+    """
+    # Remove punctuation and whitespace
+    cleaned = re.sub(r'[^\w]', '', word)
+    
+    # If empty after cleaning, it's not an English word
+    if not cleaned:
+        return False
+    
+    # Check if all characters are ASCII letters (a-z, A-Z)
+    # This is a simple heuristic: English words use ASCII, Cantonese uses Unicode
+    return all(ord(c) < 128 and c.isalpha() for c in cleaned)
+
+
+def _contains_english_words(text: str) -> Tuple[bool, List[str]]:
+    """
+    Check if text contains any English words.
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        Tuple of (has_english, english_words_found)
+    """
+    # Split by whitespace and punctuation to get potential words
+    words = re.findall(r'\b\w+\b', text)
+    
+    english_words = []
+    for word in words:
+        if _is_english_word(word):
+            # Filter out very short words that might be false positives
+            if len(word) > 2 or word.lower() in ['ok', 'okay', 'uh', 'um', 'ah', 'oh']:
+                english_words.append(word)
+    
+    return len(english_words) > 0, english_words
+
+
+def _verify_cantonese_only(translation: str) -> Tuple[bool, Optional[str]]:
+    """
+    Verify that a translation is fully Cantonese (no English words).
+    
+    Args:
+        translation: Translated text to verify
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+        is_valid is True if translation is fully Cantonese
+    """
+    if not translation or not translation.strip():
+        return False, "Translation is empty"
+    
+    has_english, english_words = _contains_english_words(translation)
+    
+    if has_english:
+        return False, f"Contains English words: {', '.join(english_words[:5])}"
+    
+    return True, None
+
+
+def sort_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Sort DataFrame by group, participant_id, then start_time.
+    
+    Args:
+        df: DataFrame to sort
+        
+    Returns:
+        Sorted DataFrame
+    """
+    if len(df) == 0:
+        return df
+    
+    # Check which columns exist
+    sort_columns = []
+    if 'group' in df.columns:
+        sort_columns.append('group')
+    if 'participant_id' in df.columns:
+        sort_columns.append('participant_id')
+    if 'start_time' in df.columns:
+        sort_columns.append('start_time')
+    
+    if sort_columns:
+        df = df.sort_values(by=sort_columns, na_position='last').reset_index(drop=True)
+    
+    return df
 
 
 def filter_code_switching_sentences(
@@ -89,6 +185,7 @@ def export_to_csv(
         'group': [s['group'] for s in with_fillers],
         'participant_id': [s['participant_id'] for s in with_fillers]
     })
+    csv_with_fillers = sort_dataframe(csv_with_fillers)
     
     # Create the second CSV - WITHOUT fillers
     csv_without_fillers = pd.DataFrame({
@@ -101,6 +198,7 @@ def export_to_csv(
         'group': [s['group'] for s in without_fillers],
         'participant_id': [s['participant_id'] for s in without_fillers]
     })
+    csv_without_fillers = sort_dataframe(csv_without_fillers)
     
     # Create output directory if it doesn't exist
     csv_dir = os.path.dirname(csv_with_fillers_path)
@@ -150,6 +248,7 @@ def export_all_sentences_to_csv(
         'group': [s.get('group', '') for s in all_sentences],
         'participant_id': [s.get('participant_id', '') for s in all_sentences]
     })
+    csv_all = sort_dataframe(csv_all)
     
     # Create output directory if it doesn't exist
     csv_dir = os.path.dirname(csv_all_sentences_path)
@@ -164,6 +263,47 @@ def export_all_sentences_to_csv(
     logger.info(f"  '{csv_all_sentences_path}' - {len(csv_all)} sentences")
     
     return csv_all
+
+
+def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str, is_cantonese: bool = False) -> pd.DataFrame:
+    """
+    Add POS tagging column to a DataFrame.
+    
+    Args:
+        df: DataFrame to add POS column to
+        sentence_col: Name of column containing sentences
+        pos_col: Name of column to create for POS tags
+        is_cantonese: True if sentences are Cantonese, False if English
+        
+    Returns:
+        DataFrame with POS column added
+    """
+    from src.analysis.pos_tagging import pos_tag_cantonese, pos_tag_english, extract_pos_sequence
+    
+    logger.info(f"Adding POS tagging to {pos_col} column...")
+    
+    pos_sequences = []
+    for idx, row in df.iterrows():
+        sentence = str(row.get(sentence_col, ''))
+        if not sentence or pd.isna(sentence):
+            pos_sequences.append('')
+            continue
+        
+        try:
+            if is_cantonese:
+                tagged = pos_tag_cantonese(sentence)
+            else:
+                tagged = pos_tag_english(sentence)
+            
+            pos_seq = extract_pos_sequence(tagged)
+            pos_sequences.append(' '.join(pos_seq) if pos_seq else '')
+        except Exception as e:
+            logger.warning(f"Error tagging sentence at row {idx}: {e}")
+            pos_sequences.append('')
+    
+    df = df.copy()
+    df[pos_col] = pos_sequences
+    return df
 
 
 def export_monolingual_sentences(
@@ -246,7 +386,7 @@ def export_monolingual_sentences(
         else:
             reconstructed_sentences = [s['reconstructed_text_without_fillers'] for s in sentences]
         
-        return pd.DataFrame({
+        df = pd.DataFrame({
             'start_time': [s['start_time'] for s in sentences],
             'end_time': [s['end_time'] for s in sentences],
             'reconstructed_sentence': reconstructed_sentences,
@@ -256,11 +396,15 @@ def export_monolingual_sentences(
             'group': [s.get('group', '') for s in sentences],
             'participant_id': [s.get('participant_id', '') for s in sentences]
         })
+        return sort_dataframe(df)
     
     cant_with_df = create_df(cantonese_with_fillers, use_pattern_with_fillers=True, lang='C')
     cant_without_df = create_df(cantonese_without_fillers, use_pattern_with_fillers=False, lang='C')
     eng_with_df = create_df(english_with_fillers, use_pattern_with_fillers=True, lang='E')
     eng_without_df = create_df(english_without_fillers, use_pattern_with_fillers=False, lang='E')
+    
+    # Add POS tagging to Cantonese monolingual WITHOUT fillers
+    cant_without_df = _add_pos_to_dataframe(cant_without_df, 'reconstructed_sentence', 'pos', is_cantonese=True)
     
     # Save CSVs
     csv_paths = [
@@ -286,95 +430,194 @@ def export_monolingual_sentences(
 
 def export_translated_sentences(
     all_sentences: List[Dict],
-    config
+    config,
+    do_translation: bool = True
 ) -> pd.DataFrame:
     """
     Export code-switched sentences with full Cantonese translations.
     
-    Translates English portions to Cantonese using NLLB (free, local model).
-    Only processes sentences WITHOUT fillers AND with Cantonese matrix language.
+    Reads from code_switching_WITHOUT_fillers.csv, filters for Cantonese matrix language,
+    and creates a new CSV with code_switch_original and cantonese_translation columns.
+    Optionally performs translation and POS tagging.
     
     Args:
-        all_sentences: List of all processed sentence data dictionaries
+        all_sentences: List of all processed sentence data dictionaries (not used, kept for compatibility)
         config: Config object with CSV path methods
+        do_translation: If True, perform translation and POS tagging. If False, leave columns empty.
         
     Returns:
-        DataFrame with translated sentences
+        DataFrame with translated sentences structure
     """
     logger.info("Exporting translated code-switched sentences...")
     
-    # Filter to code-switched sentences WITHOUT fillers
-    code_switched = filter_code_switching_sentences(all_sentences, include_fillers=False)
+    # Read from code_switching_WITHOUT_fillers.csv
+    csv_without_fillers_path = config.get_csv_without_fillers_path()
     
-    if not code_switched:
-        logger.warning("No code-switched sentences found!")
+    if not os.path.exists(csv_without_fillers_path):
+        logger.error(f"Source CSV not found: {csv_without_fillers_path}")
+        logger.error("Please run preprocessing first to generate code_switching_WITHOUT_fillers.csv")
         return pd.DataFrame()
     
+    logger.info(f"Reading from: {csv_without_fillers_path}")
+    df_source = pd.read_csv(csv_without_fillers_path)
+    logger.info(f"Loaded {len(df_source)} rows from source CSV")
+    
     # Filter to ONLY Cantonese matrix language
-    # (sentences where Cantonese is dominant, with embedded English)
-    cantonese_matrix = [s for s in code_switched if s.get('matrix_language') == 'Cantonese']
+    df_cantonese = df_source[df_source['matrix_language'] == 'Cantonese'].copy()
     
-    logger.info(f"Total code-switched sentences: {len(code_switched)}")
-    logger.info(f"Cantonese matrix language only: {len(cantonese_matrix)}")
-    logger.info(f"Filtered out {len(code_switched) - len(cantonese_matrix)} non-Cantonese matrix sentences")
+    logger.info(f"Total code-switched sentences: {len(df_source)}")
+    logger.info(f"Cantonese matrix language only: {len(df_cantonese)}")
+    logger.info(f"Filtered out {len(df_source) - len(df_cantonese)} non-Cantonese matrix sentences")
     
-    if not cantonese_matrix:
+    if len(df_cantonese) == 0:
         logger.warning("No Cantonese matrix language sentences found!")
         return pd.DataFrame()
     
-    # Add translation column FIRST
-    # Use NLLB (free, local translator)
-    from src.experiments.nllb_translator import NLLBTranslator
-    
-    logger.info(f"Translating {len(cantonese_matrix)} Cantonese matrix sentences to full Cantonese...")
-    logger.info(f"Using NLLB (free, local model) - {config.get_translation_model()}")
-    
-    translator = NLLBTranslator(
-        model_name=config.get_translation_model(),
-        device=config.get_translation_device(),
-        show_progress=True
-    )
-    
-    # Prepare data for batch translation
-    sentences = [s['reconstructed_text'] for s in cantonese_matrix]
-    patterns = [s.get('pattern_content_only', '') for s in cantonese_matrix]
-    
-    # Tokenize sentences into words (split by whitespace)
-    # Reconstructed text should already be space-separated
-    words_list = [sent.split() for sent in sentences]
-    
-    # Batch translate (with progress bar)
-    translation_results = translator.translate_batch(
-        sentences=sentences,
-        patterns=patterns,
-        words_list=words_list
-    )
-    
-    # Extract just the translated sentences
-    translations = [result['translated_sentence'] for result in translation_results]
-    logger.info(f"✓ Translation complete! Translated {len(translations)} sentences")
-    
-    # Create DataFrame with cantonese_translation BEFORE code_switch_original
+    # Create new DataFrame with desired structure
+    # Column order: code_switch_original, cantonese_translation, translated_pos, pattern, then other columns
     df = pd.DataFrame({
-        'start_time': [s['start_time'] for s in cantonese_matrix],
-        'end_time': [s['end_time'] for s in cantonese_matrix],
-        'cantonese_translation': translations,
-        'code_switch_original': [s['reconstructed_text'] for s in cantonese_matrix],
-        'sentence_original': [s['text'] for s in cantonese_matrix],
-        'pattern': [s.get('pattern_content_only', '') for s in cantonese_matrix],
-        'matrix_language': [s.get('matrix_language', 'Unknown') for s in cantonese_matrix],
-        'group': [s.get('group', '') for s in cantonese_matrix],
-        'participant_id': [s.get('participant_id', '') for s in cantonese_matrix]
+        'start_time': df_cantonese['start_time'].values,
+        'end_time': df_cantonese['end_time'].values,
+        'code_switch_original': df_cantonese['reconstructed_sentence'].values,
+        'cantonese_translation': '',  # Will be filled if do_translation is True
+        'translated_pos': '',  # Will be filled if do_translation is True
+        'pattern': df_cantonese['pattern'].values,
+        'matrix_language': df_cantonese['matrix_language'].values,
+        'group': df_cantonese['group'].values,
+        'participant_id': df_cantonese['participant_id'].values
     })
     
-    # Save CSV
+    # Define column order (used for saving)
+    column_order = [
+        'start_time',
+        'end_time',
+        'code_switch_original',
+        'cantonese_translation',
+        'translated_pos',
+        'pattern',
+        'matrix_language',
+        'group',
+        'participant_id'
+    ]
+    
+    # Get CSV path for saving
     csv_path = config.get_csv_cantonese_translated_path()
     csv_dir = os.path.dirname(csv_path)
     if csv_dir and not os.path.exists(csv_dir):
         os.makedirs(csv_dir, exist_ok=True)
     
-    df.to_csv(csv_path, index=False, encoding='utf-8-sig')
-    logger.info(f"Saved translated sentences: '{csv_path}' - {len(df)} sentences")
+    # Save initial structure first (before translation starts)
+    df_initial = df[column_order].copy()
+    df_initial = sort_dataframe(df_initial)
+    df_initial.to_csv(csv_path, index=False, encoding='utf-8-sig')
+    logger.info(f"Created initial CSV structure: '{csv_path}' - {len(df_initial)} sentences")
+    
+    # Perform translation if requested
+    if do_translation:
+        logger.info("Performing translation with verification and POS tagging...")
+        from src.experiments.nllb_translator import NLLBTranslator
+        from src.core.tokenization import segment_cantonese_sentence
+        from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence
+        from tqdm import tqdm
+        
+        translator = NLLBTranslator(
+            model_name=config.get_translation_model(),
+            device=config.get_translation_device(),
+            show_progress=False
+        )
+        translations = []
+        pos_sequences = []
+        valid_count = 0
+        invalid_count = 0
+        
+        # Create progress bar with detailed description
+        pbar = tqdm(df.iterrows(), total=len(df), desc="Translating & verifying")
+        
+        # Save every N sentences to balance performance and safety
+        save_interval = 10
+        
+        for row_idx, (idx, row) in enumerate(pbar):
+            sentence = str(row['code_switch_original'])
+            pattern = str(row['pattern'])
+            translation = ''
+            pos_seq = ''
+            
+            try:
+                # Segment the sentence
+                words = segment_cantonese_sentence(sentence)
+                
+                # Translate
+                translation_result = translator.translate_code_switched_sentence(
+                    sentence=sentence,
+                    pattern=pattern,
+                    words=words
+                )
+                translation = translation_result.get('translated_sentence', '')
+                
+                # Verify translation is full Cantonese
+                is_valid, error_msg = _verify_cantonese_only(translation)
+                
+                if is_valid:
+                    valid_count += 1
+                    # Add POS tagging for valid translation
+                    try:
+                        tagged = pos_tag_cantonese(translation)
+                        pos_seq_list = extract_pos_sequence(tagged)
+                        pos_seq = ' '.join(pos_seq_list) if pos_seq_list else ''
+                    except Exception as e:
+                        logger.warning(f"Error POS tagging translation at row {idx}: {e}")
+                        pos_seq = ''
+                else:
+                    invalid_count += 1
+                    # Log first few failures with actual translation text for debugging
+                    if invalid_count <= 3:
+                        logger.warning(f"Row {idx}: Translation verification failed - {error_msg}")
+                        logger.debug(f"  Original: {sentence[:100]}")
+                        logger.debug(f"  Translation (first 200 chars): {translation[:200]}")
+                    else:
+                        logger.warning(f"Row {idx}: Translation verification failed - {error_msg}")
+                    # Still add empty POS for consistency
+                    pos_seq = ''
+                
+            except Exception as e:
+                logger.warning(f"Error translating row {idx}: {e}")
+                translation = ''
+                pos_seq = ''
+                invalid_count += 1
+            
+            translations.append(translation)
+            pos_sequences.append(pos_seq)
+            
+            # Update DataFrame row immediately
+            df.at[idx, 'cantonese_translation'] = translation
+            df.at[idx, 'translated_pos'] = pos_seq
+            
+            # Save CSV periodically (every save_interval sentences or at the end)
+            if (row_idx + 1) % save_interval == 0 or (row_idx + 1) == len(df):
+                # Reorder columns before saving
+                df_save = df[column_order].copy()
+                df_save = sort_dataframe(df_save)
+                df_save.to_csv(csv_path, index=False, encoding='utf-8-sig')
+            
+            # Update progress bar with stats
+            pbar.set_postfix({
+                'valid': valid_count,
+                'invalid': invalid_count,
+                'saved': '✓' if (row_idx + 1) % save_interval == 0 or (row_idx + 1) == len(df) else ''
+            })
+        
+        pbar.close()
+        
+        # Final save to ensure everything is saved
+        df = df[column_order].copy()
+        df = sort_dataframe(df)
+        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        
+        logger.info(f"Translation complete: {valid_count} valid, {invalid_count} invalid out of {len(df)} total")
+        logger.info(f"Saved translated sentences with POS tags: '{csv_path}' - {len(df)} sentences")
+    else:
+        logger.info("Skipping translation (do_translation=False). Columns will remain empty.")
+        logger.info("Note: cantonese_translation and translated_pos columns are empty (already saved in initial structure)")
     
     return df
 
@@ -418,6 +661,7 @@ def save_exploratory_outputs(
             monolingual['cantonese'],
             monolingual['english']
         ], ignore_index=True)
+        all_mono = sort_dataframe(all_mono)
         all_mono.to_csv(monolingual_path, index=False, encoding='utf-8-sig')
         logger.info(f"Saved monolingual sentences to {monolingual_path}")
     

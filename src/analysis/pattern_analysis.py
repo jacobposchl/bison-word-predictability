@@ -235,7 +235,13 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
     content_items = []
     
     for idx, (timestamp, word, lang) in enumerate(items):
-        if is_filler(word, lang):
+        # Check if word is a filler in EITHER language
+        # This handles cases where English fillers appear in Cantonese segments
+        # or vice versa (e.g., "eh" in a Cantonese annotation)
+        is_english_filler = is_filler(word, 'E')
+        is_cantonese_filler = is_filler(word, 'C')
+        
+        if is_english_filler or is_cantonese_filler:
             # This word is a hesitation marker, not a real code-switch
             filler_positions.append({
                 'position': idx,

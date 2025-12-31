@@ -231,4 +231,8 @@ class Config:
     def get_translation_max_tokens(self) -> int:
         """Get maximum tokens for translation responses."""
         return self.get('translation.max_tokens', 200)
+    
+    def get_analysis_min_cantonese_words(self) -> int:
+        """Get minimum number of Cantonese words required at sentence start for analysis dataset."""
+        return self.get('analysis.min_cantonese_words', 3)
 

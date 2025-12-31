@@ -144,13 +144,20 @@ def main():
         # Export translated code-switched sentences
         translated_df = None
         if not args.no_translation:
-            logger.info("\nStep 3d: Exporting translated sentences...")
+            logger.info("\nStep 3d: Exporting and translating sentences...")
             translated_df = export_translated_sentences(
                 all_sentences,
-                config
+                config,
+                do_translation=True
             )
         else:
             logger.info("\nStep 3d: Skipping translation process (--no-translation flag set)")
+            # Still create the structure but without translation
+            translated_df = export_translated_sentences(
+                all_sentences,
+                config,
+                do_translation=False
+            )
         
         # Step 4: Generate visualizations
         if not args.no_plots:
