@@ -171,12 +171,13 @@ class NLLBTranslator:
         
         for lang, segment_words, start_idx, end_idx in word_segments:
             if lang == 'C':
-                # Keep Cantonese as-is
-                translated_words.extend(segment_words)
+                # Keep Cantonese as-is (preserve spaces)
+                cantonese_segment = ' '.join(segment_words)
+                translated_words.append(cantonese_segment)
                 segment_translations.append({
                     'language': 'Cantonese',
-                    'original': ''.join(segment_words),
-                    'translated': ''.join(segment_words),
+                    'original': cantonese_segment,
+                    'translated': cantonese_segment,
                     'start_idx': start_idx,
                     'end_idx': end_idx
                 })
@@ -185,7 +186,7 @@ class NLLBTranslator:
                 english_text = ' '.join(segment_words)
                 cantonese_translation = self.translate_english_to_cantonese(english_text)
                 
-                # Add translation (without spaces for Cantonese)
+                # Add translation (preserve as space-separated)
                 translated_words.append(cantonese_translation)
                 
                 segment_translations.append({
@@ -196,8 +197,8 @@ class NLLBTranslator:
                     'end_idx': end_idx
                 })
         
-        # Combine into full sentence
-        translated_sentence = ''.join(translated_words)
+        # Combine into full sentence with spaces
+        translated_sentence = ' '.join(translated_words)
         
         return {
             'translated_sentence': translated_sentence,

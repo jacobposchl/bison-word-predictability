@@ -355,3 +355,316 @@ def find_matches(
     
     return matches
 
+
+def rank_matches_by_context(
+    matches: List[Dict],
+    source_sentence: Dict
+) -> List[Dict]:
+    """
+    Rank matches by contextual relevance: same group > same speaker > time proximity.
+    
+    Args:
+        matches: List of match dictionaries from find_window_matches
+        source_sentence: The code-switched sentence being matched
+        
+    Returns:
+        Sorted list of matches
+    """
+    source_group = source_sentence.get('group', '')
+    source_speaker = source_sentence.get('participant_id', '')
+    source_time = source_sentence.get('start_time', 0.0)
+    
+    def sort_key(match: Dict) -> Tuple[int, int, float]:
+        """
+        Create composite sort key for match ranking.
+        
+        Returns tuple of (same_group_priority, same_speaker_priority, time_distance)
+        where lower values are better (sorted ascending).
+        """
+        match_sent = match.get('match_sentence', {})
+        match_group = match_sent.get('group', '')
+        match_speaker = match_sent.get('participant_id', '')
+        match_time = match_sent.get('start_time', 0.0)
+        
+        # Priority 1: Same group (0 if same, 1 if different)
+        same_group_priority = 0 if match_group == source_group else 1
+        
+        # Priority 2: Same speaker (0 if same, 1 if different)
+        same_speaker_priority = 0 if match_speaker == source_speaker else 1
+        
+        # Priority 3: Time proximity (smaller difference is better)
+        time_distance = abs(match_time - source_time)
+        
+        return (same_group_priority, same_speaker_priority, time_distance)
+    
+    # Sort by the composite key
+    ranked_matches = sorted(matches, key=sort_key)
+    
+    return ranked_matches
+
+
+def find_window_matches(
+    code_switched_sentence: Dict,
+    monolingual_sentences: List[Dict],
+    window_size: int = 1,
+    similarity_threshold: float = 0.4
+) -> List[Dict]:
+    """
+    Find monolingual sentences matching POS window around switch point.
+    
+    This function:
+    1. Identifies the switch point in the code-switched sentence
+    2. Extracts a window of n words before and after the switch
+    3. Finds all monolingual sentences with similar POS sequences
+    4. Returns matches with similarity >= threshold
+    
+    Args:
+        code_switched_sentence: Dict with 'cantonese_translation', 'translated_pos',
+                               'switch_index', 'pattern', 'group', 'participant_id', etc.
+        monolingual_sentences: List of Cantonese monolingual sentence dicts
+        window_size: Number of words before/after switch point (n)
+        similarity_threshold: Minimum Levenshtein similarity (0-1)
+        
+    Returns:
+        List of match dictionaries with:
+        - 'match_sentence': The matched monolingual sentence
+        - 'similarity': Similarity score (0-1)
+        - 'window_size': The window size used
+        - 'pos_window': POS sequence from code-switched sentence
+        - 'matched_pos': POS sequence from monolingual sentence
+        - 'matched_window_start': Starting index of match in monolingual sentence
+    """
+    # Extract switch point information
+    switch_index = code_switched_sentence.get('switch_index', -1)
+    translated_pos = code_switched_sentence.get('translated_pos', '')
+    
+    if switch_index < 0 or not translated_pos:
+        return []
+    
+    # Parse POS sequence
+    pos_sequence = translated_pos.split()
+    
+    if not pos_sequence:
+        return []
+    
+    # Extract POS window around switch point
+    pos_window = extract_pos_window(pos_sequence, switch_index, window_size)
+    
+    if not pos_window:
+        return []
+    
+    matches = []
+    window_len = len(pos_window)
+    
+    # Search through all monolingual sentences
+    for mono_sent in monolingual_sentences:
+        mono_pos_str = mono_sent.get('pos', '')
+        
+        if not mono_pos_str:
+            continue
+        
+        mono_pos_seq = mono_pos_str.split()
+        
+        if not mono_pos_seq:
+            continue
+        
+        # Try all possible windows in the monolingual sentence
+        best_similarity = 0.0
+        best_window = []
+        best_start_idx = -1
+        
+        # Sliding window approach
+        for i in range(len(mono_pos_seq) - window_len + 1):
+            mono_window = mono_pos_seq[i:i + window_len]
+            similarity = levenshtein_similarity(pos_window, mono_window)
+            
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_window = mono_window
+                best_start_idx = i
+                
+                # Early termination for perfect match
+                if similarity >= 1.0:
+                    break
+        
+        # Also try comparing to full sequence if monolingual is shorter than window
+        if len(mono_pos_seq) < window_len:
+            similarity = levenshtein_similarity(pos_window, mono_pos_seq)
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_window = mono_pos_seq
+                best_start_idx = 0
+        
+        # Keep if above threshold
+        if best_similarity >= similarity_threshold:
+            matches.append({
+                'match_sentence': mono_sent,
+                'similarity': best_similarity,
+                'window_size': window_size,
+                'pos_window': ' '.join(pos_window),
+                'matched_pos': ' '.join(best_window),
+                'matched_window_start': best_start_idx
+            })
+    
+    return matches
+
+
+def analyze_window_matching(
+    translated_sentences: List[Dict],
+    monolingual_sentences: List[Dict],
+    window_sizes: List[int] = [1, 2, 3],
+    similarity_threshold: float = 0.4,
+    top_k: int = 5
+) -> Dict:
+    """
+    Analyze POS window matching across multiple window sizes.
+    
+    For each window size:
+    1. Extract POS windows around switch points
+    2. Find matching monolingual sentences
+    3. Rank matches by group/speaker/time proximity
+    4. Collect statistics and examples
+    
+    Args:
+        translated_sentences: List of code-switched sentences with Cantonese translations
+        monolingual_sentences: List of Cantonese monolingual sentences
+        window_sizes: List of window sizes to analyze (default: [1, 2, 3])
+        similarity_threshold: Minimum similarity threshold (default: 0.4)
+        top_k: Number of top matches to keep per sentence (default: 5)
+        
+    Returns:
+        Dictionary with results for each window size:
+        {
+            'window_1': {
+                'total_sentences': int,
+                'sentences_with_matches': int,
+                'match_rate': float,
+                'total_matches': int,
+                'avg_matches_per_sentence': float,
+                'avg_similarity': float,
+                'similarity_scores': List[float],
+                'detailed_matches': List[Dict],
+                'example_matches': List[Dict]  # Top 3-5 examples with their top 5 matches
+            },
+            'window_2': {...},
+            'window_3': {...}
+        }
+    """
+    logger.info(f"Starting window matching analysis for {len(translated_sentences)} sentences")
+    logger.info(f"Window sizes: {window_sizes}, Similarity threshold: {similarity_threshold}")
+    
+    results = {}
+    
+    for window_size in window_sizes:
+        logger.info(f"\nAnalyzing window size n={window_size}...")
+        
+        window_key = f'window_{window_size}'
+        detailed_matches = []
+        similarity_scores = []
+        sentences_with_matches = 0
+        
+        # Process each code-switched sentence
+        for cs_sent in tqdm(translated_sentences, desc=f"Window n={window_size}", leave=False):
+            # Find all matches for this sentence
+            matches = find_window_matches(
+                cs_sent,
+                monolingual_sentences,
+                window_size=window_size,
+                similarity_threshold=similarity_threshold
+            )
+            
+            if matches:
+                sentences_with_matches += 1
+                
+                # Rank matches by context
+                ranked_matches = rank_matches_by_context(matches, cs_sent)
+                
+                # Keep only top-k matches
+                top_matches = ranked_matches[:top_k]
+                
+                # Collect similarity scores for distribution analysis
+                similarity_scores.extend([m['similarity'] for m in matches])
+                
+                # Store detailed results
+                for rank, match in enumerate(top_matches, 1):
+                    detailed_match = {
+                        'cs_sentence': cs_sent.get('code_switch_original', ''),
+                        'cs_translation': cs_sent.get('cantonese_translation', ''),
+                        'cs_pattern': cs_sent.get('pattern', ''),
+                        'cs_group': cs_sent.get('group', ''),
+                        'cs_participant': cs_sent.get('participant_id', ''),
+                        'cs_start_time': cs_sent.get('start_time', 0.0),
+                        'switch_index': cs_sent.get('switch_index', -1),
+                        'rank': rank,
+                        'similarity': match['similarity'],
+                        'pos_window': match['pos_window'],
+                        'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
+                        'matched_pos': match['matched_pos'],
+                        'matched_group': match['match_sentence'].get('group', ''),
+                        'matched_participant': match['match_sentence'].get('participant_id', ''),
+                        'matched_start_time': match['match_sentence'].get('start_time', 0.0),
+                        'same_group': cs_sent.get('group', '') == match['match_sentence'].get('group', ''),
+                        'same_speaker': cs_sent.get('participant_id', '') == match['match_sentence'].get('participant_id', ''),
+                        'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0))
+                    }
+                    detailed_matches.append(detailed_match)
+        
+        # Calculate statistics
+        total_sentences = len(translated_sentences)
+        match_rate = sentences_with_matches / total_sentences if total_sentences > 0 else 0.0
+        total_matches = len(detailed_matches)
+        avg_matches = total_matches / total_sentences if total_sentences > 0 else 0.0
+        avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+        
+        # Select example matches (sentences with highest average similarity in top-5)
+        sentence_avg_similarities = {}
+        for match in detailed_matches:
+            key = (match['cs_sentence'], match['cs_translation'])
+            if key not in sentence_avg_similarities:
+                sentence_avg_similarities[key] = []
+            sentence_avg_similarities[key].append(match['similarity'])
+        
+        # Calculate average similarity per sentence and sort
+        sentence_rankings = []
+        for (cs_sent, cs_trans), sims in sentence_avg_similarities.items():
+            avg_sim = sum(sims) / len(sims)
+            sentence_rankings.append((cs_sent, cs_trans, avg_sim))
+        
+        sentence_rankings.sort(key=lambda x: x[2], reverse=True)
+        
+        # Get top 3-5 example sentences
+        num_examples = min(5, len(sentence_rankings))
+        example_sentences = sentence_rankings[:num_examples]
+        
+        example_matches = []
+        for cs_sent, cs_trans, _ in example_sentences:
+            # Get all matches for this sentence
+            sent_matches = [m for m in detailed_matches 
+                           if m['cs_sentence'] == cs_sent and m['cs_translation'] == cs_trans]
+            sent_matches = sorted(sent_matches, key=lambda x: x['rank'])[:top_k]
+            
+            example_matches.append({
+                'cs_sentence': cs_sent,
+                'cs_translation': cs_trans,
+                'matches': sent_matches
+            })
+        
+        # Store results for this window size
+        results[window_key] = {
+            'window_size': window_size,
+            'total_sentences': total_sentences,
+            'sentences_with_matches': sentences_with_matches,
+            'match_rate': match_rate,
+            'total_matches': total_matches,
+            'avg_matches_per_sentence': avg_matches,
+            'avg_similarity': avg_similarity,
+            'similarity_scores': similarity_scores,
+            'detailed_matches': detailed_matches,
+            'example_matches': example_matches
+        }
+        
+        logger.info(f"  Sentences with matches: {sentences_with_matches}/{total_sentences} ({match_rate*100:.1f}%)")
+        logger.info(f"  Total matches found: {total_matches}")
+        logger.info(f"  Average similarity: {avg_similarity:.3f}")
+    
+    return results

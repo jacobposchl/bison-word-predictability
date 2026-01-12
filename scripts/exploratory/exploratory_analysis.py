@@ -1,19 +1,19 @@
 """
-Main script for running exporatory analysis.
+Main script for running exploratory analysis.
 
-This script orchestrates the complete exploratory analysis pipeline:
-1. Load CSV data
-2. Extract monolingual sentences
-3. Analyze POS tagging
-4. Test matching algorithm
-5. Analyze distributions
-6. Generates report
+This script orchestrates the exploratory analysis pipeline:
+1. Load translated code-switched sentences
+2. Load monolingual Cantonese sentences
+3. Analyze POS window matching
+4. Create final analysis dataset
+5. Save results
 """
 
 import argparse
 import logging
 import os
 import sys
+import pandas as pd
 from pathlib import Path
 
 # Add project root to Python path
@@ -21,19 +21,12 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.core.config import Config
-from src.data.data_loading import (
-    load_dataset,
-    load_code_switched_sentences,
-    load_monolingual_csvs
-)
-from src.data.data_export import save_exploratory_outputs
 from src.data.analysis_dataset import create_analysis_dataset
 from src.analysis.feasibility import (
-    analyze_pos_tagging,
-    test_matching_algorithm,
-    analyze_distributions,
-    generate_report
+    plot_similarity_distributions,
+    generate_window_matching_report
 )
+from src.analysis.matching_algorithm import analyze_window_matching
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +44,13 @@ def setup_logging(verbose: bool = False) -> None:
 def main():
     """Main entry point for exploratory analysis."""
     parser = argparse.ArgumentParser(
-        description='Calvillo methodology feasibility analysis'
+        description='POS window matching analysis for code-switching'
     )
     parser.add_argument(
         '--sample-size',
         type=int,
         default=None,
-        help='Number of sentences for POS tagging and matching tests (default: process full dataset)'
+        help='Number of sentences to process (default: process all sentences)'
     )
     parser.add_argument(
         '--verbose',
@@ -76,108 +69,136 @@ def main():
     # Get output and figures directories from config
     output_dir = Path(config.get_exploratory_results_dir())
     figures_dir = Path(config.get_exploratory_figures_dir())
+    preprocessing_dir = Path(config.get_preprocessing_results_dir())
     
     logger.info("=" * 80)
-    logger.info("CALVILLO METHODOLOGY ANALYSIS")
+    logger.info("POS WINDOW MATCHING ANALYSIS")
     logger.info("=" * 80)
     if args.sample_size is None:
         logger.info("Mode: FULL DATASET (processing all sentences)")
     else:
-        logger.info(f"Sample size: {args.sample_size}")
+        logger.info(f"Sample size: {args.sample_size} sentences")
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Figures directory: {figures_dir}")
     logger.info("=" * 80)
     logger.info("")
     
     try:
-        # Step 1: Load code-switched sentences (WITHOUT fillers for cleaner matching)
-        logger.info("Step 1: Loading code-switched sentences...")
-        code_switched = load_code_switched_sentences(config, use_fillers=False)
+        # Step 1: Load translated code-switched sentences
+        logger.info("Step 1: Loading translated code-switched sentences...")
+        translated_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
         
-        # Step 2: Load monolingual sentences (WITHOUT fillers for consistent matching)
-        logger.info("\nStep 2: Loading monolingual sentences...")
-        monolingual = load_monolingual_csvs(config, use_fillers=False)
+        if not translated_csv.exists():
+            raise FileNotFoundError(f"Translated sentences CSV not found: {translated_csv}")
         
-        # Combine for overall stats (use code_switched for general analysis)
-        df = code_switched
+        translated_df = pd.read_csv(translated_csv)
+        logger.info(f"Loaded {len(translated_df)} translated sentences")
         
-        # Step 3: Analyze POS tagging
-        logger.info("\nStep 3: Analyzing POS tagging...")
-        # Sample from all sentences for POS analysis (or use full dataset)
-        pos_sample_size = 0 if args.sample_size is None else args.sample_size
-        pos_results = analyze_pos_tagging(df, sample_size=pos_sample_size)
+        # Step 2: Load monolingual Cantonese sentences
+        logger.info("\nStep 2: Loading monolingual Cantonese sentences...")
+        monolingual_csv = preprocessing_dir / "cantonese_monolingual_WITHOUT_fillers.csv"
         
-        # Step 4: Test matching algorithm
-        logger.info("\nStep 4: Testing matching algorithm...")
-        # code_switched is already loaded above
+        if not monolingual_csv.exists():
+            raise FileNotFoundError(f"Monolingual CSV not found: {monolingual_csv}")
         
-        # Determine sample size for matching
-        if args.sample_size is None:
-            matching_sample_size = 0  # 0 means use all sentences
-            logger.info("Processing FULL dataset for matching (this may take a while)...")
-        else:
-            matching_sample_size = args.sample_size
-            logger.info(f"Processing sample of {matching_sample_size} code-switched sentences...\n")
-            logger.info("To process the full dataset, omit the --sample-size flag\n")
+        monolingual_df = pd.read_csv(monolingual_csv)
+        logger.info(f"Loaded {len(monolingual_df)} monolingual Cantonese sentences")
         
-        # Limit monolingual sentences to 500 per language for faster matching
-        # (can be adjusted based on dataset size)
-        # For full dataset, use all monolingual sentences
-        max_mono = None if args.sample_size is None else 500
-        matching_results = test_matching_algorithm(
-            code_switched,
-            monolingual,
-            sample_size=matching_sample_size,
-            max_monolingual_per_lang=max_mono
+        # Step 3: Run POS window matching analysis
+        logger.info("\nStep 3: Running POS window matching analysis...")
+        
+        # Get parameters from config
+        window_size = config.get_analysis_window_size()
+        similarity_threshold = config.get_analysis_similarity_threshold()
+        
+        logger.info(f"Window size: {window_size}")
+        logger.info(f"Similarity threshold: {similarity_threshold}")
+        
+        # Filter to sentences with valid switch indices
+        translated_sentences = [s for s in translated_df.to_dict('records') if s.get('switch_index', -1) >= 0]
+        monolingual_sentences = monolingual_df.to_dict('records')
+        
+        # Apply sample size if specified
+        if args.sample_size is not None:
+            translated_sentences = translated_sentences[:args.sample_size]
+            logger.info(f"Limited to {len(translated_sentences)} sentences for testing")
+        
+        logger.info(f"Analyzing {len(translated_sentences)} sentences with valid switch points")
+        
+        # Run window matching
+        window_results = analyze_window_matching(
+            translated_sentences=translated_sentences,
+            monolingual_sentences=monolingual_sentences,
+            window_sizes=[window_size],
+            similarity_threshold=similarity_threshold,
+            top_k=5
         )
         
-        # Step 5: Analyze distributions
-        logger.info("\nStep 5: Analyzing distributions...")
-        distributions = analyze_distributions(code_switched)
+        # Step 4: Create analysis dataset
+        logger.info("\nStep 4: Creating final analysis dataset...")
+        analysis_df = create_analysis_dataset(config, translated_df, monolingual_df)
         
-        # Step 6: Generate report
-        logger.info("\nStep 6: Generating report...")
-        # Build monolingual dict for report (add code_switched for compatibility)
-        monolingual_dict = {
-            'cantonese': monolingual['cantonese'],
-            'english': monolingual['english'],
-            'code_switched': code_switched
-        }
-        all_results = {
-            'monolingual': monolingual_dict,
-            'pos_tagging': pos_results,
-            'matching': matching_results,
-            'distributions': distributions
-        }
-        report = generate_report(all_results)
-        
-        # Step 7: Create analysis dataset
-        logger.info("\nStep 7: Creating analysis dataset...")
-        analysis_df = create_analysis_dataset(config)
+        # Step 5: Save outputs
+        logger.info("\nStep 5: Saving outputs...")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        figures_dir.mkdir(parents=True, exist_ok=True)
         
         # Save analysis dataset
-        output_dir.mkdir(parents=True, exist_ok=True)
         analysis_csv_path = output_dir / "analysis_dataset.csv"
         analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
         logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
         
-        # Step 8: Save outputs
-        logger.info("\nStep 8: Saving outputs...")
-        save_exploratory_outputs(
-            output_dir,
-            monolingual_dict,
-            pos_results,
-            matching_results,
-            distributions,
-            report,
-            figures_dir=figures_dir
-        )
+        # Generate and save similarity distribution plot
+        logger.info("\nGenerating similarity distribution plots...")
+        plot_path = plot_similarity_distributions(window_results, str(figures_dir))
         
-        # Print report to console
+        # Generate window matching report
+        logger.info("\nGenerating window matching report...")
+        window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
+        
+        # Save window matching results
+        window_key = f'window_{window_size}'
+        if window_key in window_results:
+            results = window_results[window_key]
+            
+            # Save summary CSV
+            summary_data = [{
+                'window_size': results['window_size'],
+                'total_sentences': results['total_sentences'],
+                'sentences_with_matches': results['sentences_with_matches'],
+                'match_rate': results['match_rate'],
+                'total_matches': results['total_matches'],
+                'avg_matches_per_sentence': results['avg_matches_per_sentence'],
+                'avg_similarity': results['avg_similarity'],
+                'similarity_min': min(results['similarity_scores']) if results['similarity_scores'] else 0.0,
+                'similarity_max': max(results['similarity_scores']) if results['similarity_scores'] else 0.0,
+                'similarity_median': pd.Series(results['similarity_scores']).median() if results['similarity_scores'] else 0.0
+            }]
+            
+            summary_df = pd.DataFrame(summary_data)
+            summary_csv = output_dir / "window_matching_summary.csv"
+            summary_df.to_csv(summary_csv, index=False, encoding='utf-8-sig')
+            logger.info(f"Saved window matching summary: {summary_csv}")
+            
+            # Save detailed CSV
+            detailed_data = results['detailed_matches']
+            if detailed_data:
+                detailed_df = pd.DataFrame(detailed_data)
+                detailed_csv = output_dir / "window_matching_detailed.csv"
+                detailed_df.to_csv(detailed_csv, index=False, encoding='utf-8-sig')
+                logger.info(f"Saved window matching details: {detailed_csv} ({len(detailed_df)} matches)")
+            
+            # Save window matching report
+            window_report_path = output_dir / "window_matching_report.txt"
+            with open(window_report_path, 'w', encoding='utf-8') as f:
+                f.write(window_report)
+            logger.info(f"Saved window matching report: {window_report_path}")
+        
+        # Print window matching report
         logger.info("\n" + "=" * 80)
-        logger.info("REPORT")
+        logger.info("WINDOW MATCHING REPORT")
         logger.info("=" * 80)
-        print(report)
+        print(window_report)
         
         logger.info("\n" + "=" * 80)
         logger.info("Analysis complete!")
@@ -186,8 +207,8 @@ def main():
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
-        logger.error(f"Please ensure the CSV files exist in {config.get_preprocessing_results_dir()}/ directory")
-        logger.error("Run preprocessing first: python -m src.preprocess")
+        logger.error("Please ensure preprocessing has been run first")
+        logger.error("Run: python scripts/preprocessing/preprocess.py")
         sys.exit(1)
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")

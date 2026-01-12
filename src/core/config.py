@@ -235,4 +235,11 @@ class Config:
     def get_analysis_min_cantonese_words(self) -> int:
         """Get minimum number of Cantonese words required at sentence start for analysis dataset."""
         return self.get('analysis.min_cantonese_words', 3)
-
+    
+    def get_analysis_window_size(self) -> int:
+        """Get window size for POS matching around switch points."""
+        return self.get('analysis.window_size', 2)
+    
+    def get_analysis_similarity_threshold(self) -> float:
+        """Get minimum Levenshtein similarity threshold for matches."""
+        return self.get('analysis.similarity_threshold', 0.4)

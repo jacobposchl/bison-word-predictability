@@ -34,6 +34,12 @@ analysis:
   # Minimum number of Cantonese words required at sentence start
   # for inclusion in analysis dataset
   min_cantonese_words: 3
+  
+  # Window size for POS matching around switch points
+  window_size: 2
+  
+  # Minimum Levenshtein similarity threshold for matches (0-1)
+  similarity_threshold: 0.4
 
 # Output settings
 output:

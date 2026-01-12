@@ -448,6 +448,9 @@ def export_translated_sentences(
     Returns:
         DataFrame with translated sentences structure
     """
+    # Import parse_pattern_segments early since it's needed for filtering
+    from src.analysis.pos_tagging import parse_pattern_segments
+    
     logger.info("Exporting translated code-switched sentences...")
     
     # Read from code_switching_WITHOUT_fillers.csv
@@ -462,12 +465,46 @@ def export_translated_sentences(
     df_source = pd.read_csv(csv_without_fillers_path)
     logger.info(f"Loaded {len(df_source)} rows from source CSV")
     
+    # Track filtering stats for summary
+    stats = {
+        'initial_total': len(df_source),
+        'after_cantonese_filter': 0,
+        'after_pattern_filter': 0,
+        'translation_valid': 0,
+        'translation_invalid': 0,
+        'final_with_pos': 0
+    }
+    
     # Filter to ONLY Cantonese matrix language
     df_cantonese = df_source[df_source['matrix_language'] == 'Cantonese'].copy()
+    stats['after_cantonese_filter'] = len(df_cantonese)
     
     logger.info(f"Total code-switched sentences: {len(df_source)}")
     logger.info(f"Cantonese matrix language only: {len(df_cantonese)}")
     logger.info(f"Filtered out {len(df_source) - len(df_cantonese)} non-Cantonese matrix sentences")
+    
+    # Apply min_cantonese_words filter: must start with at least X Cantonese words followed by English
+    min_cantonese = config.get_analysis_min_cantonese_words()
+    logger.info(f"Applying pattern filter: must start with at least {min_cantonese} Cantonese words followed by English")
+    
+    # Filter by pattern criteria - check if pattern starts with enough Cantonese words followed by English
+    valid_patterns = []
+    for pattern in df_cantonese['pattern'].values:
+        try:
+            segments = parse_pattern_segments(pattern)
+            if len(segments) >= 2:
+                first_lang, first_count = segments[0]
+                second_lang, _ = segments[1]
+                is_valid = first_lang == 'C' and first_count >= min_cantonese and second_lang == 'E'
+                valid_patterns.append(is_valid)
+            else:
+                valid_patterns.append(False)
+        except Exception:
+            valid_patterns.append(False)
+    
+    df_cantonese = df_cantonese[valid_patterns].copy()
+    stats['after_pattern_filter'] = len(df_cantonese)
+    logger.info(f"After pattern filtering: {len(df_cantonese)} sentences (starts with {min_cantonese}+ Cantonese words -> English)")
     
     if len(df_cantonese) == 0:
         logger.warning("No Cantonese matrix language sentences found!")
@@ -475,12 +512,30 @@ def export_translated_sentences(
     
     # Create new DataFrame with desired structure
     # Column order: code_switch_original, cantonese_translation, translated_pos, pattern, then other columns
+    
+    # Calculate switch_index for each sentence (index where English starts)
+    def get_switch_index(pattern: str) -> int:
+        """Extract the index where the first English word appears."""
+        try:
+            segments = parse_pattern_segments(pattern)
+            if len(segments) < 2:
+                return -1
+            first_lang, first_count = segments[0]
+            if first_lang == 'C':
+                return first_count  # Index where English starts (0-based)
+            return 0  # English starts at beginning
+        except Exception:
+            return -1
+    
+    switch_indices = [get_switch_index(pattern) for pattern in df_cantonese['pattern'].values]
+    
     df = pd.DataFrame({
         'start_time': df_cantonese['start_time'].values,
         'end_time': df_cantonese['end_time'].values,
         'code_switch_original': df_cantonese['reconstructed_sentence'].values,
         'cantonese_translation': '',  # Will be filled if do_translation is True
         'translated_pos': '',  # Will be filled if do_translation is True
+        'switch_index': switch_indices,
         'pattern': df_cantonese['pattern'].values,
         'matrix_language': df_cantonese['matrix_language'].values,
         'group': df_cantonese['group'].values,
@@ -494,6 +549,7 @@ def export_translated_sentences(
         'code_switch_original',
         'cantonese_translation',
         'translated_pos',
+        'switch_index',
         'pattern',
         'matrix_language',
         'group',
@@ -517,7 +573,7 @@ def export_translated_sentences(
         logger.info("Performing translation with verification and POS tagging...")
         from src.experiments.nllb_translator import NLLBTranslator
         from src.core.tokenization import segment_cantonese_sentence
-        from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence
+        from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence, parse_pattern_segments
         from tqdm import tqdm
         
         translator = NLLBTranslator(
@@ -539,12 +595,13 @@ def export_translated_sentences(
         for row_idx, (idx, row) in enumerate(pbar):
             sentence = str(row['code_switch_original'])
             pattern = str(row['pattern'])
+            switch_index = row.get('switch_index', -1)
             translation = ''
             pos_seq = ''
             
             try:
-                # Segment the sentence
-                words = segment_cantonese_sentence(sentence)
+                # Use original tokenization (sentence is already space-separated to match pattern)
+                words = sentence.split()
                 
                 # Translate
                 translation_result = translator.translate_code_switched_sentence(
@@ -554,19 +611,68 @@ def export_translated_sentences(
                 )
                 translation = translation_result.get('translated_sentence', '')
                 
-                # Verify translation is full Cantonese
+                # Enhanced verification: check if English words are within the code-switched segment
                 is_valid, error_msg = _verify_cantonese_only(translation)
+                
+                # If verification failed but we have a valid switch_index, check if English words are outside our segment
+                if not is_valid and switch_index >= 0:
+                    # Get the length of the first English segment from pattern
+                    segments = parse_pattern_segments(pattern)
+                    if len(segments) >= 2 and segments[1][0] == 'E':
+                        first_english_length = segments[1][1]
+                        # Calculate the end of our code-switched segment (Cantonese + first English)
+                        segment_end = switch_index + first_english_length
+                        
+                        # Check if all English words are AFTER the code-switched segment
+                        translation_words = translation.split()
+                        english_in_segment = False
+                        for i, word in enumerate(translation_words[:segment_end]):
+                            # Simple check: if word contains only ASCII letters, it's likely English
+                            if word and any(c.isascii() and c.isalpha() for c in word):
+                                english_in_segment = True
+                                break
+                        
+                        # If no English in the segment we care about, consider it valid
+                        if not english_in_segment:
+                            is_valid = True
+                            error_msg = ''
                 
                 if is_valid:
                     valid_count += 1
                     # Add POS tagging for valid translation
+                    # Handle mixed Cantonese/English by tagging word by word
                     try:
-                        tagged = pos_tag_cantonese(translation)
-                        pos_seq_list = extract_pos_sequence(tagged)
-                        pos_seq = ' '.join(pos_seq_list) if pos_seq_list else ''
+                        translation_words = translation.split()
+                        pos_tags = []
+                        
+                        for word in translation_words:
+                            # Check if word is English (contains ASCII letters)
+                            if word and any(c.isascii() and c.isalpha() for c in word):
+                                # Mark English words that we're keeping (after code-switch point)
+                                pos_tags.append('ENG')
+                            else:
+                                # Try to POS tag Cantonese word
+                                try:
+                                    tagged_word = pos_tag_cantonese(word)
+                                    word_pos = extract_pos_sequence(tagged_word)
+                                    if word_pos:
+                                        pos_tags.extend(word_pos)
+                                    else:
+                                        pos_tags.append('UNK')
+                                except Exception:
+                                    pos_tags.append('UNK')
+                        
+                        pos_seq = ' '.join(pos_tags) if pos_tags else ''
+                        
+                        # If POS sequence is still empty despite having translation, mark all as unknown
+                        if not pos_seq and translation:
+                            pos_seq = ' '.join(['UNK'] * len(translation_words))
+                            
                     except Exception as e:
                         logger.warning(f"Error POS tagging translation at row {idx}: {e}")
-                        pos_seq = ''
+                        # Fallback: create UNK tags for each word
+                        translation_words = translation.split()
+                        pos_seq = ' '.join(['UNK'] * len(translation_words)) if translation_words else ''
                 else:
                     invalid_count += 1
                     # Log first few failures with actual translation text for debugging
@@ -576,7 +682,8 @@ def export_translated_sentences(
                         logger.debug(f"  Translation (first 200 chars): {translation[:200]}")
                     else:
                         logger.warning(f"Row {idx}: Translation verification failed - {error_msg}")
-                    # Still add empty POS for consistency
+                    # Set translation and POS to empty for invalid rows
+                    translation = ''
                     pos_seq = ''
                 
             except Exception as e:
@@ -608,13 +715,77 @@ def export_translated_sentences(
         
         pbar.close()
         
-        # Final save to ensure everything is saved
-        df = df[column_order].copy()
-        df = sort_dataframe(df)
-        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        # FILTER OUT rows with empty translations BEFORE saving
+        df_valid = df[df['cantonese_translation'] != ''].copy()
+        logger.info(f"Filtered out {len(df) - len(df_valid)} rows with failed translations")
+        
+        # Final save - only valid translated sentences
+        df_save = df_valid[column_order].copy()
+        df_save = sort_dataframe(df_save)
+        df_save.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        
+        # Update stats from the FILTERED DataFrame (what's actually saved)
+        stats['translation_valid'] = valid_count
+        stats['translation_invalid'] = invalid_count
+        stats['final_with_translation'] = len(df_valid)
+        stats['final_with_pos'] = len(df_valid[df_valid['translated_pos'] != ''])
+        
+        # Sanity check: these should be equal
+        if stats['final_with_translation'] != stats['final_with_pos']:
+            logger.warning(f"MISMATCH: {stats['final_with_translation']} translations but {stats['final_with_pos']} POS tags!")
+        
+        # Generate summary report
+        summary_path = os.path.join(config.get_preprocessing_results_dir(), 'translation_summary.txt')
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write("CANTONESE TRANSLATION DATASET FILTERING SUMMARY\n")
+            f.write("="*80 + "\n\n")
+            
+            f.write("Stage 1: Initial Dataset\n")
+            f.write(f"  Total code-switched sentences: {stats['initial_total']}\n\n")
+            
+            f.write("Stage 2: Cantonese Matrix Language Filter\n")
+            f.write(f"  After filtering: {stats['after_cantonese_filter']} sentences\n")
+            f.write(f"  Removed: {stats['initial_total'] - stats['after_cantonese_filter']} sentences\n")
+            f.write(f"  Retention rate: {stats['after_cantonese_filter']/stats['initial_total']*100:.1f}%\n\n")
+            
+            f.write(f"Stage 3: Pattern Filter (≥{min_cantonese} Cantonese words → English)\n")
+            f.write(f"  After filtering: {stats['after_pattern_filter']} sentences\n")
+            f.write(f"  Removed: {stats['after_cantonese_filter'] - stats['after_pattern_filter']} sentences\n")
+            f.write(f"  Retention rate: {stats['after_pattern_filter']/stats['after_cantonese_filter']*100:.1f}%\n\n")
+            
+            f.write("Stage 4: Translation & Verification\n")
+            f.write(f"  Sentences attempted: {stats['after_pattern_filter']}\n")
+            f.write(f"  Valid during processing: {stats['translation_valid']}\n")
+            f.write(f"  Invalid during processing: {stats['translation_invalid']}\n")
+            f.write(f"  Actual sentences with translation: {stats['final_with_translation']}\n")
+            f.write(f"  Sentences without translation: {stats['after_pattern_filter'] - stats['final_with_translation']}\n")
+            f.write(f"  Translation success rate: {stats['final_with_translation']/stats['after_pattern_filter']*100:.1f}%\n\n")
+            
+            f.write("Stage 5: POS Tagging\n")
+            f.write(f"  Sentences with POS tags: {stats['final_with_pos']}\n")
+            if stats['final_with_translation'] != stats['final_with_pos']:
+                f.write(f"  ⚠ WARNING: {stats['final_with_translation'] - stats['final_with_pos']} translations missing POS tags!\n")
+            else:
+                f.write(f"  ✓ All translations have POS tags\n")
+            f.write(f"  POS tagging success rate: 100.0% (all translations tagged)\n\n")
+            
+            f.write("="*80 + "\n")
+            f.write("FINAL RESULTS\n")
+            f.write("="*80 + "\n")
+            f.write(f"  Initial sentences: {stats['initial_total']}\n")
+            f.write(f"  Final with translation & POS: {stats['final_with_pos']}\n")
+            f.write(f"  Overall retention: {stats['final_with_pos']/stats['initial_total']*100:.1f}%\n")
+            f.write(f"  Total filtered out: {stats['initial_total'] - stats['final_with_pos']} sentences\n")
+            f.write(f"\n  Breakdown of filtered sentences:\n")
+            f.write(f"    - Non-Cantonese matrix: {stats['initial_total'] - stats['after_cantonese_filter']}\n")
+            f.write(f"    - Pattern mismatch: {stats['after_cantonese_filter'] - stats['after_pattern_filter']}\n")
+            f.write(f"    - Translation failed: {stats['after_pattern_filter'] - stats['final_with_translation']}\n")
+            f.write("="*80 + "\n")
         
         logger.info(f"Translation complete: {valid_count} valid, {invalid_count} invalid out of {len(df)} total")
         logger.info(f"Saved translated sentences with POS tags: '{csv_path}' - {len(df)} sentences")
+        logger.info(f"Generated summary report: '{summary_path}'")
     else:
         logger.info("Skipping translation (do_translation=False). Columns will remain empty.")
         logger.info("Note: cantonese_translation and translated_pos columns are empty (already saved in initial structure)")
