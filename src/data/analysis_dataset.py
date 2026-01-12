@@ -144,44 +144,91 @@ def create_analysis_dataset(config, translated_df: pd.DataFrame, monolingual_df:
     window_key = f'window_{window_size}'
     if window_key not in window_results:
         logger.error(f"No results for window size {window_size}")
-        return pd.DataFrame(columns=['translated_cs', 'matched_mono', 'context', 'surprisal', 'switch_index'])
+        return pd.DataFrame()
     
     detailed_matches = window_results[window_key]['detailed_matches']
     
-    # Build analysis dataset: one row per code-switched sentence with top-1 match
-    analysis_rows = []
-    matched_cs_translations = set()  # Track which sentences have been matched
+    # Build analysis dataset: one row per code-switched sentence with best match
+    # Group matches by CS sentence to collect statistics
+    sentence_data = {}
     
     for match in detailed_matches:
         cs_translation = match['cs_translation']
         
-        # Only keep first match for each code-switched sentence (rank 1)
-        if match['rank'] == 1 and cs_translation not in matched_cs_translations:
-            matched_cs_translations.add(cs_translation)
-            
+        if cs_translation not in sentence_data:
+            # Initialize with CS sentence data and match counts
+            sentence_data[cs_translation] = {
+                'cs_sentence': match['cs_sentence'],
+                'cs_translation': cs_translation,
+                'cs_pattern': match['cs_pattern'],
+                'cs_group': match['cs_group'],
+                'cs_participant': match['cs_participant'],
+                'cs_start_time': match['cs_start_time'],
+                'switch_index': match['switch_index'],
+                'pos_window': match['pos_window'],
+                'best_match': None,
+                'all_matches': []
+            }
+        
+        # Collect all matches for statistics
+        sentence_data[cs_translation]['all_matches'].append(match)
+        
+        # Store best match (rank 1)
+        if match['rank'] == 1:
+            sentence_data[cs_translation]['best_match'] = match
+    
+    # Build analysis rows with statistics
+    analysis_rows = []
+    sentences_without_matches = 0
+    
+    for cs_translation, data in sentence_data.items():
+        best_match = data['best_match']
+        all_matches = data['all_matches']
+        
+        # Calculate statistics
+        total_matches_above_threshold = len(all_matches)
+        matches_same_group = sum(1 for m in all_matches if m['same_group'])
+        matches_same_speaker = sum(1 for m in all_matches if m['same_speaker'])
+        
+        # Only include sentences that have at least one match
+        if best_match:
             analysis_rows.append({
-                'translated_cs': cs_translation,
-                'matched_mono': match['matched_sentence'],
-                'context': '',  # Placeholder
-                'surprisal': '',  # Placeholder
-                'switch_index': match['switch_index']
+                # Code-switched sentence info
+                'cs_sentence': data['cs_sentence'],
+                'cs_translation': cs_translation,
+                'cs_pattern': data['cs_pattern'],
+                'cs_group': data['cs_group'],
+                'cs_participant': data['cs_participant'],
+                'cs_start_time': data['cs_start_time'],
+                'switch_index': data['switch_index'],
+                'pos_window': data['pos_window'],
+                
+                # Best matched monolingual sentence info
+                'matched_mono': best_match['matched_sentence'],
+                'matched_group': best_match['matched_group'],
+                'matched_participant': best_match['matched_participant'],
+                'matched_start_time': best_match['matched_start_time'],
+                'matched_pos': best_match['matched_pos'],
+                'similarity': best_match['similarity'],
+                
+                # Match statistics
+                'total_matches_above_threshold': total_matches_above_threshold,
+                'matches_same_group': matches_same_group,
+                'matches_same_speaker': matches_same_speaker,
+                'selected_match_time_distance_sec': best_match['time_distance'] / 1000.0,  # Convert ms to seconds
+                'same_group': best_match['same_group'],
+                'same_speaker': best_match['same_speaker']
             })
     
-    # Add sentences that had no matches
+    # Count sentences without matches
     for sent in filtered_sentences:
         cs_translation = sent.get('cantonese_translation', '')
-        if cs_translation not in matched_cs_translations:
-            analysis_rows.append({
-                'translated_cs': cs_translation,
-                'matched_mono': '',  # No match found
-                'context': '',
-                'surprisal': '',
-                'switch_index': sent.get('switch_index', -1)
-            })
+        if cs_translation not in sentence_data:
+            sentences_without_matches += 1
     
-    logger.info(f"Created analysis dataset with {len(analysis_rows)} rows")
-    logger.info(f"  - Sentences with matches: {len(matched_cs_translations)}")
-    logger.info(f"  - Sentences without matches: {len(analysis_rows) - len(matched_cs_translations)}")
+    logger.info(f"Created analysis dataset with {len(analysis_rows)} rows (sentences with matches)")
+    logger.info(f"  - Sentences with matches: {len(analysis_rows)}")
+    logger.info(f"  - Sentences without matches (excluded): {sentences_without_matches}")
     
     # Create DataFrame
     analysis_df = pd.DataFrame(analysis_rows)

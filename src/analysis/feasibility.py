@@ -867,18 +867,42 @@ def generate_window_matching_report(
         detailed = results['detailed_matches']
         
         if detailed:
-            same_group = sum(1 for m in detailed if m['same_group'])
-            same_speaker = sum(1 for m in detailed if m['same_speaker'])
-            total = len(detailed)
+            # Get only rank-1 (selected) matches for statistics
+            selected_matches = [m for m in detailed if m['rank'] == 1]
             
-            report_lines.append(f"Window Size n={n}:")
-            report_lines.append(f"  Matches from same group:   {same_group}/{total} ({same_group/total*100:.1f}%)")
-            report_lines.append(f"  Matches from same speaker: {same_speaker}/{total} ({same_speaker/total*100:.1f}%)")
-            
-            # Calculate average time distance
-            avg_time_dist = sum(m['time_distance'] for m in detailed) / total
-            report_lines.append(f"  Average time distance:     {avg_time_dist:.2f} seconds")
-            report_lines.append("")
+            if selected_matches:
+                same_group = sum(1 for m in selected_matches if m['same_group'])
+                same_speaker = sum(1 for m in selected_matches if m['same_speaker'])
+                total = len(selected_matches)
+                
+                report_lines.append(f"Window Size n={n}:")
+                report_lines.append(f"  Selected matches (best per sentence): {total}")
+                report_lines.append(f"  Matches from same group:   {same_group}/{total} ({same_group/total*100:.1f}%)")
+                report_lines.append(f"  Matches from same speaker: {same_speaker}/{total} ({same_speaker/total*100:.1f}%)")
+                
+                # Calculate average time distance (convert ms to seconds)
+                avg_time_dist = sum(m['time_distance'] for m in selected_matches) / total / 1000.0
+                report_lines.append(f"  Average time distance:     {avg_time_dist:.2f} seconds")
+                
+                # Calculate average matches per sentence (all matches above threshold)
+                # Group by sentence to count matches
+                sentence_match_counts = {}
+                for m in detailed:
+                    key = m['cs_translation']
+                    sentence_match_counts[key] = sentence_match_counts.get(key, 0) + 1
+                
+                avg_matches_per_sent = sum(sentence_match_counts.values()) / len(sentence_match_counts) if sentence_match_counts else 0
+                report_lines.append(f"  Avg matches above threshold per sentence: {avg_matches_per_sent:.2f}")
+                
+                # Quartiles of time distance
+                time_distances = [m['time_distance'] / 1000.0 for m in selected_matches]  # Convert to seconds
+                if time_distances:
+                    report_lines.append(f"  Time distance quartiles:")
+                    report_lines.append(f"    25th percentile: {pd.Series(time_distances).quantile(0.25):.2f}s")
+                    report_lines.append(f"    Median:          {pd.Series(time_distances).quantile(0.50):.2f}s")
+                    report_lines.append(f"    75th percentile: {pd.Series(time_distances).quantile(0.75):.2f}s")
+                
+                report_lines.append("")
     
     # Section 4: Example Matches
     report_lines.append("4. EXAMPLE MATCHES (Top 3-5 Sentences with Best Average Similarity)")

@@ -143,10 +143,11 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
         figures_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save analysis dataset
+        # Save unified analysis dataset (includes all CS sentence info, matched mono info, and statistics)
         analysis_csv_path = output_dir / "analysis_dataset.csv"
         analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
-        logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
+        logger.info(f"Saved unified analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
+        logger.info(f"  Columns: {', '.join(analysis_df.columns.tolist())}")
         
         # Generate and save similarity distribution plot
         logger.info("\nGenerating similarity distribution plots...")
@@ -156,37 +157,18 @@ def main():
         logger.info("\nGenerating window matching report...")
         window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
         
-        # Save window matching results
+        # Log summary of excluded sentences
         window_key = f'window_{window_size}'
         if window_key in window_results:
             results = window_results[window_key]
+            total_cs_sentences = results['total_sentences']
+            sentences_with_matches = results['sentences_with_matches']
+            sentences_excluded = total_cs_sentences - sentences_with_matches
             
-            # Save summary CSV
-            summary_data = [{
-                'window_size': results['window_size'],
-                'total_sentences': results['total_sentences'],
-                'sentences_with_matches': results['sentences_with_matches'],
-                'match_rate': results['match_rate'],
-                'total_matches': results['total_matches'],
-                'avg_matches_per_sentence': results['avg_matches_per_sentence'],
-                'avg_similarity': results['avg_similarity'],
-                'similarity_min': min(results['similarity_scores']) if results['similarity_scores'] else 0.0,
-                'similarity_max': max(results['similarity_scores']) if results['similarity_scores'] else 0.0,
-                'similarity_median': pd.Series(results['similarity_scores']).median() if results['similarity_scores'] else 0.0
-            }]
-            
-            summary_df = pd.DataFrame(summary_data)
-            summary_csv = output_dir / "window_matching_summary.csv"
-            summary_df.to_csv(summary_csv, index=False, encoding='utf-8-sig')
-            logger.info(f"Saved window matching summary: {summary_csv}")
-            
-            # Save detailed CSV
-            detailed_data = results['detailed_matches']
-            if detailed_data:
-                detailed_df = pd.DataFrame(detailed_data)
-                detailed_csv = output_dir / "window_matching_detailed.csv"
-                detailed_df.to_csv(detailed_csv, index=False, encoding='utf-8-sig')
-                logger.info(f"Saved window matching details: {detailed_csv} ({len(detailed_df)} matches)")
+            logger.info(f"\nDataset composition:")
+            logger.info(f"  Total code-switched sentences analyzed: {total_cs_sentences}")
+            logger.info(f"  Sentences with matches (included in CSV): {sentences_with_matches}")
+            logger.info(f"  Sentences without matches (excluded): {sentences_excluded}")
             
             # Save window matching report
             window_report_path = output_dir / "window_matching_report.txt"

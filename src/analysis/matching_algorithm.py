@@ -378,7 +378,7 @@ def rank_matches_by_context(
         """
         Create composite sort key for match ranking.
         
-        Returns tuple of (same_group_priority, same_speaker_priority, time_distance)
+        Returns tuple of (same_speaker_priority, same_group_priority, time_distance)
         where lower values are better (sorted ascending).
         """
         match_sent = match.get('match_sentence', {})
@@ -386,16 +386,16 @@ def rank_matches_by_context(
         match_speaker = match_sent.get('participant_id', '')
         match_time = match_sent.get('start_time', 0.0)
         
-        # Priority 1: Same group (0 if same, 1 if different)
-        same_group_priority = 0 if match_group == source_group else 1
-        
-        # Priority 2: Same speaker (0 if same, 1 if different)
+        # Priority 1: Same speaker (0 if same, 1 if different)
         same_speaker_priority = 0 if match_speaker == source_speaker else 1
+        
+        # Priority 2: Same group (0 if same, 1 if different)
+        same_group_priority = 0 if match_group == source_group else 1
         
         # Priority 3: Time proximity (smaller difference is better)
         time_distance = abs(match_time - source_time)
         
-        return (same_group_priority, same_speaker_priority, time_distance)
+        return (same_speaker_priority, same_group_priority, time_distance)
     
     # Sort by the composite key
     ranked_matches = sorted(matches, key=sort_key)
