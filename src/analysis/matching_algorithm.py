@@ -497,13 +497,20 @@ def find_window_matches(
         
         # Keep if above threshold
         if best_similarity >= similarity_threshold:
+            # Calculate actual center of matched window
+            # For normal window: center = start + window_size
+            # For short sentences: center = middle of the actual sentence
+            matched_window_length = len(best_window)
+            matched_center_idx = best_start_idx + (matched_window_length // 2)
+            
             matches.append({
                 'match_sentence': mono_sent,
                 'similarity': best_similarity,
                 'window_size': window_size,
                 'pos_window': ' '.join(pos_window),
                 'matched_pos': ' '.join(best_window),
-                'matched_window_start': best_start_idx
+                'matched_window_start': best_start_idx,
+                'matched_window_center': matched_center_idx  # Actual center of matched window
             })
     
     return matches
@@ -576,10 +583,17 @@ def analyze_window_matching(
             if matches:
                 sentences_with_matches += 1
                 
+                # Calculate stats from ALL matches (before truncation)
+                total_matches_count = len(matches)
+                all_matches_same_group = sum(1 for m in matches 
+                                            if m['match_sentence'].get('group', '') == cs_sent.get('group', ''))
+                all_matches_same_speaker = sum(1 for m in matches 
+                                              if m['match_sentence'].get('participant_id', '') == cs_sent.get('participant_id', ''))
+                
                 # Rank matches by context
                 ranked_matches = rank_matches_by_context(matches, cs_sent)
                 
-                # Keep only top-k matches
+                # Keep only top-k matches for storage
                 top_matches = ranked_matches[:top_k]
                 
                 # Collect similarity scores for distribution analysis
@@ -600,12 +614,18 @@ def analyze_window_matching(
                         'pos_window': match['pos_window'],
                         'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
                         'matched_pos': match['matched_pos'],
+                        'matched_window_start': match['matched_window_start'],
+                        'matched_switch_index': match['matched_window_center'],  # Use actual center instead of start + window_size
                         'matched_group': match['match_sentence'].get('group', ''),
                         'matched_participant': match['match_sentence'].get('participant_id', ''),
                         'matched_start_time': match['match_sentence'].get('start_time', 0.0),
                         'same_group': cs_sent.get('group', '') == match['match_sentence'].get('group', ''),
                         'same_speaker': cs_sent.get('participant_id', '') == match['match_sentence'].get('participant_id', ''),
-                        'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0))
+                        'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0)),
+                        # Statistics from ALL matches (not just top-k)
+                        'total_matches_above_threshold': total_matches_count,
+                        'all_matches_same_group': all_matches_same_group,
+                        'all_matches_same_speaker': all_matches_same_speaker
                     }
                     detailed_matches.append(detailed_match)
         

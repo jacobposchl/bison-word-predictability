@@ -137,7 +137,7 @@ def create_analysis_dataset(config, translated_df: pd.DataFrame, monolingual_df:
         monolingual_sentences=monolingual_sentences,
         window_sizes=[window_size],  # Use single window size from config
         similarity_threshold=similarity_threshold,
-        top_k=1  # We only need top-1 match
+        top_k=5  # Get top 5 matches to calculate proper statistics
     )
     
     # Extract results
@@ -185,11 +185,6 @@ def create_analysis_dataset(config, translated_df: pd.DataFrame, monolingual_df:
         best_match = data['best_match']
         all_matches = data['all_matches']
         
-        # Calculate statistics
-        total_matches_above_threshold = len(all_matches)
-        matches_same_group = sum(1 for m in all_matches if m['same_group'])
-        matches_same_speaker = sum(1 for m in all_matches if m['same_speaker'])
-        
         # Only include sentences that have at least one match
         if best_match:
             analysis_rows.append({
@@ -209,12 +204,13 @@ def create_analysis_dataset(config, translated_df: pd.DataFrame, monolingual_df:
                 'matched_participant': best_match['matched_participant'],
                 'matched_start_time': best_match['matched_start_time'],
                 'matched_pos': best_match['matched_pos'],
+                'matched_switch_index': best_match['matched_switch_index'],  # Center of matched POS window
                 'similarity': best_match['similarity'],
                 
-                # Match statistics
-                'total_matches_above_threshold': total_matches_above_threshold,
-                'matches_same_group': matches_same_group,
-                'matches_same_speaker': matches_same_speaker,
+                # Match statistics (from ALL matches, not just those in all_matches list)
+                'total_matches_above_threshold': best_match.get('total_matches_above_threshold', len(all_matches)),
+                'matches_same_group': best_match.get('all_matches_same_group', sum(1 for m in all_matches if m['same_group'])),
+                'matches_same_speaker': best_match.get('all_matches_same_speaker', sum(1 for m in all_matches if m['same_speaker'])),
                 'selected_match_time_distance_sec': best_match['time_distance'] / 1000.0,  # Convert ms to seconds
                 'same_group': best_match['same_group'],
                 'same_speaker': best_match['same_speaker']

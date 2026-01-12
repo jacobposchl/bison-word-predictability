@@ -41,6 +41,29 @@ analysis:
   # Minimum Levenshtein similarity threshold for matches (0-1)
   similarity_threshold: 0.4
 
+# Experiment settings
+experiment:
+  # HuggingFace model for masked LM surprisal calculation
+  # Default: hon9kon9ize/bert-large-cantonese (Cantonese BERT)
+  masked_model: "hon9kon9ize/bert-large-cantonese"
+  
+  # HuggingFace model for autoregressive LM surprisal calculation
+  # Options: uer/gpt2-chinese-cluecorpussmall (small), hon9kon9ize/CantoneseLLMChat-v1.0-7B (large)
+  autoregressive_model: "hon9kon9ize/CantoneseLLMChat-v1.0-7B"
+  
+  # Use 4-bit quantization for autoregressive model (saves memory for large models)
+  # Set to true for 7B+ models, false for small models
+  use_4bit_quantization: true
+  
+  # Device to use for surprisal calculation
+  device: "cuda"
+  
+  # Output subdirectory for main experiment results
+  output_subdir: "main_experiment"
+  
+  # Statistical testing alpha level
+  alpha: 0.05
+
 # Output settings
 output:
   # Base directory for all results

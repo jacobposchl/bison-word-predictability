@@ -515,15 +515,19 @@ def export_translated_sentences(
     
     # Calculate switch_index for each sentence (index where English starts)
     def get_switch_index(pattern: str) -> int:
-        """Extract the index where the first English word appears."""
+        """Extract the index of the last Cantonese word before the first English word.
+        
+        For pattern C18-E1, returns 17 (the last Cantonese word, 0-based indexing).
+        This is the word immediately before the switch point.
+        """
         try:
             segments = parse_pattern_segments(pattern)
             if len(segments) < 2:
                 return -1
             first_lang, first_count = segments[0]
-            if first_lang == 'C':
-                return first_count  # Index where English starts (0-based)
-            return 0  # English starts at beginning
+            if first_lang == 'C' and first_count > 0:
+                return first_count - 1  # Last Cantonese word (0-based, so count-1)
+            return -1  # English starts at beginning, no Cantonese word before switch
         except Exception:
             return -1
     

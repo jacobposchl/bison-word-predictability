@@ -1,413 +1,327 @@
 """
-Main experiment script for code-switching surprisal analysis.
+Main Experiment: Surprisal Comparison Analysis
 
-This script runs the complete Calvillo-inspired methodology:
-1. Load code-switched sentences and monolingual baselines
-2. Translate code-switched sentences to full Cantonese
-3. Find matching monolingual sentences for each code-switched sentence
-4. Calculate surprisal at switch positions (translated sentences)
-5. Calculate surprisal at matched positions (monolingual baselines)
-6. Compare surprisal values
-7. Generate results and visualizations
+This script compares surprisal values at code-switch points between:
+1. Code-switched sentences (translated to full Cantonese)
+2. Matched monolingual Cantonese baseline sentences
+
+The hypothesis is that surprisal at switch points in CS translations
+may differ systematically from comparable positions in monolingual speech.
+
+Usage:
+    python scripts/main_experiment/run_surprisal_experiment.py --model masked [--sample-size N]
+    python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive [--sample-size N]
+    
+    Required arguments:
+        --model: Type of model - "masked" for BERT-style or "autoregressive" for GPT-style
+        
+    Optional arguments:
+        --dataset: Path to analysis dataset CSV (default: results/analysis_dataset.csv)
+        --sample-size: Number of sentences to process (default: all)
 """
 
-import argparse
-import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy import stats
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+import argparse
+import pandas as pd
+import torch
+from datetime import datetime
+
 from src.core.config import Config
-from src.experiments.translation import CodeSwitchTranslator
-from src.experiments.surprisal_calculator import CantoneseSuprisalCalculator
-from src.analysis.matching_algorithm import find_matches, precompute_monolingual_pos_sequences
-from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence
-from src.data.data_loading import load_code_switched_sentences, load_monolingual_sentences
-from src.core.tokenization import segment_cantonese_sentence
-from src.analysis.pattern_analysis import find_switch_positions
+from src.experiments.surprisal_calculator import create_surprisal_calculator
+from src.experiments.surprisal_analysis import (
+    calculate_surprisal_for_dataset,
+    compute_statistics,
+    print_statistics_summary
+)
+from src.experiments.visualization import (
+    plot_surprisal_distributions,
+    plot_scatter_comparison,
+    plot_difference_histogram,
+    plot_summary_statistics
+)
 
-logger = logging.getLogger(__name__)
 
-
-def setup_logging(verbose: bool = False):
-    """Configure logging."""
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run surprisal comparison experiment for code-switching analysis"
     )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="results/exploratory/analysis_dataset.csv",
+        help="Path to analysis dataset CSV (default: results/exploratory/analysis_dataset.csv)"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        choices=['masked', 'autoregressive'],
+        help='Type of model - "masked" for BERT-style or "autoregressive" for GPT-style'
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=None,
+        help="Number of sentences to process (default: all)"
+    )
+    
+    return parser.parse_args()
 
 
-def run_experiment(
-    code_switched_df: pd.DataFrame,
-    monolingual_dict: Dict[str, pd.DataFrame],
-    translator: CodeSwitchTranslator,
-    surprisal_calc: CantoneseSuprisalCalculator,
-    output_dir: Path,
-    sample_size: int = None,
-    similarity_threshold: float = 0.4
-) -> pd.DataFrame:
+def load_analysis_dataset(dataset_path: str) -> pd.DataFrame:
     """
-    Run the full surprisal experiment.
+    Load the pre-computed analysis dataset with matched sentences.
     
     Args:
-        code_switched_df: DataFrame with code-switched sentences
-        monolingual_dict: Dictionary with monolingual sentences
-        translator: Translator instance
-        surprisal_calc: Surprisal calculator instance
-        output_dir: Output directory for results
-        sample_size: Optional sample size (None = use all)
-        similarity_threshold: Minimum similarity for matching
+        dataset_path: Path to the analysis dataset CSV
         
     Returns:
-        DataFrame with experimental results
-    """
-    logger.info("="*80)
-    logger.info("RUNNING SURPRISAL EXPERIMENT")
-    logger.info("="*80)
-    
-    # Sample if requested
-    if sample_size and sample_size < len(code_switched_df):
-        logger.info(f"Sampling {sample_size} sentences from {len(code_switched_df)}")
-        code_switched_df = code_switched_df.sample(n=sample_size, random_state=42)
-    else:
-        logger.info(f"Processing all {len(code_switched_df)} code-switched sentences")
-    
-    # Precompute POS sequences for monolingual sentences
-    logger.info("\nPrecomputing POS sequences for monolingual sentences...")
-    monolingual_dicts = {
-        'cantonese': monolingual_dict['cantonese'].to_dict('records'),
-        'english': monolingual_dict['english'].to_dict('records')
-    }
-    monolingual_dicts = precompute_monolingual_pos_sequences(monolingual_dicts)
-    
-    results = []
-    
-    logger.info("\nProcessing code-switched sentences...")
-    for idx, row in tqdm(code_switched_df.iterrows(), total=len(code_switched_df), desc="Analyzing"):
-        try:
-            # Get sentence info
-            sentence = row['reconstructed_sentence']
-            pattern = row['pattern']
-            
-            # Segment the code-switched sentence
-            words = segment_cantonese_sentence(sentence)
-            
-            # Translate to full Cantonese
-            translation_result = translator.translate_code_switched_sentence(
-                sentence=sentence,
-                pattern=pattern,
-                words=words
-            )
-            translated_sentence = translation_result['translated_sentence']
-            
-            # Segment translated sentence
-            translated_words = segment_cantonese_sentence(translated_sentence)
-            
-            # Find switch positions
-            switch_positions = find_switch_positions(pattern)
-            
-            # Find matching monolingual sentences
-            cs_sentence_dict = row.to_dict()
-            matches = find_matches(
-                cs_sentence_dict,
-                monolingual_dicts,
-                similarity_threshold=similarity_threshold
-            )
-            
-            if not matches:
-                logger.debug(f"No matches found for sentence: {sentence}")
-                continue
-            
-            # For each switch position
-            for switch_pos in switch_positions:
-                if switch_pos >= len(translated_words):
-                    logger.debug(f"Switch position {switch_pos} out of range for translated sentence")
-                    continue
-                
-                # Calculate surprisal at switch position in translated sentence
-                try:
-                    cs_surprisal_result = surprisal_calc.calculate_surprisal(
-                        sentence=translated_sentence,
-                        word_index=switch_pos,
-                        words=translated_words
-                    )
-                    cs_surprisal = cs_surprisal_result['surprisal']
-                except Exception as e:
-                    logger.debug(f"Error calculating CS surprisal: {e}")
-                    continue
-                
-                # Calculate surprisal at matched positions in monolingual sentences
-                mono_surprisals = []
-                for match in matches[:5]:  # Use top 5 matches
-                    try:
-                        mono_sentence = match['monolingual_sentence']['reconstructed_sentence']
-                        mono_words = segment_cantonese_sentence(mono_sentence)
-                        
-                        # Use the same relative position
-                        mono_pos = min(switch_pos, len(mono_words) - 1)
-                        
-                        mono_surprisal_result = surprisal_calc.calculate_surprisal(
-                            sentence=mono_sentence,
-                            word_index=mono_pos,
-                            words=mono_words
-                        )
-                        mono_surprisals.append(mono_surprisal_result['surprisal'])
-                    except Exception as e:
-                        logger.debug(f"Error calculating mono surprisal: {e}")
-                        continue
-                
-                if not mono_surprisals:
-                    continue
-                
-                # Store result
-                results.append({
-                    'sentence_id': idx,
-                    'original_sentence': sentence,
-                    'translated_sentence': translated_sentence,
-                    'pattern': pattern,
-                    'switch_position': switch_pos,
-                    'cs_surprisal': cs_surprisal,
-                    'mono_surprisal_mean': np.mean(mono_surprisals),
-                    'mono_surprisal_std': np.std(mono_surprisals),
-                    'surprisal_difference': cs_surprisal - np.mean(mono_surprisals),
-                    'num_matches': len(matches),
-                    'group': row.get('group', ''),
-                    'participant_id': row.get('participant_id', '')
-                })
+        DataFrame with CS sentences, translations, and matched mono sentences
         
-        except Exception as e:
-            logger.error(f"Error processing sentence {idx}: {e}")
-            continue
-    
-    # Convert to DataFrame
-    results_df = pd.DataFrame(results)
-    
-    logger.info(f"\nCompleted analysis of {len(results_df)} switch positions")
-    
-    # Save results
-    output_dir.mkdir(parents=True, exist_ok=True)
-    results_path = output_dir / "surprisal_results.csv"
-    results_df.to_csv(results_path, index=False)
-    logger.info(f"Results saved to {results_path}")
-    
-    return results_df
-
-
-def analyze_results(results_df: pd.DataFrame, output_dir: Path):
+    Raises:
+        FileNotFoundError: If analysis dataset doesn't exist
     """
-    Analyze and visualize results.
+    dataset_path = Path(dataset_path)
+    
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            f"Analysis dataset not found: {dataset_path}\n"
+            f"Please run scripts/exploratory/exploratory_analysis.py first!"
+        )
+    
+    print(f"Loading analysis dataset from {dataset_path}")
+    df = pd.read_csv(dataset_path)
+    print(f"Loaded {len(df)} comparisons from dataset")
+    
+    # Verify required columns exist
+    required_columns = [
+        'cs_translation', 'matched_mono',
+        'switch_index', 'matched_switch_index'
+    ]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        raise ValueError(
+            f"Analysis dataset is missing required columns: {missing_columns}\n"
+            f"Available columns: {list(df.columns)}"
+        )
+    
+    return df
+
+
+def initialize_surprisal_calculator(
+    model_type: str,
+    config: Config
+):
+    """
+    Initialize the surprisal calculator with specified model type.
     
     Args:
-        results_df: DataFrame with experimental results
-        output_dir: Output directory
+        model_type: Type of model - "masked" or "autoregressive"
+        config: Configuration object for device settings
+        
+    Returns:
+        Initialized surprisal calculator
     """
-    logger.info("\n" + "="*80)
-    logger.info("STATISTICAL ANALYSIS")
-    logger.info("="*80)
+    # Get device from config
+    device = config.get('experiment.device', 'auto')
     
-    # Basic statistics
-    logger.info(f"\nTotal switch positions analyzed: {len(results_df)}")
-    logger.info(f"Mean CS surprisal: {results_df['cs_surprisal'].mean():.4f}")
-    logger.info(f"Mean mono surprisal: {results_df['mono_surprisal_mean'].mean():.4f}")
-    logger.info(f"Mean difference: {results_df['surprisal_difference'].mean():.4f}")
+    print(f"\nInitializing {model_type} surprisal calculator:")
+    print(f"  Device: {device}")
     
-    # Paired t-test
-    t_stat, p_value = stats.ttest_rel(
-        results_df['cs_surprisal'],
-        results_df['mono_surprisal_mean']
+    # Auto-detect CUDA availability
+    if device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"  Auto-detected device: {device}")
+    
+    calculator = create_surprisal_calculator(
+        model_type=model_type,
+        config=config,
+        device=device
     )
-    logger.info(f"\nPaired t-test:")
-    logger.info(f"  t-statistic: {t_stat:.4f}")
-    logger.info(f"  p-value: {p_value:.6f}")
     
-    # Effect size (Cohen's d)
-    diff = results_df['cs_surprisal'] - results_df['mono_surprisal_mean']
-    cohens_d = diff.mean() / diff.std()
-    logger.info(f"  Cohen's d: {cohens_d:.4f}")
+    print(f"  Model loaded successfully")
     
-    # Create visualizations
-    logger.info("\nGenerating visualizations...")
+    return calculator
+
+
+def setup_output_directories(config: Config, model_type: str) -> tuple:
+    """
+    Create output directories for results and figures.
     
-    # 1. Distribution comparison
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    Args:
+        config: Configuration object
+        model_type: Type of model - "masked" or "autoregressive"
+        
+    Returns:
+        Tuple of (results_dir, figures_dir) as Path objects
+    """
+    results_base = Path(config.get_results_dir())
+    base_dir = results_base / f"main_experiment_{model_type}"
     
-    axes[0].hist(results_df['cs_surprisal'], bins=30, alpha=0.6, label='Code-switched', color='red')
-    axes[0].hist(results_df['mono_surprisal_mean'], bins=30, alpha=0.6, label='Monolingual', color='blue')
-    axes[0].set_xlabel('Surprisal')
-    axes[0].set_ylabel('Frequency')
-    axes[0].set_title('Surprisal Distribution')
-    axes[0].legend()
+    results_dir = base_dir
+    figures_dir = Path(config.get_figures_dir()) / f"main_experiment_{model_type}"
     
-    # 2. Box plot comparison
-    data_to_plot = [results_df['cs_surprisal'], results_df['mono_surprisal_mean']]
-    axes[1].boxplot(data_to_plot, labels=['Code-switched', 'Monolingual'])
-    axes[1].set_ylabel('Surprisal')
-    axes[1].set_title('Surprisal Comparison')
+    # Create directories
+    results_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
     
-    plt.tight_layout()
-    fig_path = output_dir / 'surprisal_comparison.png'
-    plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-    logger.info(f"Saved: {fig_path}")
-    plt.close()
+    print(f"\nOutput directories:")
+    print(f"  Results: {results_dir}")
+    print(f"  Figures: {figures_dir}")
     
-    # 3. Scatter plot
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(results_df['mono_surprisal_mean'], results_df['cs_surprisal'], alpha=0.5)
-    
-    # Add diagonal line
-    max_val = max(results_df['mono_surprisal_mean'].max(), results_df['cs_surprisal'].max())
-    ax.plot([0, max_val], [0, max_val], 'r--', label='y=x')
-    
-    ax.set_xlabel('Monolingual Surprisal')
-    ax.set_ylabel('Code-switched Surprisal')
-    ax.set_title('Surprisal at Code-switched vs. Matched Positions')
-    ax.legend()
-    
-    fig_path = output_dir / 'surprisal_scatter.png'
-    plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-    logger.info(f"Saved: {fig_path}")
-    plt.close()
-    
-    # Save summary statistics
-    summary_path = output_dir / 'summary_statistics.txt'
-    with open(summary_path, 'w') as f:
-        f.write("SURPRISAL EXPERIMENT SUMMARY\n")
-        f.write("="*80 + "\n\n")
-        f.write(f"Total switch positions analyzed: {len(results_df)}\n\n")
-        f.write("Descriptive Statistics:\n")
-        f.write(f"  Code-switched surprisal:  Mean={results_df['cs_surprisal'].mean():.4f}, SD={results_df['cs_surprisal'].std():.4f}\n")
-        f.write(f"  Monolingual surprisal:    Mean={results_df['mono_surprisal_mean'].mean():.4f}, SD={results_df['mono_surprisal_mean'].std():.4f}\n")
-        f.write(f"  Difference:               Mean={results_df['surprisal_difference'].mean():.4f}, SD={results_df['surprisal_difference'].std():.4f}\n\n")
-        f.write("Paired t-test:\n")
-        f.write(f"  t-statistic: {t_stat:.4f}\n")
-        f.write(f"  p-value: {p_value:.6f}\n")
-        f.write(f"  Cohen's d: {cohens_d:.4f}\n\n")
-        if p_value < 0.05:
-            f.write("Result: Code-switched positions show SIGNIFICANTLY HIGHER surprisal than matched monolingual positions.\n")
-        else:
-            f.write("Result: No significant difference in surprisal between code-switched and monolingual positions.\n")
-    
-    logger.info(f"Saved: {summary_path}")
+    return results_dir, figures_dir
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Run surprisal experiment for code-switching analysis"
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config/config.yaml',
-        help='Path to config file'
-    )
-    parser.add_argument(
-        '--sample-size',
-        type=int,
-        default=None,
-        help='Number of sentences to sample (None = use all)'
-    )
-    parser.add_argument(
-        '--use-fillers',
-        action='store_true',
-        help='Use dataset with fillers included'
-    )
-    parser.add_argument(
-        '--similarity-threshold',
-        type=float,
-        default=0.4,
-        help='Minimum similarity threshold for matching'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        default='results/surprisal_experiment',
-        help='Output directory for results'
-    )
-    parser.add_argument(
-        '--api-key',
-        type=str,
-        required=True,
-        help='OpenAI API key (REQUIRED for translation)'
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
+    """Main experiment execution."""
+    print("="*80)
+    print("SURPRISAL COMPARISON EXPERIMENT")
+    print("Code-Switched Translation vs. Monolingual Baseline")
+    print("="*80)
+    print(f"\nStarted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Load configuration (hardcoded path)
+    config_path = "config/config.yaml"
+    print(f"Loading configuration from {config_path}")
+    config = Config(config_path)
+    
+    # Setup output directories
+    results_dir, figures_dir = setup_output_directories(config, args.model)
+    
+    # Load analysis dataset
+    analysis_df = load_analysis_dataset(args.dataset)
+    
+    # Apply sample size limit if specified
+    if args.sample_size:
+        print(f"\nLimiting to {args.sample_size} sentences (from {len(analysis_df)} total)")
+        # Sample unique CS sentences
+        unique_cs = analysis_df['cs_translation'].unique()
+        sampled_cs = pd.Series(unique_cs).sample(n=min(args.sample_size, len(unique_cs)), random_state=42)
+        analysis_df = analysis_df[analysis_df['cs_translation'].isin(sampled_cs)]
+        print(f"Selected {len(analysis_df)} comparisons")
+    
+    # Initialize surprisal calculator
+    surprisal_calc = initialize_surprisal_calculator(
+        model_type=args.model,
+        config=config
     )
     
-    args = parser.parse_args()
-    setup_logging(args.verbose)
+    # Calculate surprisal values
+    print("\n" + "-"*80)
+    print("CALCULATING SURPRISAL VALUES")
+    print("-"*80)
     
-    logger.info("="*80)
-    logger.info("CODE-SWITCHING SURPRISAL EXPERIMENT")
-    logger.info("="*80)
-    logger.info(f"Config: {args.config}")
-    logger.info(f"Sample size: {args.sample_size or 'ALL'}")
-    logger.info(f"Use fillers: {args.use_fillers}")
-    logger.info(f"Similarity threshold: {args.similarity_threshold}")
-    logger.info(f"Output directory: {args.output_dir}")
-    logger.info("="*80 + "\n")
+    results_df = calculate_surprisal_for_dataset(
+        analysis_df=analysis_df,
+        surprisal_calc=surprisal_calc,
+        show_progress=True
+    )
     
-    try:
-        # Load config
-        config = Config(args.config)
-        output_dir = Path(args.output_dir)
+    # Save detailed results
+    results_csv_path = results_dir / "surprisal_results.csv"
+    results_df.to_csv(results_csv_path, index=False)
+    print(f"\nSaved detailed results to {results_csv_path}")
+    
+    # Compute statistics
+    print("\n" + "-"*80)
+    print("COMPUTING STATISTICS")
+    print("-"*80)
+    
+    stats_dict = compute_statistics(results_df)
+    print_statistics_summary(stats_dict)
+    
+    # Save statistics to file
+    stats_txt_path = results_dir / "statistics_summary.txt"
+    with open(stats_txt_path, 'w', encoding='utf-8') as f:
+        f.write("="*80 + "\n")
+        f.write("SURPRISAL COMPARISON STATISTICS\n")
+        f.write("="*80 + "\n\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Model type: {args.model}\n\n")
         
-        # Load data
-        logger.info("Step 1: Loading data...")
-        code_switched_df = load_code_switched_sentences(config, args.use_fillers)
-        monolingual_dict = load_monolingual_sentences(config)
+        f.write(f"Sample Size:\n")
+        f.write(f"  Total comparisons: {stats_dict['n_total']}\n")
+        f.write(f"  Valid calculations: {stats_dict['n_valid']}\n")
+        f.write(f"  Success rate: {stats_dict['success_rate']:.1%}\n\n")
         
-        # Initialize translator and surprisal calculator
-        logger.info("\nStep 2: Initializing models...")
-        translator = CodeSwitchTranslator(
-            api_key=args.api_key,
-            model=config.get_translation_model(),
-            use_cache=config.get_translation_use_cache(),
-            cache_dir=config.get_translation_cache_dir(),
-            temperature=config.get_translation_temperature(),
-            max_tokens=config.get_translation_max_tokens()
-        )
-        surprisal_calc = CantoneseSuprisalCalculator()
+        f.write(f"Code-Switched Translation Surprisal:\n")
+        f.write(f"  Mean:   {stats_dict['cs_surprisal_mean']:.4f}\n")
+        f.write(f"  Median: {stats_dict['cs_surprisal_median']:.4f}\n")
+        f.write(f"  Std:    {stats_dict['cs_surprisal_std']:.4f}\n\n")
         
-        # Run experiment
-        logger.info("\nStep 3: Running experiment...")
-        results_df = run_experiment(
-            code_switched_df=code_switched_df,
-            monolingual_dict=monolingual_dict,
-            translator=translator,
-            surprisal_calc=surprisal_calc,
-            output_dir=output_dir,
-            sample_size=args.sample_size,
-            similarity_threshold=args.similarity_threshold
-        )
+        f.write(f"Monolingual Baseline Surprisal:\n")
+        f.write(f"  Mean:   {stats_dict['mono_surprisal_mean']:.4f}\n")
+        f.write(f"  Median: {stats_dict['mono_surprisal_median']:.4f}\n")
+        f.write(f"  Std:    {stats_dict['mono_surprisal_std']:.4f}\n\n")
         
-        # Analyze results
-        logger.info("\nStep 4: Analyzing results...")
-        analyze_results(results_df, output_dir)
+        f.write(f"Difference (CS - Monolingual):\n")
+        f.write(f"  Mean:   {stats_dict['difference_mean']:.4f}\n")
+        f.write(f"  Median: {stats_dict['difference_median']:.4f}\n")
+        f.write(f"  Std:    {stats_dict['difference_std']:.4f}\n\n")
         
-        logger.info("\n" + "="*80)
-        logger.info("EXPERIMENT COMPLETE!")
-        logger.info("="*80)
-        logger.info(f"Results saved to: {output_dir}")
+        f.write(f"Paired t-test:\n")
+        f.write(f"  t-statistic: {stats_dict['ttest_statistic']:.4f}\n")
+        f.write(f"  p-value:     {stats_dict['ttest_pvalue']:.6f}\n\n")
         
-    except Exception as e:
-        logger.exception(f"Error running experiment: {e}")
-        sys.exit(1)
+        f.write(f"Effect Size:\n")
+        f.write(f"  Cohen's d: {stats_dict['cohens_d']:.4f}\n\n")
+    
+    print(f"\nSaved statistics summary to {stats_txt_path}")
+    
+    # Generate visualizations
+    print("\n" + "-"*80)
+    print("GENERATING VISUALIZATIONS")
+    print("-"*80)
+    
+    # Distribution plots
+    plot_surprisal_distributions(
+        results_df=results_df,
+        output_path=figures_dir / "surprisal_distributions.png"
+    )
+    
+    # Scatter comparison
+    plot_scatter_comparison(
+        results_df=results_df,
+        output_path=figures_dir / "surprisal_scatter.png"
+    )
+    
+    # Difference histogram
+    plot_difference_histogram(
+        results_df=results_df,
+        output_path=figures_dir / "surprisal_differences.png"
+    )
+    
+    # Summary figure
+    plot_summary_statistics(
+        results_df=results_df,
+        output_path=figures_dir / "surprisal_summary.png",
+        stats_dict=stats_dict
+    )
+    
+    print("\nAll visualizations generated successfully!")
+    
+    # Final summary
+    print("\n" + "="*80)
+    print("EXPERIMENT COMPLETED SUCCESSFULLY")
+    print("="*80)
+    print(f"\nFinished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\nResults saved to:")
+    print(f"  - Detailed results: {results_csv_path}")
+    print(f"  - Statistics: {stats_txt_path}")
+    print(f"  - Figures: {figures_dir}")
+    print("\n" + "="*80)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
