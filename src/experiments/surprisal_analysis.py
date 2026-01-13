@@ -19,7 +19,8 @@ from src.core.tokenization import segment_cantonese_sentence
 def calculate_surprisal_for_dataset(
     analysis_df: pd.DataFrame,
     surprisal_calc: Union[MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator],
-    show_progress: bool = True
+    show_progress: bool = True,
+    use_context: bool = True
 ) -> pd.DataFrame:
     """
     Calculate surprisal values for both CS translations and matched monolingual sentences.
@@ -34,8 +35,10 @@ def calculate_surprisal_for_dataset(
             - similarity: Similarity score
             - pattern: Code-switch pattern
             - cs_participant: Participant ID
+            - cs_context, mono_context: Optional discourse context
         surprisal_calc: Initialized surprisal calculator (masked or autoregressive)
         show_progress: Whether to show progress bar
+        use_context: Whether to use discourse context in calculations
         
     Returns:
         DataFrame with added columns:
@@ -49,6 +52,7 @@ def calculate_surprisal_for_dataset(
             - mono_num_tokens: Number of subword tokens for mono word
             - surprisal_difference: cs_surprisal_total - mono_surprisal_total
             - calculation_success: Boolean indicating successful calculation
+            - used_context: Whether context was actually used for this calculation
     """
     results = []
     
@@ -57,6 +61,20 @@ def calculate_surprisal_for_dataset(
     
     for idx, row in iterator:
         result = row.to_dict()
+        
+        # Determine whether to use context for this row
+        cs_context = None
+        mono_context = None
+        used_context = False
+        
+        if use_context:
+            # Check if context columns exist and are valid
+            if 'cs_context' in row and row.get('cs_context_valid', False):
+                cs_context = row['cs_context']
+            if 'mono_context' in row and row.get('mono_context_valid', False):
+                mono_context = row['mono_context']
+            
+            used_context = (cs_context is not None and mono_context is not None)
         
         try:
             # Calculate CS translation surprisal
@@ -68,13 +86,15 @@ def calculate_surprisal_for_dataset(
             
             cs_result = surprisal_calc.calculate_surprisal(
                 word_index=switch_idx,
-                words=cs_words
+                words=cs_words,
+                context=cs_context  # Pass context
             )
             
             result['cs_surprisal_total'] = cs_result['surprisal']
             result['cs_surprisal_per_token'] = cs_result['surprisal'] / cs_result['num_tokens'] if cs_result['num_tokens'] > 0 else np.nan
             result['cs_word'] = cs_result['word']
             result['cs_num_tokens'] = cs_result['num_tokens']
+            result['cs_num_valid_tokens'] = cs_result['num_valid_tokens']
             
             # Calculate matched monolingual surprisal
             mono_words = segment_cantonese_sentence(row['matched_mono'])
@@ -85,17 +105,20 @@ def calculate_surprisal_for_dataset(
             
             mono_result = surprisal_calc.calculate_surprisal(
                 word_index=matched_switch_idx,
-                words=mono_words
+                words=mono_words,
+                context=mono_context  # Pass context
             )
             
             result['mono_surprisal_total'] = mono_result['surprisal']
             result['mono_surprisal_per_token'] = mono_result['surprisal'] / mono_result['num_tokens'] if mono_result['num_tokens'] > 0 else np.nan
             result['mono_word'] = mono_result['word']
             result['mono_num_tokens'] = mono_result['num_tokens']
+            result['mono_num_valid_tokens'] = mono_result['num_valid_tokens']
             
             # Calculate difference
             result['surprisal_difference'] = result['cs_surprisal_total'] - result['mono_surprisal_total']
             result['calculation_success'] = True
+            result['used_context'] = used_context
             
         except Exception as e:
             # Handle errors gracefully
@@ -103,12 +126,15 @@ def calculate_surprisal_for_dataset(
             result['cs_surprisal_per_token'] = np.nan
             result['cs_word'] = None
             result['cs_num_tokens'] = np.nan
+            result['cs_num_valid_tokens'] = np.nan
             result['mono_surprisal_total'] = np.nan
             result['mono_surprisal_per_token'] = np.nan
             result['mono_word'] = None
             result['mono_num_tokens'] = np.nan
+            result['mono_num_valid_tokens'] = np.nan
             result['surprisal_difference'] = np.nan
             result['calculation_success'] = False
+            result['used_context'] = False
             result['error_message'] = str(e)
             
             if show_progress:
@@ -144,32 +170,47 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     # Filter valid calculations
     valid_df = results_df[results_df['calculation_success'] == True].copy()
     
+    # Further filter to only include complete calculations (all tokens valid)
+    complete_df = valid_df[
+        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
+        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+    ].copy()
+    
     stats_dict = {
         'n_total': len(results_df),
         'n_valid': len(valid_df),
-        'success_rate': len(valid_df) / len(results_df) if len(results_df) > 0 else 0
+        'n_complete': len(complete_df),
+        'success_rate': len(valid_df) / len(results_df) if len(results_df) > 0 else 0,
+        'complete_rate': len(complete_df) / len(results_df) if len(results_df) > 0 else 0
     }
     
-    if len(valid_df) == 0:
+    # Track context usage if column exists
+    if 'used_context' in complete_df.columns:
+        n_with_context = complete_df['used_context'].sum()
+        stats_dict['n_with_context'] = int(n_with_context)
+        stats_dict['n_without_context'] = len(complete_df) - int(n_with_context)
+    
+    if len(complete_df) == 0:
         return stats_dict
     
+    # Use complete_df for all statistics (only fully valid token calculations)
     # Basic statistics
-    stats_dict['cs_surprisal_mean'] = valid_df['cs_surprisal_total'].mean()
-    stats_dict['cs_surprisal_std'] = valid_df['cs_surprisal_total'].std()
-    stats_dict['cs_surprisal_median'] = valid_df['cs_surprisal_total'].median()
+    stats_dict['cs_surprisal_mean'] = complete_df['cs_surprisal_total'].mean()
+    stats_dict['cs_surprisal_std'] = complete_df['cs_surprisal_total'].std()
+    stats_dict['cs_surprisal_median'] = complete_df['cs_surprisal_total'].median()
     
-    stats_dict['mono_surprisal_mean'] = valid_df['mono_surprisal_total'].mean()
-    stats_dict['mono_surprisal_std'] = valid_df['mono_surprisal_total'].std()
-    stats_dict['mono_surprisal_median'] = valid_df['mono_surprisal_total'].median()
+    stats_dict['mono_surprisal_mean'] = complete_df['mono_surprisal_total'].mean()
+    stats_dict['mono_surprisal_std'] = complete_df['mono_surprisal_total'].std()
+    stats_dict['mono_surprisal_median'] = complete_df['mono_surprisal_total'].median()
     
-    stats_dict['difference_mean'] = valid_df['surprisal_difference'].mean()
-    stats_dict['difference_std'] = valid_df['surprisal_difference'].std()
-    stats_dict['difference_median'] = valid_df['surprisal_difference'].median()
+    stats_dict['difference_mean'] = complete_df['surprisal_difference'].mean()
+    stats_dict['difference_std'] = complete_df['surprisal_difference'].std()
+    stats_dict['difference_median'] = complete_df['surprisal_difference'].median()
     
     # Paired t-test (filter out any remaining infinite values)
-    valid_pairs = valid_df[
-        np.isfinite(valid_df['cs_surprisal_total']) & 
-        np.isfinite(valid_df['mono_surprisal_total'])
+    valid_pairs = complete_df[
+        np.isfinite(complete_df['cs_surprisal_total']) & 
+        np.isfinite(complete_df['mono_surprisal_total'])
     ]
     
     if len(valid_pairs) >= 2:
@@ -184,7 +225,7 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     stats_dict['ttest_pvalue'] = p_value
     
     # Cohen's d effect size
-    diff = valid_df['cs_surprisal_total'] - valid_df['mono_surprisal_total']
+    diff = complete_df['cs_surprisal_total'] - complete_df['mono_surprisal_total']
     cohens_d = diff.mean() / diff.std()
     stats_dict['cohens_d'] = cohens_d
     
@@ -205,10 +246,19 @@ def print_statistics_summary(stats_dict: Dict):
     print(f"\nSample Size:")
     print(f"  Total comparisons: {stats_dict['n_total']}")
     print(f"  Valid calculations: {stats_dict['n_valid']}")
+    print(f"  Complete calculations: {stats_dict['n_complete']} (all tokens valid)")
     print(f"  Success rate: {stats_dict['success_rate']:.1%}")
+    print(f"  Complete rate: {stats_dict['complete_rate']:.1%}")
     
-    if stats_dict['n_valid'] == 0:
-        print("\nNo valid calculations to report.")
+    # Show context usage if available
+    if 'n_with_context' in stats_dict:
+        print(f"\nContext Usage:")
+        print(f"  Calculations with context: {stats_dict['n_with_context']}")
+        print(f"  Calculations without context: {stats_dict['n_without_context']}")
+    
+    if stats_dict['n_complete'] == 0:
+        print("\nNo complete calculations to report.")
+        print("(Complete = both CS and mono words have all tokens successfully calculated)")
         return
     
     print(f"\nCode-Switched Translation Surprisal:")

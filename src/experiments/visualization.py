@@ -41,12 +41,16 @@ def plot_surprisal_distributions(
     """
     setup_plot_style()
     
-    # Filter valid data
+    # Filter for complete calculations only (all tokens valid)
     valid_df = results_df[results_df['calculation_success'] == True].copy()
+    complete_df = valid_df[
+        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
+        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+    ].copy()
     
     # Prepare data for plotting
-    cs_data = valid_df['cs_surprisal_total'].values
-    mono_data = valid_df['mono_surprisal_total'].values
+    cs_data = complete_df['cs_surprisal_total'].values
+    mono_data = complete_df['mono_surprisal_total'].values
     
     # Create melted dataframe for seaborn
     plot_data = pd.DataFrame({
@@ -107,19 +111,19 @@ def plot_scatter_comparison(
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     
     # Scatter plot
-    ax.scatter(valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total'],
+    ax.scatter(complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total'],
                alpha=0.5, s=30, color='#66C2A5', edgecolors='black', linewidth=0.5)
     
     # Identity line
-    max_val = max(valid_df['cs_surprisal_total'].max(), valid_df['mono_surprisal_total'].max())
-    min_val = min(valid_df['cs_surprisal_total'].min(), valid_df['mono_surprisal_total'].min())
+    max_val = max(complete_df['cs_surprisal_total'].max(), complete_df['mono_surprisal_total'].max())
+    min_val = min(complete_df['cs_surprisal_total'].min(), complete_df['mono_surprisal_total'].min())
     ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, 
             label='Identity (CS = Mono)')
     
     # Add regression line
     from scipy.stats import linregress
     slope, intercept, r_value, p_value, std_err = linregress(
-        valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total']
+        complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total']
     )
     x_line = np.array([min_val, max_val])
     y_line = slope * x_line + intercept
@@ -128,7 +132,7 @@ def plot_scatter_comparison(
     
     ax.set_xlabel('Monolingual Baseline Surprisal (bits)', fontweight='bold')
     ax.set_ylabel('Code-Switched Translation Surprisal (bits)', fontweight='bold')
-    ax.set_title(f'CS vs. Monolingual Surprisal\n(n={len(valid_df)} comparisons)',
+    ax.set_title(f'CS vs. Monolingual Surprisal\n(n={len(complete_df)} complete comparisons)',
                 fontweight='bold', fontsize=14)
     ax.legend(loc='upper left', frameon=True, fancybox=True)
     ax.grid(True, alpha=0.3)
@@ -155,14 +159,18 @@ def plot_difference_histogram(
     """
     setup_plot_style()
     
-    # Filter valid data
+    # Filter for complete calculations only (all tokens valid)
     valid_df = results_df[results_df['calculation_success'] == True].copy()
+    complete_df = valid_df[
+        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
+        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+    ].copy()
     
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     
     # Histogram
-    differences = valid_df['surprisal_difference'].values
+    differences = complete_df['surprisal_difference'].values
     
     ax.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
     ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero difference')
@@ -171,7 +179,7 @@ def plot_difference_histogram(
     
     ax.set_xlabel('Surprisal Difference (CS - Mono, bits)', fontweight='bold')
     ax.set_ylabel('Frequency', fontweight='bold')
-    ax.set_title(f'Distribution of Surprisal Differences\n(n={len(valid_df)} comparisons)',
+    ax.set_title(f'Distribution of Surprisal Differences\n(n={len(complete_df)} complete comparisons)',
                 fontweight='bold', fontsize=14)
     ax.legend(loc='upper right', frameon=True, fancybox=True)
     ax.grid(True, alpha=0.3, axis='y')
@@ -209,8 +217,12 @@ def plot_summary_statistics(
     """
     setup_plot_style()
     
-    # Filter valid data
+    # Filter for complete calculations only (all tokens valid)
     valid_df = results_df[results_df['calculation_success'] == True].copy()
+    complete_df = valid_df[
+        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
+        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+    ].copy()
     
     # Create 2x2 subplot figure
     fig = plt.figure(figsize=(16, 12))
@@ -220,10 +232,10 @@ def plot_summary_statistics(
     ax1 = fig.add_subplot(gs[0, 0])
     plot_data = pd.DataFrame({
         'Surprisal': np.concatenate([
-            valid_df['cs_surprisal_total'].values,
-            valid_df['mono_surprisal_total'].values
+            complete_df['cs_surprisal_total'].values,
+            complete_df['mono_surprisal_total'].values
         ]),
-        'Condition': ['CS Translation'] * len(valid_df) + ['Mono Baseline'] * len(valid_df)
+        'Condition': ['CS Translation'] * len(complete_df) + ['Mono Baseline'] * len(complete_df)
     })
     sns.violinplot(data=plot_data, x='Condition', y='Surprisal', ax=ax1, palette='Set2')
     sns.boxplot(data=plot_data, x='Condition', y='Surprisal', ax=ax1,
@@ -235,10 +247,10 @@ def plot_summary_statistics(
     
     # Panel 2: Scatter plot (top-right)
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.scatter(valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total'],
+    ax2.scatter(complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total'],
                alpha=0.5, s=25, color='#66C2A5', edgecolors='black', linewidth=0.5)
-    max_val = max(valid_df['cs_surprisal_total'].max(), valid_df['mono_surprisal_total'].max())
-    min_val = min(valid_df['cs_surprisal_total'].min(), valid_df['mono_surprisal_total'].min())
+    max_val = max(complete_df['cs_surprisal_total'].max(), complete_df['mono_surprisal_total'].max())
+    min_val = min(complete_df['cs_surprisal_total'].min(), complete_df['mono_surprisal_total'].min())
     ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2)
     ax2.set_xlabel('Monolingual Surprisal (bits)', fontweight='bold')
     ax2.set_ylabel('CS Translation Surprisal (bits)', fontweight='bold')
@@ -247,7 +259,7 @@ def plot_summary_statistics(
     
     # Panel 3: Difference histogram (bottom-left)
     ax3 = fig.add_subplot(gs[1, 0])
-    differences = valid_df['surprisal_difference'].values
+    differences = complete_df['surprisal_difference'].values
     ax3.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
     ax3.axvline(0, color='red', linestyle='--', linewidth=2)
     ax3.axvline(differences.mean(), color='darkblue', linestyle='-', linewidth=2)
@@ -266,8 +278,9 @@ STATISTICAL SUMMARY
 {'='*40}
 
 Sample Size:
-  Total comparisons: {stats_dict['n_valid']}
-  Success rate: {stats_dict['success_rate']:.1%}
+  Total comparisons: {stats_dict['n_total']}
+  Complete comparisons: {stats_dict['n_complete']}
+  Complete rate: {stats_dict['complete_rate']:.1%}
 
 Code-Switched Translation:
   Mean: {stats_dict['cs_surprisal_mean']:.4f} bits

@@ -22,6 +22,7 @@ sys.path.insert(0, str(project_root))
 
 from src.core.config import Config
 from src.data.analysis_dataset import create_analysis_dataset
+from src.experiments.nllb_translator import NLLBTranslator
 from src.analysis.feasibility import (
     plot_similarity_distributions,
     generate_window_matching_report
@@ -104,6 +105,29 @@ def main():
         monolingual_df = pd.read_csv(monolingual_csv)
         logger.info(f"Loaded {len(monolingual_df)} monolingual Cantonese sentences")
         
+        # Step 2b: Load all sentences for discourse context
+        logger.info("\nStep 2b: Loading all sentences for discourse context...")
+        all_sentences_csv = preprocessing_dir / config.get('output.csv_all_sentences', 'all_sentences.csv')
+        
+        all_sentences_df = None
+        translator = None
+        
+        if all_sentences_csv.exists():
+            all_sentences_df = pd.read_csv(all_sentences_csv)
+            logger.info(f"Loaded {len(all_sentences_df)} sentences for context retrieval")
+            
+            # Initialize translator for context translation
+            logger.info("Initializing translator for context processing...")
+            translator = NLLBTranslator(
+                model_name=config.get_translation_model(),
+                device=config.get_translation_device(),
+                show_progress=False
+            )
+            logger.info("Translator initialized")
+        else:
+            logger.warning(f"All sentences CSV not found: {all_sentences_csv}")
+            logger.warning("Context will not be added to analysis dataset")
+        
         # Step 3: Run POS window matching analysis
         logger.info("\nStep 3: Running POS window matching analysis...")
         
@@ -136,7 +160,13 @@ def main():
         
         # Step 4: Create analysis dataset
         logger.info("\nStep 4: Creating final analysis dataset...")
-        analysis_df = create_analysis_dataset(config, translated_df, monolingual_df)
+        analysis_df = create_analysis_dataset(
+            config,
+            translated_df,
+            monolingual_df,
+            all_sentences_df,
+            translator
+        )
         
         # Step 5: Save outputs
         logger.info("\nStep 5: Saving outputs...")

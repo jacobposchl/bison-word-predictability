@@ -21,7 +21,7 @@ processing:
 translation:
   # NLLB model settings (free, local translation)
   model: "facebook/nllb-200-distilled-600M"  # Options: 600M (faster), 1.3B, 3.3B (better)
-  device: "auto"  # "auto" (detect GPU/CPU), "cpu", or "cuda"
+  device: "cuda"
   
   # Whether to use caching for translations
   use_cache: true
@@ -40,6 +40,19 @@ analysis:
   
   # Minimum Levenshtein similarity threshold for matches (0-1)
   similarity_threshold: 0.4
+
+# Discourse context settings
+context:
+  # Number of previous sentences to include as discourse context
+  num_previous_sentences: 3
+  
+  # Minimum number of context sentences required to include sentence in analysis
+  # Sentences with fewer context sentences will still be included but flagged
+  min_required_sentences: 2
+  
+  # Minimum translation quality for context (ratio of successfully translated words)
+  # Context with quality below this threshold will be flagged as invalid
+  min_translation_quality: 0.3
 
 # Experiment settings
 experiment:

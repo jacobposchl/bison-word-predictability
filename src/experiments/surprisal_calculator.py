@@ -2,8 +2,8 @@
 Core surprisal calculation using language models.
 
 Supports two types of models:
-1. Masked Language Models (BERT-style): hon9kon9ize/bert-large-cantonese
-2. Autoregressive Models (GPT-style): e.g., gpt2, bloom, etc.
+1. Masked Language Models (BERT-style)
+2. Autoregressive Models (GPT-style)
 
 '''
 
@@ -94,15 +94,18 @@ class MaskedLMSurprisalCalculator:
     def calculate_surprisal(self,
                             word_index: int,
                             words: List[str] = None,
+                            context: str = None,
                             ) -> Dict:
         '''
-        Calculate the surprisal for a word at a given position in the sentence
+        Calculate the surprisal for a word at a given position in the sentence.
         
         :param self: self
         :param word_index: index of the target word to measure surprisal (0-based)
         :type word_index: int
         :param words: pre-segmented words list
         :type words: List[str]
+        :param context: optional discourse context (previous sentences)
+        :type context: str
         '''
 
         if words is None:
@@ -111,9 +114,22 @@ class MaskedLMSurprisalCalculator:
         if word_index < 0 or word_index >= len(words):
             raise ValueError("Your word index is out of bounds")
         
+        # Build full input with context if provided
+        if context and context.strip():
+            # For masked LM, prepend context to sentence
+            full_sentence = context.strip() + " " + "".join(words)
+            # Re-tokenize and adjust word index
+            context_words = context.strip().split()
+            adjusted_word_index = len(context_words) + word_index
+            full_words = context_words + words
+        else:
+            full_sentence = "".join(words)
+            adjusted_word_index = word_index
+            full_words = words
+        
         target_word = words[word_index]
 
-        token_indices, token_strings = self._align_word_to_tokens(words, word_index)
+        token_indices, token_strings = self._align_word_to_tokens(full_words, adjusted_word_index)
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -128,7 +144,8 @@ class MaskedLMSurprisalCalculator:
         token_surprisals = []
         token_probs = []
 
-        sentence = "".join(words)
+        # Use full sentence with context
+        sentence = full_sentence
 
         for token_idx in token_indices:
             tokens = self.tokenizer.tokenize(sentence, add_special_tokens = True)
@@ -157,6 +174,9 @@ class MaskedLMSurprisalCalculator:
             token_surprisals.append(token_surprisal)
             token_probs.append(token_prob)
 
+        # Filter out invalid values for validation
+        valid_surprisals = [s for s in token_surprisals if not np.isnan(s) and not np.isinf(s)]
+        
         total_surprisal = sum(token_surprisals)
         total_prob = np.prod(token_probs)
 
@@ -166,14 +186,14 @@ class MaskedLMSurprisalCalculator:
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
-            'num_tokens': len(token_indices)
+            'num_tokens': len(token_indices),
+            'num_valid_tokens': len(valid_surprisals)
         }
 
 
 class AutoregressiveLMSurprisalCalculator:
     '''
-    Class for word-level surprisal calculation using Autoregressive Language Models (GPT-style).
-    Uses left-to-right context to predict the target word.
+    Class for word-level surprisal calculation using Autoregressive Language Models.
     '''
 
     def __init__(self,
@@ -274,6 +294,7 @@ class AutoregressiveLMSurprisalCalculator:
     def calculate_surprisal(self,
                             word_index: int,
                             words: List[str] = None,
+                            context: str = None,
                             ) -> Dict:
         '''
         Calculate the surprisal for a word at a given position using autoregressive LM.
@@ -282,6 +303,8 @@ class AutoregressiveLMSurprisalCalculator:
         :type word_index: int
         :param words: pre-segmented words list
         :type words: List[str]
+        :param context: optional discourse context (previous sentences)
+        :type context: str
         '''
 
         if words is None:
@@ -290,9 +313,22 @@ class AutoregressiveLMSurprisalCalculator:
         if word_index < 0 or word_index >= len(words):
             raise ValueError("Your word index is out of bounds")
         
+        # Build full input with context if provided
+        if context and context.strip():
+            # For autoregressive LM, prepend context to sentence
+            full_sentence = context.strip() + " " + "".join(words)
+            # Re-tokenize and adjust word index
+            context_words = context.strip().split()
+            adjusted_word_index = len(context_words) + word_index
+            full_words = context_words + words
+        else:
+            full_sentence = "".join(words)
+            adjusted_word_index = word_index
+            full_words = words
+        
         target_word = words[word_index]
 
-        token_indices, token_strings = self._align_word_to_tokens(words, word_index)
+        token_indices, token_strings = self._align_word_to_tokens(full_words, adjusted_word_index)
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -302,13 +338,15 @@ class AutoregressiveLMSurprisalCalculator:
                 'word': target_word,
                 'tokens': [],
                 'token_surprisals': [],
-                'num_tokens': 0
+                'num_tokens': 0,
+                'num_valid_tokens': 0
             }
 
         token_surprisals = []
         token_probs = []
 
-        sentence = "".join(words)
+        # Use full sentence with context
+        sentence = full_sentence
         encoding = self.tokenizer(sentence, return_tensors="pt", add_special_tokens=True, 
                                   truncation=True, max_length=512)
         input_ids = encoding['input_ids'].to(self.device)
@@ -322,7 +360,8 @@ class AutoregressiveLMSurprisalCalculator:
                 'word': target_word,
                 'tokens': token_strings,
                 'token_surprisals': [],
-                'num_tokens': len(token_indices)
+                'num_tokens': len(token_indices),
+                'num_valid_tokens': 0
             }
 
         with torch.no_grad():
