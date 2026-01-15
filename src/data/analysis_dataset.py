@@ -50,7 +50,7 @@ def get_previous_sentences(
     """
     # Filter to same participant, before current sentence
     previous = all_sentences_df[
-        (all_sentences_df['participant'] == participant) &
+        (all_sentences_df['participant_id'] == participant) &
         (all_sentences_df['start_time'] < start_time)
     ].sort_values('start_time').tail(num_previous)
     

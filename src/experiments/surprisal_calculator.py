@@ -413,7 +413,8 @@ class AutoregressiveLMSurprisalCalculator:
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
-            'num_tokens': len(token_indices)
+            'num_tokens': len(token_indices),
+            'num_valid_tokens': len(valid_surprisals)
         }
 
 
