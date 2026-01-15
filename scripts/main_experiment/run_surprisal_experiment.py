@@ -1,5 +1,5 @@
 """
-Main Experiment: Surprisal Comparison Analysis
+Surprisal Comparison Analysis
 
 This script compares surprisal values at code-switch points between:
 1. Code-switched sentences (translated to full Cantonese)
@@ -8,23 +8,21 @@ This script compares surprisal values at code-switch points between:
 Supports discourse context by using k previous sentences from the same speaker.
 
 Usage:
-    # Without context (isolated sentences)
-    python scripts/main_experiment/run_surprisal_experiment.py --model masked --no-context
+    # With context (default)
+    python scripts/main_experiment/run_surprisal_experiment.py --model _
     
-    # With context (if available in dataset)
-    python scripts/main_experiment/run_surprisal_experiment.py --model masked --use-context
+    # Without context
+    python scripts/main_experiment/run_surprisal_experiment.py --model _ --no-context
     
     # Compare both modes
-    python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive --compare-context
+    python scripts/main_experiment/run_surprisal_experiment.py --model _ --compare-context
     
     Required arguments:
         --model: Type of model - "masked" for BERT-style or "autoregressive" for GPT-style
         
     Optional arguments:
-        --dataset: Path to analysis dataset CSV (default: results/exploratory/analysis_dataset.csv)
         --sample-size: Number of sentences to process (default: all)
-        --use-context: Use discourse context in calculations (if available)
-        --no-context: Disable context even if available
+        --no-context: Disable discourse context
         --compare-context: Run both with and without context for comparison
 """
 
@@ -61,12 +59,6 @@ def parse_arguments():
         description="Run surprisal comparison experiment for code-switching analysis"
     )
     parser.add_argument(
-        "--dataset",
-        type=str,
-        default="results/exploratory/analysis_dataset.csv",
-        help="Path to analysis dataset CSV (default: results/exploratory/analysis_dataset.csv)"
-    )
-    parser.add_argument(
         "--model",
         type=str,
         required=True,
@@ -80,14 +72,9 @@ def parse_arguments():
         help="Number of sentences to process (default: all)"
     )
     parser.add_argument(
-        "--use-context",
-        action='store_true',
-        help="Use discourse context in surprisal calculations (if available in dataset)"
-    )
-    parser.add_argument(
         "--no-context",
         action='store_true',
-        help="Disable discourse context even if available in dataset"
+        help="Disable discourse context"
     )
     parser.add_argument(
         "--compare-context",
@@ -121,9 +108,9 @@ def load_analysis_dataset(dataset_path: str) -> pd.DataFrame:
     
     print(f"Loading analysis dataset from {dataset_path}")
     df = pd.read_csv(dataset_path)
-    print(f"Loaded {len(df)} comparisons from dataset")
+    print(f"    LOADED")
     
-    # Verify a few columns exist
+    # Verify required columns exist
     required_columns = [
         'cs_translation', 'matched_mono',
         'switch_index', 'matched_switch_index'
@@ -217,7 +204,8 @@ def main():
     results_dir, figures_dir = setup_output_directories(config, args.model)
     
     # Load analysis dataset
-    analysis_df = load_analysis_dataset(args.dataset)
+    dataset_path = "results/exploratory/analysis_dataset.csv"
+    analysis_df = load_analysis_dataset(dataset_path)
     
     # Apply sample size limit if specified
     if args.sample_size:
@@ -240,16 +228,13 @@ def main():
         context_modes = [False, True]
         mode_names = ['without_context', 'with_context']
     elif args.no_context:
+        # No context (when --no-context is specified)
         context_modes = [False]
         mode_names = ['without_context']
-    elif args.use_context or 'cs_context' in analysis_df.columns:
-        # Use context if explicitly requested or if available in dataset
+    else:
+        # Use context (default behavior)
         context_modes = [True]
         mode_names = ['with_context']
-    else:
-        # No context available or requested
-        context_modes = [False]
-        mode_names = ['without_context']
     
     # Run analysis for each context mode
     for use_context, mode_name in zip(context_modes, mode_names):
@@ -279,10 +264,9 @@ def main():
             use_context=use_context
         )
         
-        # Save detailed results
+        # Save results
         results_csv_path = mode_results_dir / "surprisal_results.csv"
         results_df.to_csv(results_csv_path, index=False)
-        print(f"\nSaved detailed results to {results_csv_path}")
         
         # Compute statistics
         print("\n" + "-"*80)

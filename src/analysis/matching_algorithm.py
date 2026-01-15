@@ -146,81 +146,6 @@ def extract_pos_window(
     return pos_sequence[start:end]
 
 
-def _get_monolingual_pos_sequence(mono_sent: Dict, lang_code: str) -> Optional[List[str]]:
-    """
-    Get POS sequence for a monolingual sentence, using cache.
-    
-    Args:
-        mono_sent: Monolingual sentence dictionary
-        lang_code: Language code ('C' or 'E')
-        
-    Returns:
-        POS sequence or None if tagging fails
-    """
-    # Use sentence text as cache key
-    sentence = mono_sent.get('reconstructed_sentence', '')
-    cache_key = (sentence, lang_code)
-    
-    if cache_key in _monolingual_pos_cache:
-        return _monolingual_pos_cache[cache_key]
-    
-    try:
-        if lang_code == 'C':
-            mono_tagged = pos_tag_cantonese(sentence)
-        else:
-            mono_tagged = pos_tag_english(sentence)
-        
-        mono_pos_seq = extract_pos_sequence(mono_tagged)
-        _monolingual_pos_cache[cache_key] = mono_pos_seq
-        return mono_pos_seq
-    except Exception as e:
-        logger.debug(f"Error tagging monolingual sentence: {e}")
-        _monolingual_pos_cache[cache_key] = None
-        return None
-
-
-def precompute_monolingual_pos_sequences(
-    monolingual_sentences: Dict[str, List[Dict]],
-    max_per_language: Optional[int] = None
-) -> Dict[str, List[Dict]]:
-    """
-    Pre-compute and cache POS sequences for monolingual sentences.
-    
-    This significantly speeds up matching by avoiding repeated POS tagging.
-    
-    Args:
-        monolingual_sentences: Dict with 'cantonese' and 'english' keys
-        max_per_language: Optional limit on number of sentences per language to process
-        
-    Returns:
-        Filtered monolingual_sentences dict (if max_per_language was used)
-    """
-    logger.info("Pre-computing POS sequences for monolingual sentences...")
-    
-    total = 0
-    filtered = {}
-    
-    for lang_key, lang_code in [('cantonese', 'C'), ('english', 'E')]:
-        if lang_key in monolingual_sentences:
-            mono_list = monolingual_sentences[lang_key]
-            
-            # Optionally limit the number of sentences
-            if max_per_language and len(mono_list) > max_per_language:
-                logger.info(f"  Limiting {lang_key} to {max_per_language} sentences (from {len(mono_list)})")
-                mono_list = mono_list[:max_per_language]
-                filtered[lang_key] = mono_list
-            else:
-                filtered[lang_key] = mono_list
-            
-            # Pre-compute POS sequences with progress bar
-            for mono_sent in tqdm(filtered[lang_key], desc=f"Tagging {lang_key}", leave=False):
-                _get_monolingual_pos_sequence(mono_sent, lang_code)
-                total += 1
-    
-    logger.info(f"Cached POS sequences for {total} monolingual sentences")
-    return filtered
-
-
 def rank_matches_by_context(
     matches: List[Dict],
     source_sentence: Dict
@@ -421,8 +346,6 @@ def analyze_window_matching(
             'window_3': {...}
         }
     """
-    logger.info(f"Starting window matching analysis for {len(translated_sentences)} sentences")
-    logger.info(f"Window sizes: {window_sizes}, Similarity threshold: {similarity_threshold}")
     
     results = {}
     
@@ -479,14 +402,14 @@ def analyze_window_matching(
                         'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
                         'matched_pos': match['matched_pos'],
                         'matched_window_start': match['matched_window_start'],
-                        'matched_switch_index': match['matched_window_center'],  # Use actual center instead of start + window_size
+                        'matched_switch_index': match['matched_window_center'],
                         'matched_group': match['match_sentence'].get('group', ''),
                         'matched_participant': match['match_sentence'].get('participant_id', ''),
                         'matched_start_time': match['match_sentence'].get('start_time', 0.0),
                         'same_group': cs_sent.get('group', '') == match['match_sentence'].get('group', ''),
                         'same_speaker': cs_sent.get('participant_id', '') == match['match_sentence'].get('participant_id', ''),
                         'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0)),
-                        # Statistics from ALL matches (not just top-k)
+                        # Statistics from ALL matches
                         'total_matches_above_threshold': total_matches_count,
                         'all_matches_same_group': all_matches_same_group,
                         'all_matches_same_speaker': all_matches_same_speaker
@@ -516,7 +439,7 @@ def analyze_window_matching(
         
         sentence_rankings.sort(key=lambda x: x[2], reverse=True)
         
-        # Get top 3-5 example sentences
+        # Get top example sentences
         num_examples = min(5, len(sentence_rankings))
         example_sentences = sentence_rankings[:num_examples]
         
@@ -546,9 +469,5 @@ def analyze_window_matching(
             'detailed_matches': detailed_matches,
             'example_matches': example_matches
         }
-        
-        logger.info(f"  Sentences with matches: {sentences_with_matches}/{total_sentences} ({match_rate*100:.1f}%)")
-        logger.info(f"  Total matches found: {total_matches}")
-        logger.info(f"  Average similarity: {avg_similarity:.3f}")
     
     return results

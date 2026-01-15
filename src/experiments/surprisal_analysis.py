@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Union
 from scipy import stats
 from tqdm import tqdm
+import pycantonese
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
-from src.core.tokenization import segment_cantonese_sentence
 
 
 def calculate_surprisal_for_dataset(
@@ -78,7 +78,9 @@ def calculate_surprisal_for_dataset(
         
         try:
             # Calculate CS translation surprisal
-            cs_words = segment_cantonese_sentence(row['cs_translation'])
+            # Use space-splitting to match how switch_index was calculated
+            # (translations are already properly segmented and space-joined)
+            cs_words = row['cs_translation'].split()
             switch_idx = int(row['switch_index'])
             
             if switch_idx >= len(cs_words):
@@ -97,7 +99,9 @@ def calculate_surprisal_for_dataset(
             result['cs_num_valid_tokens'] = cs_result['num_valid_tokens']
             
             # Calculate matched monolingual surprisal
-            mono_words = segment_cantonese_sentence(row['matched_mono'])
+            # Use PyCantonese segmentation because matched_switch_index is based on POS sequence,
+            # which was created by re-segmenting with PyCantonese
+            mono_words = pycantonese.segment(row['matched_mono'])
             matched_switch_idx = int(row['matched_switch_index'])
             
             if matched_switch_idx >= len(mono_words):

@@ -51,6 +51,7 @@ class MaskedLMSurprisalCalculator:
         logger.info("Model Loaded!")
 
     def _align_word_to_tokens(self,
+                              sentence: str,
                               words: List[str],
                               word_index: int,
                               ) -> Tuple[List[int], List[str]]:
@@ -58,19 +59,21 @@ class MaskedLMSurprisalCalculator:
 
         Align a word to its corresponding BERT subword tokens.
         
+        :param sentence: the full sentence string to tokenize
+        :type sentence: str
         :param words: list of words in the given sentence
         :type words: List[str]
         :param word_index: position of the target word for surprisal calculation
         :type word_index: int
         '''
 
-        sentence = "".join(words)
         target_word = words[word_index]
 
+        # Calculate character position based on how sentence was constructed
         char_start = sum(len(w) for w in words[:word_index])
         char_end = char_start + len(target_word)
 
-        encoding = self.tokenizer(sentence, return_tensors="pt", add_special_tokens=False)
+        encoding = self.tokenizer(sentence, return_tensors="pt", add_special_tokens=True)
         token_ids = encoding['input_ids'][0].tolist()
 
         token_indices = []
@@ -115,11 +118,13 @@ class MaskedLMSurprisalCalculator:
             raise ValueError("Your word index is out of bounds")
         
         # Build full input with context if provided
+        # Use consistent spacing: no spaces between Cantonese characters
         if context and context.strip():
             # For masked LM, prepend context to sentence
-            full_sentence = context.strip() + " " + "".join(words)
-            # Re-tokenize and adjust word index
+            # Join context and words without spaces (Cantonese doesn't need them)
             context_words = context.strip().split()
+            full_sentence = "".join(context_words) + "".join(words)
+            # Adjust word index to account for context words at the beginning
             adjusted_word_index = len(context_words) + word_index
             full_words = context_words + words
         else:
@@ -129,7 +134,7 @@ class MaskedLMSurprisalCalculator:
         
         target_word = words[word_index]
 
-        token_indices, token_strings = self._align_word_to_tokens(full_words, adjusted_word_index)
+        token_indices, token_strings = self._align_word_to_tokens(full_sentence, full_words, adjusted_word_index)
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -138,23 +143,25 @@ class MaskedLMSurprisalCalculator:
                 'probability': 0.0,
                 'word': target_word,
                 'tokens': [],
-                'token_surprisals': []
+                'token_surprisals': [],
+                'num_tokens': 0,
+                'num_valid_tokens': 0
             }
 
         token_surprisals = []
         token_probs = []
 
-        # Use full sentence with context
-        sentence = full_sentence
+        # Tokenize once before the loop for efficiency
+        tokens = self.tokenizer.tokenize(full_sentence, add_special_tokens = True)
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
 
         for token_idx in token_indices:
-            tokens = self.tokenizer.tokenize(sentence, add_special_tokens = True)
-            input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+            # Create a copy of input_ids for this iteration
+            masked_input_ids = input_ids.copy()
+            original_token_id = masked_input_ids[token_idx]
+            masked_input_ids[token_idx] = self.tokenizer.mask_token_id
 
-            original_token_id = input_ids[token_idx]
-            input_ids[token_idx] = self.tokenizer.mask_token_id
-
-            input_ids_tensor = torch.tensor([input_ids]).to(self.device)
+            input_ids_tensor = torch.tensor([masked_input_ids]).to(self.device)
 
             with torch.no_grad():
                 outputs = self.model(input_ids_tensor)
@@ -251,21 +258,24 @@ class AutoregressiveLMSurprisalCalculator:
         logger.info("Autoregressive model loaded!")
 
     def _align_word_to_tokens(self,
+                              sentence: str,
                               words: List[str],
                               word_index: int,
                               ) -> Tuple[List[int], List[str]]:
         '''
         Align a word to its corresponding subword tokens.
         
+        :param sentence: the full sentence string to tokenize
+        :type sentence: str
         :param words: list of words in the given sentence
         :type words: List[str]
         :param word_index: position of the target word for surprisal calculation
         :type word_index: int
         '''
 
-        sentence = "".join(words)
         target_word = words[word_index]
 
+        # Calculate character position based on how sentence was constructed
         char_start = sum(len(w) for w in words[:word_index])
         char_end = char_start + len(target_word)
 
@@ -314,11 +324,13 @@ class AutoregressiveLMSurprisalCalculator:
             raise ValueError("Your word index is out of bounds")
         
         # Build full input with context if provided
+        # Use consistent spacing: no spaces between Cantonese characters
         if context and context.strip():
             # For autoregressive LM, prepend context to sentence
-            full_sentence = context.strip() + " " + "".join(words)
-            # Re-tokenize and adjust word index
+            # Join context and words without spaces (Cantonese doesn't need them)
             context_words = context.strip().split()
+            full_sentence = "".join(context_words) + "".join(words)
+            # Adjust word index to account for context words at the beginning
             adjusted_word_index = len(context_words) + word_index
             full_words = context_words + words
         else:
@@ -328,7 +340,7 @@ class AutoregressiveLMSurprisalCalculator:
         
         target_word = words[word_index]
 
-        token_indices, token_strings = self._align_word_to_tokens(full_words, adjusted_word_index)
+        token_indices, token_strings = self._align_word_to_tokens(full_sentence, full_words, adjusted_word_index)
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -345,9 +357,8 @@ class AutoregressiveLMSurprisalCalculator:
         token_surprisals = []
         token_probs = []
 
-        # Use full sentence with context
-        sentence = full_sentence
-        encoding = self.tokenizer(sentence, return_tensors="pt", add_special_tokens=True, 
+        # Tokenize the full sentence once
+        encoding = self.tokenizer(full_sentence, return_tensors="pt", add_special_tokens=True, 
                                   truncation=True, max_length=512)
         input_ids = encoding['input_ids'].to(self.device)
         

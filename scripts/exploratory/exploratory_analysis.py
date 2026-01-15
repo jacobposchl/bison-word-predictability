@@ -26,6 +26,7 @@ from src.experiments.nllb_translator import NLLBTranslator
 from src.plots.exploratory.plot_functions import plot_similarity_distributions
 from src.plots.exploratory.report_generator import generate_window_matching_report
 from src.analysis.matching_algorithm import analyze_window_matching
+from src.analysis.pos_tagging import parse_pattern_segments
 
 logger = logging.getLogger(__name__)
 
@@ -125,23 +126,41 @@ def main():
         # Get parameters from config
         window_size = config.get_analysis_window_size()
         similarity_threshold = config.get_analysis_similarity_threshold()
+        min_cantonese = config.get_analysis_min_cantonese_words()
         
         logger.info(f"Window size: {window_size}")
         logger.info(f"Similarity threshold: {similarity_threshold}")
+        logger.info(f"Minimum Cantonese words: {min_cantonese}")
         
         # Filter to sentences with valid switch indices
         translated_sentences = [s for s in translated_df.to_dict('records') if s.get('switch_index', -1) >= 0]
+        
+        # Apply additional filtering for sentences matching pattern criteria:
+        # Pattern must start with C >= min_cantonese, followed by E
+        filtered_translated_sentences = []
+        for sent in translated_sentences:
+            pattern = sent.get('pattern', '')
+            segments = parse_pattern_segments(pattern)
+            
+            # Check criteria: starts with C >= min_cantonese, followed by E
+            if len(segments) >= 2:
+                first_lang, first_count = segments[0]
+                second_lang, _ = segments[1]
+                
+                if first_lang == 'C' and first_count >= min_cantonese and second_lang == 'E':
+                    filtered_translated_sentences.append(sent)
+        
         monolingual_sentences = monolingual_df.to_dict('records')
         
         # Apply sample size if specified
         if args.sample_size is not None:
-            translated_sentences = translated_sentences[:args.sample_size]
+            filtered_translated_sentences = filtered_translated_sentences[:args.sample_size]
         
-        logger.info(f"Analyzing {len(translated_sentences)} sentences with valid switch points")
+        logger.info(f"Analyzing {len(filtered_translated_sentences)} sentences matching pattern criteria")
         
         # Run window matching
         window_results = analyze_window_matching(
-            translated_sentences=translated_sentences,
+            translated_sentences=filtered_translated_sentences,
             monolingual_sentences=monolingual_sentences,
             window_sizes=[window_size],
             similarity_threshold=similarity_threshold,
@@ -154,8 +173,8 @@ def main():
         logger.info("\nCreating final analysis dataset...")
         analysis_df = create_analysis_dataset(
             config,
-            translated_df,
-            monolingual_df,
+            filtered_translated_sentences,
+            window_results,
             all_sentences_df,
             translator
         )

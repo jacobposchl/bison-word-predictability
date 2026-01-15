@@ -192,23 +192,26 @@ def extract_code_switched_segment(
 
 def create_analysis_dataset(
     config,
-    translated_df: pd.DataFrame,
-    monolingual_df: pd.DataFrame,
+    filtered_translated_sentences: List[Dict],
+    window_results: Dict,
     all_sentences_df: pd.DataFrame = None,
     translator = None
 ) -> pd.DataFrame:
     """
-    Create analysis dataset using window matching to find matched monolingual sentences.
+    Create analysis dataset from pre-computed window matching results.
     
     Optionally adds discourse context from previous sentences in the same conversation.
     
-    Filters sentences that start with at least x Cantonese words followed by
-    English words, then finds the top-1 matched monolingual sentence using POS window matching.
+    Takes filtered code-switched sentences and their pre-computed window matching results,
+    then builds the final analysis dataset with the top-1 matched monolingual sentence
+    for each code-switched sentence.
     
     Args:
         config: Config object
-        translated_df: DataFrame with translated code-switched sentences
-        monolingual_df: DataFrame with monolingual Cantonese sentences
+        filtered_translated_sentences: List of filtered CS sentence dicts (already filtered
+            for sentences that start with >= min_cantonese words followed by English)
+        window_results: Pre-computed results from analyze_window_matching() containing
+            detailed matches for each window size
         all_sentences_df: Optional DataFrame with all sentences for context retrieval
         translator: Optional NLLBTranslator for translating CS context
         
@@ -220,51 +223,17 @@ def create_analysis_dataset(
         - context quality metrics
         - switch_index: Index where code-switch occurs
     """
-    logger.info("Creating analysis dataset with window matching...")
+    logger.info("Creating analysis dataset from pre-computed window matching results...")
     
-    # Get parameters from config
-    min_cantonese = config.get_analysis_min_cantonese_words()
+    # Get window size from config to extract the right results
     window_size = config.get_analysis_window_size()
-    similarity_threshold = config.get_analysis_similarity_threshold()
     
-    logger.info(f"Filtering for sentences with at least {min_cantonese} Cantonese words at start, followed by English")
-    logger.info(f"Using window size: {window_size}, similarity threshold: {similarity_threshold}")
+    logger.info(f"Using window size: {window_size}")
+    logger.info(f"Processing {len(filtered_translated_sentences)} filtered sentences")
     
-    # Filter translated sentences to those matching criteria
-    filtered_sentences = []
-    for idx, row in translated_df.iterrows():
-        pattern = row.get('pattern', '')
-        switch_index = row.get('switch_index', -1)
-        
-        # Parse pattern
-        segments = parse_pattern_segments(pattern)
-        
-        # Check criteria: starts with C >= min_cantonese, followed by E
-        if len(segments) >= 2:
-            first_lang, first_count = segments[0]
-            second_lang, _ = segments[1]
-            
-            if first_lang == 'C' and first_count >= min_cantonese and second_lang == 'E' and switch_index >= 0:
-                filtered_sentences.append(row.to_dict())
-    
-    logger.info(f"Found {len(filtered_sentences)} sentences matching criteria")
-    
-    if not filtered_sentences:
-        logger.warning("No sentences matched the criteria!")
+    if not filtered_translated_sentences:
+        logger.warning("No sentences provided!")
         return pd.DataFrame(columns=['translated_cs', 'matched_mono', 'context', 'surprisal', 'switch_index'])
-    
-    # Convert monolingual DataFrame to list of dicts
-    monolingual_sentences = monolingual_df.to_dict('records')
-    
-    # Run window matching analysis
-    logger.info("Running window matching analysis...")
-    window_results = analyze_window_matching(
-        translated_sentences=filtered_sentences,
-        monolingual_sentences=monolingual_sentences,
-        window_sizes=[window_size],  # Use single window size from config
-        similarity_threshold=similarity_threshold,
-        top_k=5  # Get top 5 matches to calculate proper statistics
-    )
     
     # Extract results
     window_key = f'window_{window_size}'
@@ -343,7 +312,7 @@ def create_analysis_dataset(
             })
     
     # Count sentences without matches
-    for sent in filtered_sentences:
+    for sent in filtered_translated_sentences:
         cs_translation = sent.get('cantonese_translation', '')
         if cs_translation not in sentence_data:
             sentences_without_matches += 1
