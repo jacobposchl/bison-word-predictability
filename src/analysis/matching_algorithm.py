@@ -221,141 +221,6 @@ def precompute_monolingual_pos_sequences(
     return filtered
 
 
-def find_matches(
-    code_switched_sentence: Dict,
-    monolingual_sentences: Dict[str, List[Dict]],
-    similarity_threshold: float = 0.4,
-    window_size: int = 3,
-    max_matches_per_switch: int = 10
-) -> List[Dict]:
-    """
-    Find matching monolingual sentences for a code-switched sentence.
-    
-    For each switch point in the code-switched sentence:
-    1. Extract 3-word POS window around switch
-    2. Calculate similarity to all monolingual sentences in the same language
-    3. Keep matches above threshold
-    
-    Args:
-        code_switched_sentence: Dictionary with 'reconstructed_sentence', 'pattern'
-        monolingual_sentences: Dict with 'cantonese' and 'english' keys, each
-                              containing list of sentence dicts
-        similarity_threshold: Minimum similarity score (default 0.4 = 40%)
-        window_size: Number of words around switch point (default 3)
-        
-    Returns:
-        List of match dictionaries with:
-        - 'match_sentence': The matched monolingual sentence
-        - 'similarity': Similarity score
-        - 'switch_point': Which switch point this match is for
-        - 'language': Language of the matched segment
-    """
-    sentence = code_switched_sentence.get('reconstructed_sentence', '')
-    pattern = code_switched_sentence.get('pattern', '')
-    
-    if not sentence or not pattern:
-        return []
-    
-    # Tag the code-switched sentence
-    try:
-        tagged = pos_tag_mixed_sentence(sentence, pattern)
-        pos_seq = extract_pos_sequence(tagged)
-    except Exception as e:
-        logger.warning(f"Error tagging code-switched sentence: {e}")
-        return []
-    
-    if not pos_seq:
-        return []
-    
-    # Find switch points
-    switch_points = find_switch_points(pattern)
-    if not switch_points:
-        return []
-    
-    # Parse pattern to get language at each segment
-    segments = parse_pattern_segments(pattern)
-    matches = []
-    
-    for switch_idx, switch_point in enumerate(switch_points):
-        # Determine which language we're matching for
-        # We want to match the segment AFTER the switch
-        if switch_idx < len(segments) - 1:
-            target_lang_code = segments[switch_idx + 1][0]  # Language after switch
-            target_lang = 'cantonese' if target_lang_code == 'C' else 'english'
-        else:
-            continue
-        
-        # Extract POS window around switch point
-        pos_window = extract_pos_window(pos_seq, switch_point, window_size)
-        
-        if not pos_window:
-            continue
-        
-        # Get monolingual sentences in target language
-        monolingual_list = monolingual_sentences.get(target_lang, [])
-        
-        if not monolingual_list:
-            continue
-        
-        # Collect matches for this switch point
-        switch_matches = []
-        
-        # Calculate similarity to each monolingual sentence
-        for mono_sent in monolingual_list:
-            # Get cached POS sequence (or compute if not cached)
-            mono_pos_seq = _get_monolingual_pos_sequence(mono_sent, target_lang_code)
-            
-            if not mono_pos_seq:
-                continue
-            
-            # Calculate similarity
-            # Compare window to all possible windows in monolingual sentence
-            best_similarity = 0.0
-            best_window = []
-            
-            # Try all possible windows of same size in monolingual sentence
-            window_len = len(pos_window)
-            for i in range(len(mono_pos_seq) - window_len + 1):
-                mono_window = mono_pos_seq[i:i + window_len]
-                similarity = levenshtein_similarity(pos_window, mono_window)
-                
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_window = mono_window
-                    
-                    # Early termination: if we find a perfect match, stop searching
-                    if similarity >= 1.0:
-                        break
-            
-            # If no exact window size match, compare to full sequence
-            if len(mono_pos_seq) < window_len:
-                similarity = levenshtein_similarity(pos_window, mono_pos_seq)
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_window = mono_pos_seq
-            
-            # Keep if above threshold
-            if best_similarity >= similarity_threshold:
-                switch_matches.append({
-                    'match_sentence': mono_sent,
-                    'similarity': best_similarity,
-                    'switch_point': switch_point,
-                    'switch_index': switch_idx,
-                    'language': target_lang,
-                    'pos_window': ' '.join(pos_window),
-                    'matched_window': ' '.join(best_window)
-                })
-        
-        # Sort matches for this switch by similarity and keep only top N
-        switch_matches.sort(key=lambda x: x['similarity'], reverse=True)
-        matches.extend(switch_matches[:max_matches_per_switch])
-    
-    # Sort by similarity (highest first)
-    matches.sort(key=lambda x: x['similarity'], reverse=True)
-    
-    return matches
-
-
 def rank_matches_by_context(
     matches: List[Dict],
     source_sentence: Dict
@@ -473,7 +338,7 @@ def find_window_matches(
         best_window = []
         best_start_idx = -1
         
-        # Sliding window approach
+        # Sliding window
         for i in range(len(mono_pos_seq) - window_len + 1):
             mono_window = mono_pos_seq[i:i + window_len]
             similarity = levenshtein_similarity(pos_window, mono_window)
@@ -497,11 +362,10 @@ def find_window_matches(
         
         # Keep if above threshold
         if best_similarity >= similarity_threshold:
-            # Calculate actual center of matched window
-            # For normal window: center = start + window_size
-            # For short sentences: center = middle of the actual sentence
-            matched_window_length = len(best_window)
-            matched_center_idx = best_start_idx + (matched_window_length // 2)
+            # Calculate center of matched window, clamped to valid indices
+            matched_center_idx = best_start_idx + (len(best_window) // 2)
+            # Ensure index is within bounds of monolingual sentence
+            matched_center_idx = min(matched_center_idx, len(mono_pos_seq) - 1)
             
             matches.append({
                 'match_sentence': mono_sent,
@@ -510,7 +374,7 @@ def find_window_matches(
                 'pos_window': ' '.join(pos_window),
                 'matched_pos': ' '.join(best_window),
                 'matched_window_start': best_start_idx,
-                'matched_window_center': matched_center_idx  # Actual center of matched window
+                'matched_window_center': matched_center_idx
             })
     
     return matches

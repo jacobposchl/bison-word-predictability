@@ -28,7 +28,7 @@ from src.data.data_export import (
     export_monolingual_sentences,
     export_translated_sentences
 )
-from scripts.plots.plot_preprocessing import (
+from src.plots.preprocessing.plot_preprocessing import (
     print_analysis_summary,
     plot_matrix_language_distribution,
     plot_equal_matrix_cases,

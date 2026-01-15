@@ -113,6 +113,29 @@ def parse_pattern_segments(pattern: str) -> List[Tuple[str, int]]:
     return [(lang, int(count)) for lang, count in matches]
 
 
+def is_monolingual(pattern: str) -> Optional[str]:
+    """
+    Determine if a pattern represents a monolingual sentence.
+    
+    Args:
+        pattern: Pattern string like "C10", "E8", or "C5-E3"
+        
+    Returns:
+        'Cantonese' if pure Cantonese, 'English' if pure English,
+        None if code-switched
+    """
+    segments = parse_pattern_segments(pattern)
+    languages = {lang for lang, _ in segments}
+    
+    if len(languages) == 0:
+        return None
+    elif len(languages) == 1:
+        lang = languages.pop()
+        return 'Cantonese' if lang == 'C' else 'English'
+    else:
+        return None  # Code-switched
+
+
 def split_sentence_by_pattern(sentence: str, pattern: str) -> List[Tuple[str, str]]:
     """
     Split a mixed-language sentence according to its pattern.

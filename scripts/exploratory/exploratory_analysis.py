@@ -23,20 +23,17 @@ sys.path.insert(0, str(project_root))
 from src.core.config import Config
 from src.data.analysis_dataset import create_analysis_dataset
 from src.experiments.nllb_translator import NLLBTranslator
-from src.analysis.feasibility import (
-    plot_similarity_distributions,
-    generate_window_matching_report
-)
+from src.plots.exploratory.plot_functions import plot_similarity_distributions
+from src.plots.exploratory.report_generator import generate_window_matching_report
 from src.analysis.matching_algorithm import analyze_window_matching
 
 logger = logging.getLogger(__name__)
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging() -> None:
     """Configure logging for the application."""
-    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
@@ -53,16 +50,11 @@ def main():
         default=None,
         help='Number of sentences to process (default: process all sentences)'
     )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
-    )
     
     args = parser.parse_args()
     
     # Setup logging
-    setup_logging(verbose=args.verbose)
+    setup_logging()
     
     # Load configuration
     config = Config()
@@ -73,63 +65,62 @@ def main():
     preprocessing_dir = Path(config.get_preprocessing_results_dir())
     
     logger.info("=" * 80)
-    logger.info("POS WINDOW MATCHING ANALYSIS")
+    logger.info("POS WINDOW MATCHING IN PROGRESS...")
     logger.info("=" * 80)
-    if args.sample_size is None:
-        logger.info("Mode: FULL DATASET (processing all sentences)")
-    else:
-        logger.info(f"Sample size: {args.sample_size} sentences")
-    logger.info(f"Output directory: {output_dir}")
+
+    if args.sample_size is not None:
+        logger.info(f"Selected sample size of: {args.sample_size} sentences")
+
+    logger.info(f"Output directory:  {output_dir}")
     logger.info(f"Figures directory: {figures_dir}")
     logger.info("=" * 80)
     logger.info("")
     
     try:
-        # Step 1: Load translated code-switched sentences
-        logger.info("Step 1: Loading translated code-switched sentences...")
+        #Load translated code-switched sentences
+        logger.info("Loading translated code-switched sentences...")
         translated_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
         
         if not translated_csv.exists():
             raise FileNotFoundError(f"Translated sentences CSV not found: {translated_csv}")
         
         translated_df = pd.read_csv(translated_csv)
-        logger.info(f"Loaded {len(translated_df)} translated sentences")
-        
-        # Step 2: Load monolingual Cantonese sentences
-        logger.info("\nStep 2: Loading monolingual Cantonese sentences...")
+        logger.info("   WORKED")
+
+        #Load monolingual Cantonese sentences
+        logger.info("\nLoading monolingual Cantonese sentences...")
         monolingual_csv = preprocessing_dir / "cantonese_monolingual_WITHOUT_fillers.csv"
         
         if not monolingual_csv.exists():
             raise FileNotFoundError(f"Monolingual CSV not found: {monolingual_csv}")
         
         monolingual_df = pd.read_csv(monolingual_csv)
-        logger.info(f"Loaded {len(monolingual_df)} monolingual Cantonese sentences")
-        
-        # Step 2b: Load all sentences for discourse context
-        logger.info("\nStep 2b: Loading all sentences for discourse context...")
+        logger.info("   WORKED")
+
+        #Load all sentences for discourse context
+        logger.info("\nLoading all sentences dataset for context...")
         all_sentences_csv = preprocessing_dir / config.get('output.csv_all_sentences', 'all_sentences.csv')
         
         all_sentences_df = None
         translator = None
         
-        if all_sentences_csv.exists():
-            all_sentences_df = pd.read_csv(all_sentences_csv)
-            logger.info(f"Loaded {len(all_sentences_df)} sentences for context retrieval")
-            
-            # Initialize translator for context translation
-            logger.info("Initializing translator for context processing...")
-            translator = NLLBTranslator(
-                model_name=config.get_translation_model(),
-                device=config.get_translation_device(),
-                show_progress=False
-            )
-            logger.info("Translator initialized")
-        else:
-            logger.warning(f"All sentences CSV not found: {all_sentences_csv}")
-            logger.warning("Context will not be added to analysis dataset")
+        if not all_sentences_csv.exists():
+            raise FileNotFoundError(f"All sentences CSV not found: {all_sentences_csv}")
         
-        # Step 3: Run POS window matching analysis
-        logger.info("\nStep 3: Running POS window matching analysis...")
+        all_sentences_df = pd.read_csv(all_sentences_csv)
+        logger.info("   WORKED")
+        
+        #Initialize translator for context translation
+        logger.info("Initializing translator for context processing...")
+        translator = NLLBTranslator(
+            model_name=config.get_translation_model(),
+            device=config.get_translation_device(),
+            show_progress=False
+        )
+        logger.info("   WORKED")
+        
+        #Run POS window matching analysis
+        logger.info("Running POS window matching analysis...")
         
         # Get parameters from config
         window_size = config.get_analysis_window_size()
@@ -145,7 +136,6 @@ def main():
         # Apply sample size if specified
         if args.sample_size is not None:
             translated_sentences = translated_sentences[:args.sample_size]
-            logger.info(f"Limited to {len(translated_sentences)} sentences for testing")
         
         logger.info(f"Analyzing {len(translated_sentences)} sentences with valid switch points")
         
@@ -158,8 +148,10 @@ def main():
             top_k=5
         )
         
-        # Step 4: Create analysis dataset
-        logger.info("\nStep 4: Creating final analysis dataset...")
+        logger.info("   WORKED")
+
+        #Create analysis dataset
+        logger.info("\nCreating final analysis dataset...")
         analysis_df = create_analysis_dataset(
             config,
             translated_df,
@@ -168,50 +160,31 @@ def main():
             translator
         )
         
-        # Step 5: Save outputs
-        logger.info("\nStep 5: Saving outputs...")
+        logger.info("   WORKED")
+
+        #Save outputs
+        logger.info("\nSaving outputs...")
         output_dir.mkdir(parents=True, exist_ok=True)
         figures_dir.mkdir(parents=True, exist_ok=True)
         
         # Save unified analysis dataset (includes all CS sentence info, matched mono info, and statistics)
         analysis_csv_path = output_dir / "analysis_dataset.csv"
         analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
-        logger.info(f"Saved unified analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
-        logger.info(f"  Columns: {', '.join(analysis_df.columns.tolist())}")
         
         # Generate and save similarity distribution plot
-        logger.info("\nGenerating similarity distribution plots...")
         plot_path = plot_similarity_distributions(window_results, str(figures_dir))
         
         # Generate window matching report
-        logger.info("\nGenerating window matching report...")
         window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
         
         # Log summary of excluded sentences
         window_key = f'window_{window_size}'
         if window_key in window_results:
-            results = window_results[window_key]
-            total_cs_sentences = results['total_sentences']
-            sentences_with_matches = results['sentences_with_matches']
-            sentences_excluded = total_cs_sentences - sentences_with_matches
-            
-            logger.info(f"\nDataset composition:")
-            logger.info(f"  Total code-switched sentences analyzed: {total_cs_sentences}")
-            logger.info(f"  Sentences with matches (included in CSV): {sentences_with_matches}")
-            logger.info(f"  Sentences without matches (excluded): {sentences_excluded}")
-            
             # Save window matching report
             window_report_path = output_dir / "window_matching_report.txt"
             with open(window_report_path, 'w', encoding='utf-8') as f:
                 f.write(window_report)
-            logger.info(f"Saved window matching report: {window_report_path}")
-        
-        # Print window matching report
-        logger.info("\n" + "=" * 80)
-        logger.info("WINDOW MATCHING REPORT")
-        logger.info("=" * 80)
-        print(window_report)
-        
+
         logger.info("\n" + "=" * 80)
         logger.info("Analysis complete!")
         logger.info(f"Results saved to: {output_dir}")
