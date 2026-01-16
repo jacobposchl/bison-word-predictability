@@ -2,22 +2,24 @@
 
 ## Overview
 
-This package preprocesses raw EAF annotation files into processed data for code-switching analysis:
+This package analyzes code-switching predictability by comparing surprisal values at code-switch points between code-switched and monolingual sentences. The analysis is performed in three stages:
+
+**STAGE 1: Data Preprocessing**
 - Extracts and cleans bilingual speech annotations from EAF files
-- Identifies code-switching patterns (transitions between Cantonese and English)
-- Determines matrix language (dominant language) for each sentence
-- Generates visualizations and exports processed data to CSV
+- Identifies code-switching patterns and matrix language for each sentence
+- Translates code-switched sentences to full Cantonese using NLLB
+- Exports processed datasets to CSV files
 
-## Installation
+**STAGE 2: Window Matching Analysis**
+- Matches translated code-switched sentences with similar monolingual Cantonese sentences
+- Uses POS window matching to find the best matches
+- Creates the final analysis dataset with matched sentence pairs
 
-The required packages are:
-- `pympi-ling` - For processing EAF files
-- `pycantonese` - For Cantonese word segmentation
-- `pandas` - For data manipulation
-- `numpy` - For numerical operations
-- `matplotlib` - For visualization
-- `pyyaml` - For configuration file parsing
-- `seaborn` - For plotting
+**STAGE 3: Surprisal Comparison Experiment**
+- Calculates surprisal values at code-switch points for both code-switched and monolingual sentences
+- Supports discourse context using previous sentences from the same speaker
+- Compares surprisal values and generates statistical summaries and visualizations
+
 
 ## Configuration
 
@@ -49,9 +51,9 @@ Your EAF files should have the following tier structure:
 
 ## Main Scripts
 
-This package has two main scripts that should be run in sequence:
+This package has three main scripts that should be run in sequence:
 
-### 1. `src.preprocess` - Data Preprocessing
+### 1. `scripts/preprocess/preprocess.py` - Data Preprocessing
 
 **What it does:**
 - Loads raw EAF annotation files from `raw_data/` directory
@@ -59,87 +61,126 @@ This package has two main scripts that should be run in sequence:
 - Identifies code-switching patterns (e.g., `C5-E3-C2`)
 - Determines matrix language (dominant language) for each sentence
 - Analyzes impact of filler words
+- Translates code-switched sentences to full Cantonese using NLLB
 - Generates visualizations
-- Exports processed data to CSV files in `processed_data/`
+- Exports processed data to CSV files in `results/preprocessing/`
 
 **When to run:** First step - processes raw EAF files into analyzable CSV data.
 
 **Basic usage:**
 ```bash
-python -m src.preprocess
+python scripts/preprocess/preprocess.py
 ```
 
 **Command-line options:**
 ```bash
-python -m src.preprocess [OPTIONS]
+python scripts/preprocess/preprocess.py [OPTIONS]
 ```
 
 Options:
 - `--no-plots`: Skip generating visualization plots
+- `--no-translation`: Skip translation process (faster, but needed for later steps)
 - `--verbose`: Enable verbose logging
 
 **Examples:**
 ```bash
 # Use default settings
-python -m src.preprocess
+python scripts/preprocess/preprocess.py
 
 # Skip visualizations (faster processing)
-python -m src.preprocess --no-plots
+python scripts/preprocess/preprocess.py --no-plots
+
+# Skip translation (if already done)
+python scripts/preprocess/preprocess.py --no-translation
 
 # Verbose output for debugging
-python -m src.preprocess --verbose
+python scripts/preprocess/preprocess.py --verbose
 ```
 
-### 2. `scripts/exploratory_analysis.py` - Feasibility Analysis
+### 2. `scripts/exploratory/exploratory_analysis.py` - Window Matching Analysis
 
 **What it does:**
-- Loads processed CSV data from `results/preprocessing/`
-- Extracts monolingual sentences (pure Cantonese and pure English)
-- Analyzes POS tagging quality and accuracy
-- Tests matching algorithm (finds similar monolingual sentences for code-switched sentences)
-- Analyzes code-switching distributions
-- Generates comprehensive feasibility report
+- Loads translated code-switched sentences and monolingual Cantonese sentences from preprocessing
+- Performs POS window matching to find similar monolingual sentences for each code-switched sentence
+- Analyzes similarity distributions between matched sentences
+- Creates the final analysis dataset with matched sentence pairs
+- Generates similarity distribution plots and matching reports
 - Saves results to `results/exploratory/`
 
-**When to run:** Second step - analyzes processed data to assess methodology feasibility.
+**When to run:** Second step - creates matched sentence pairs for surprisal analysis.
 
 **Basic usage:**
 ```bash
-python scripts/exploratory_analysis.py
+python scripts/exploratory/exploratory_analysis.py
 ```
 
 **Command-line options:**
 ```bash
-python scripts/exploratory_analysis.py [OPTIONS]
+python scripts/exploratory/exploratory_analysis.py [OPTIONS]
 ```
 
 Options:
-- `--dataset {ALL,WITH,WITHOUT}`: Which dataset to analyze (default: `ALL`)
-  - `ALL`: All sentences (monolingual + code-switched)
-  - `WITH`: Code-switched sentences with fillers
-  - `WITHOUT`: Code-switched sentences without fillers
-- `--sample-size N`: Number of sentences to sample for testing (default: 100, use 0 for full dataset)
-- `--full-dataset`: Process full dataset instead of sampling (overrides `--sample-size`)
-- `--output-dir PATH`: Override output directory from config file (default: from config)
-- `--config PATH`: Path to configuration YAML file (default: `config/config.yaml`)
-- `--verbose`: Enable verbose logging
+- `--sample-size N`: Number of sentences to process (default: all sentences)
 
 **Examples:**
 ```bash
-# Quick analysis with sample (default)
-python scripts/exploratory_analysis.py
+# Process all sentences (default)
+python scripts/exploratory/exploratory_analysis.py
 
-# Analyze full dataset (may take longer)
-python scripts/exploratory_analysis.py --full-dataset
+# Process a sample for testing
+python scripts/exploratory/exploratory_analysis.py --sample-size 100
+```
 
-# Analyze only code-switched sentences without fillers
-python scripts/exploratory_analysis.py --dataset WITHOUT
+### 3. `scripts/main_experiment/run_surprisal_experiment.py` - Surprisal Comparison Experiment
 
-# Custom sample size
-python scripts/exploratory_analysis.py --sample-size 500
+**What it does:**
+- Loads the analysis dataset with matched sentence pairs
+- Calculates surprisal values at code-switch points for both:
+  - Code-switched sentences (translated to full Cantonese)
+  - Matched monolingual Cantonese baseline sentences
+- Supports discourse context using previous sentences from the same speaker
+- Compares surprisal values between code-switched and monolingual sentences
+- Generates statistical summaries and visualizations
+- Saves results to `results/main_experiment_{model_type}/`
 
-# Verbose output
-python scripts/exploratory_analysis.py --verbose
+**When to run:** Third step - performs the main surprisal analysis experiment.
+
+**Basic usage:**
+```bash
+python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive
+```
+
+**Command-line options:**
+```bash
+python scripts/main_experiment/run_surprisal_experiment.py [OPTIONS]
+```
+
+Required arguments:
+- `--model {masked,autoregressive}`: Type of model to use
+  - `masked`: BERT-style masked language model
+  - `autoregressive`: GPT-style autoregressive language model
+
+Optional arguments:
+- `--sample-size N`: Number of sentences to process (default: all)
+- `--no-context`: Disable discourse context (use only current sentence)
+- `--compare-context`: Run both with and without context for comparison
+
+**Examples:**
+```bash
+# Run with autoregressive model and context (default)
+python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive
+
+# Run with masked model
+python scripts/main_experiment/run_surprisal_experiment.py --model masked
+
+# Run without discourse context
+python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive --no-context
+
+# Compare both context modes
+python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive --compare-context
+
+# Process a sample for testing
+python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive --sample-size 50
 ```
 
 ## Workflow
@@ -148,15 +189,21 @@ The typical workflow is:
 
 1. **Preprocess raw data:**
    ```bash
-   python -m src.preprocess
+   python scripts/preprocess/preprocess.py
    ```
-   This creates CSV files in `processed_data/` directory.
+   This processes EAF files and creates CSV files in `results/preprocessing/` directory, including translated sentences.
 
-2. **Run feasibility analysis:**
+2. **Run window matching analysis:**
    ```bash
-   python scripts/exploratory_analysis.py
+   python scripts/exploratory/exploratory_analysis.py
    ```
-   This analyzes the processed data and generates a feasibility report in `results/exploratory/`.
+   This matches code-switched sentences with similar monolingual sentences and creates the analysis dataset in `results/exploratory/`.
+
+3. **Run surprisal experiment:**
+   ```bash
+   python scripts/main_experiment/run_surprisal_experiment.py --model autoregressive
+   ```
+   This calculates and compares surprisal values at code-switch points, generating results in `results/main_experiment_autoregressive/` (or `results/main_experiment_masked/` for masked models).
 
 ## Output Files
 
@@ -196,47 +243,61 @@ Saved to the `figures/preprocessing/` directory:
 
 The exploratory analysis script generates:
 
-1. **`monolingual_sentences.csv`**: Extracted monolingual sentences (pure Cantonese and English)
-2. **`pos_tagged_sample.csv`**: Sample of POS-tagged sentences with sequences
-3. **`matching_results_sample.csv`**: Results of matching algorithm tests
-4. **`feasibility_report.txt`**: Comprehensive feasibility assessment report
+1. **`analysis_dataset.csv`**: Final analysis dataset with code-switched sentences, their translations, matched monolingual sentences, and matching statistics
+2. **`window_matching_report.txt`**: Report on window matching performance and similarity distributions
 
-Figures (if any) are saved to `figures/exploratory/`.
+Figures are saved to `figures/exploratory/`:
+- **`window_matching_similarity_distributions.png`**: Distribution of similarity scores between matched sentences
+
+### Main Experiment Output (`results/main_experiment_{model_type}/`)
+
+The main experiment script generates:
+
+1. **`surprisal_results.csv`**: Detailed surprisal values for each sentence pair at code-switch points
+2. **`statistics_summary.txt`**: Statistical summary including means, medians, t-tests, and effect sizes
+
+Figures are saved to `figures/main_experiment_{model_type}/`:
+- **`surprisal_distributions.png`**: Distribution of surprisal values for code-switched vs. monolingual sentences
+- **`surprisal_scatter.png`**: Scatter plot comparing surprisal values
+- **`surprisal_differences.png`**: Histogram of differences between code-switched and monolingual surprisal
+- **`surprisal_summary.png`**: Summary statistics visualization
 
 ## Project Structure
 
 ```
 code-switch-predictability-uc-irvine/
 ├── scripts/                       # Executable scripts
-│   ├── exploratory_analysis.py   # Feasibility analysis script
-│   └── analyze_dash_splitting.py  # Dash splitting analysis script
+│   ├── preprocess/               # Preprocessing script
+│   │   └── preprocess.py         # Data preprocessing script
+│   ├── exploratory/              # Exploratory analysis script
+│   │   └── exploratory_analysis.py  # Window matching analysis script
+│   └── main_experiment/          # Main experiment script
+│       └── run_surprisal_experiment.py  # Surprisal comparison experiment
 ├── src/                           # Source modules
 │   ├── __init__.py
-│   ├── preprocess.py              # Data preprocessing module
-│   ├── calvillo_feasibility.py    # Calvillo methodology implementation
-│   ├── matching_algorithm.py     # Matching algorithm for code-switching
-│   ├── pos_tagging.py            # POS tagging utilities
-│   ├── config.py                 # Configuration management
-│   ├── eaf_processor.py          # EAF file processing
-│   ├── text_cleaning.py          # Text cleaning utilities
-│   ├── tokenization.py           # Tokenization functions
-│   ├── pattern_analysis.py       # Pattern building and analysis
-│   ├── data_export.py            # CSV export
-│   └── visualization.py         # Plotting functions
+│   ├── core/                     # Core functionality (config, etc.)
+│   ├── data/                     # Data processing modules
+│   ├── analysis/                 # Analysis modules
+│   ├── experiments/              # Experiment modules
+│   └── plots/                    # Plotting modules
 ├── tests/                        # Test and validation scripts
-│   ├── test_cantonese_segmentation.py
-│   ├── deep_validation.py
-│   └── validate_analysis.py
+│   ├── cantonese_segmentation_test.py
+│   ├── similarity_matching_test.py
+│   ├── test_monolingual_datasets.py
+│   └── test_nllb_translation.py
 ├── config/
 │   └── config.yaml               # Configuration file
 ├── raw_data/                     # INPUT: EAF annotation files
 ├── results/                      # OUTPUT: All analysis results
 │   ├── preprocessing/            # CSV files from preprocessing
 │   ├── exploratory/              # Results from exploratory analysis
-│   └── dash_analysis/            # Results from dash splitting analysis
+│   ├── main_experiment_autoregressive/  # Results from main experiment (autoregressive)
+│   └── main_experiment_masked/   # Results from main experiment (masked)
 ├── figures/                      # OUTPUT: All visualization plots
 │   ├── preprocessing/            # Figures from preprocessing
-│   └── exploratory/              # Figures from exploratory analysis
+│   ├── exploratory/              # Figures from exploratory analysis
+│   ├── main_experiment_autoregressive/  # Figures from main experiment (autoregressive)
+│   └── main_experiment_masked/   # Figures from main experiment (masked)
 ├── requirements.txt              # Python dependencies
 └── README.md                     # This file
 ```

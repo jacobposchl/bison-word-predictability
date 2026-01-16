@@ -325,18 +325,21 @@ class AutoregressiveLMSurprisalCalculator:
         
         # Build full input with context if provided
         # Use consistent spacing: no spaces between Cantonese characters
+        # For autoregressive models, only include words UP TO and INCLUDING the target word
+        words_up_to_target = words[:word_index + 1]
+        
         if context and context.strip():
             # For autoregressive LM, prepend context to sentence
             # Join context and words without spaces (Cantonese doesn't need them)
             context_words = context.strip().split()
-            full_sentence = "".join(context_words) + "".join(words)
+            full_sentence = "".join(context_words) + "".join(words_up_to_target)
             # Adjust word index to account for context words at the beginning
             adjusted_word_index = len(context_words) + word_index
-            full_words = context_words + words
+            full_words = context_words + words_up_to_target
         else:
-            full_sentence = "".join(words)
+            full_sentence = "".join(words_up_to_target)
             adjusted_word_index = word_index
-            full_words = words
+            full_words = words_up_to_target
         
         target_word = words[word_index]
 
@@ -358,8 +361,14 @@ class AutoregressiveLMSurprisalCalculator:
         token_probs = []
 
         # Tokenize the full sentence once
+        # Use the model's maximum length from its config
+        max_length = getattr(self.tokenizer, 'model_max_length', 2048)
+        # If the tokenizer has an unreasonably large default, cap it
+        if max_length > 1000000:
+            max_length = 2048
+        
         encoding = self.tokenizer(full_sentence, return_tensors="pt", add_special_tokens=True, 
-                                  truncation=True, max_length=512)
+                                  truncation=True, max_length=max_length)
         input_ids = encoding['input_ids'].to(self.device)
         
         # Check if target tokens are within the truncated sequence

@@ -33,6 +33,19 @@ class Config:
         self._validate_config()
     
     def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
+        
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        if config is None:
+            raise ValueError(f"Configuration file is empty: {self.config_path}")
+        
+        return config
+    
+    def _validate_config(self) -> None:
         """Validate configuration values."""
         # Validate data path
         data_path = self.get('data.path')
@@ -44,18 +57,19 @@ class Config:
         if min_words < 1:
             raise ValueError("min_sentence_words must be at least 1")
     
-    def get(self, key: str) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         """
         Get configuration value using dot notation.
         
         Args:
             key: Configuration key in dot notation (e.g., 'data.path')
+            default: Default value to return if key is not found. If None, raises KeyError.
             
         Returns:
-            Configuration value
+            Configuration value or default if key not found and default is provided
             
         Raises:
-            KeyError: If the key is not found in configuration
+            KeyError: If the key is not found in configuration and no default is provided
         """
         keys = key.split('.')
         value = self._config
@@ -63,9 +77,13 @@ class Config:
         for k in keys:
             if isinstance(value, dict):
                 if k not in value:
+                    if default is not None:
+                        return default
                     raise KeyError(f"Configuration key not found: {key}")
                 value = value[k]
             else:
+                if default is not None:
+                    return default
                 raise KeyError(f"Configuration key not found: {key}")
         
         return value

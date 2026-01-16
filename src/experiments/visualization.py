@@ -111,19 +111,19 @@ def plot_scatter_comparison(
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     
     # Scatter plot
-    ax.scatter(complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total'],
+    ax.scatter(valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total'],
                alpha=0.5, s=30, color='#66C2A5', edgecolors='black', linewidth=0.5)
     
     # Identity line
-    max_val = max(complete_df['cs_surprisal_total'].max(), complete_df['mono_surprisal_total'].max())
-    min_val = min(complete_df['cs_surprisal_total'].min(), complete_df['mono_surprisal_total'].min())
+    max_val = max(valid_df['cs_surprisal_total'].max(), valid_df['mono_surprisal_total'].max())
+    min_val = min(valid_df['cs_surprisal_total'].min(), valid_df['mono_surprisal_total'].min())
     ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, 
             label='Identity (CS = Mono)')
     
     # Add regression line
     from scipy.stats import linregress
     slope, intercept, r_value, p_value, std_err = linregress(
-        complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total']
+        valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total']
     )
     x_line = np.array([min_val, max_val])
     y_line = slope * x_line + intercept
@@ -132,7 +132,7 @@ def plot_scatter_comparison(
     
     ax.set_xlabel('Monolingual Baseline Surprisal (bits)', fontweight='bold')
     ax.set_ylabel('Code-Switched Translation Surprisal (bits)', fontweight='bold')
-    ax.set_title(f'CS vs. Monolingual Surprisal\n(n={len(complete_df)} complete comparisons)',
+    ax.set_title(f'CS vs. Monolingual Surprisal\n(n={len(valid_df)} complete comparisons)',
                 fontweight='bold', fontsize=14)
     ax.legend(loc='upper left', frameon=True, fancybox=True)
     ax.grid(True, alpha=0.3)
