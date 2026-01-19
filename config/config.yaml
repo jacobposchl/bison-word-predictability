@@ -11,16 +11,11 @@ processing:
   # Minimum number of words required to keep a sentence
   # Sentences with fewer words will be filtered out
   min_sentence_words: 2
-  
-  # Time gap threshold (in milliseconds) for grouping annotations into sentences
-  # Consecutive annotations within this time gap will be merged into one sentence
-  # Default: 1000ms (1 second)
-  time_gap_threshold_ms: 3000
 
 # Translation settings
 translation:
   # NLLB model settings (free, local translation)
-  model: "facebook/nllb-200-distilled-600M"  # Options: 600M (faster), 1.3B, 3.3B (better)
+  model: "facebook/nllb-200-distilled-600M"  # Options: 600M, 1.3B, 3.3B
   device: "cuda"
   
   # Whether to use caching for translations
@@ -33,7 +28,7 @@ translation:
 analysis:
   # Minimum number of Cantonese words required at sentence start
   # for inclusion in analysis dataset
-  min_cantonese_words: 3
+  min_cantonese_words: 2
   
   # Window size for POS matching around switch points
   window_size: 2
@@ -107,4 +102,13 @@ output:
   
   # Output filename for CSV with ALL sentences (monolingual + code-switched)
   csv_all_sentences: "all_sentences.csv"
+  
+  # Output filenames for monolingual sentences
+  csv_cantonese_mono_with_fillers: "cantonese_monolingual_WITH_fillers.csv"
+  csv_cantonese_mono_without_fillers: "cantonese_monolingual_WITHOUT_fillers.csv"
+  csv_english_mono_with_fillers: "english_monolingual_WITH_fillers.csv"
+  csv_english_mono_without_fillers: "english_monolingual_WITHOUT_fillers.csv"
+  
+  # Output filename for translated code-switched sentences
+  csv_cantonese_translated: "cantonese_translated_WITHOUT_fillers.csv"
 

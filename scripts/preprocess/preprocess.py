@@ -36,11 +36,10 @@ from src.plots.preprocessing.plot_preprocessing import (
 )
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging() -> None:
     """Configure logging for the application."""
-    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
@@ -54,25 +53,15 @@ def main():
         description='Preprocess raw EAF files into processed code-switching data'
     )
     parser.add_argument(
-        '--no-plots',
-        action='store_true',
-        help='Skip generating visualization plots'
-    )
-    parser.add_argument(
         '--no-translation',
         action='store_true',
         help='Skip translation process'
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
     )
     
     args = parser.parse_args()
     
     # Setup logging
-    setup_logging(verbose=args.verbose)
+    setup_logging()
     logger = logging.getLogger(__name__)
     
     try:
@@ -81,7 +70,6 @@ def main():
         
         data_path = config.get_data_path()
         min_sentence_words = config.get_min_sentence_words()
-        time_gap_threshold_ms = config.get_time_gap_threshold_ms()
         csv_with_fillers_path = config.get_csv_with_fillers_path()
         csv_without_fillers_path = config.get_csv_without_fillers_path()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
@@ -92,17 +80,14 @@ def main():
         logger.info("="*80)
         logger.info(f"Raw data path: {data_path}")
         logger.info(f"Min sentence words: {min_sentence_words}")
-        logger.info(f"Time gap threshold: {time_gap_threshold_ms}ms")
         logger.info(f"Processed data output: {config.get_preprocessing_results_dir()}/")
         logger.info(f"Figures output: {figures_dir}")
         logger.info("="*80)
         
-        # Step 1: Process all EAF files
-        logger.info("\nStep 1: Processing EAF files...")
+        # Process all EAF files
+        logger.info("\nProcessing EAF files...")
         all_sentences = process_all_files(
-            data_path=data_path,
-            min_sentence_words=min_sentence_words,
-            time_gap_threshold_ms=time_gap_threshold_ms
+            data_path=data_path
         )
         
         if not all_sentences:
@@ -111,66 +96,68 @@ def main():
         
         logger.info(f"Processed {len(all_sentences)} total sentences")
         
-        # Step 2: Filter code-switching sentences
-        logger.info("\nStep 2: Filtering code-switching sentences...")
+        # Filter code-switching sentences
+        logger.info("\nFiltering code-switching sentences...")
         with_fillers = filter_code_switching_sentences(all_sentences, include_fillers=True)
         without_fillers = filter_code_switching_sentences(all_sentences, include_fillers=False)
         
         logger.info(f"Code-switching sentences WITH fillers: {len(with_fillers)}")
         logger.info(f"Code-switching sentences WITHOUT fillers: {len(without_fillers)}")
         
-        # Step 3: Export to CSV
-        logger.info("\nStep 3: Exporting processed data to CSV...")
+        # Export to CSV
+        logger.info("\nExporting processed data to CSV...")
         csv_with_fillers_df, csv_without_fillers_df = export_to_csv(
             all_sentences,
             csv_with_fillers_path,
-            csv_without_fillers_path
+            csv_without_fillers_path,
+            min_sentence_words=min_sentence_words
         )
         
         # Also export ALL sentences (monolingual + code-switched) for exploratory analysis
         logger.info("\nStep 3b: Exporting ALL sentences (monolingual + code-switched)...")
         csv_all_sentences_df = export_all_sentences_to_csv(
             all_sentences,
-            csv_all_sentences_path
+            csv_all_sentences_path,
+            min_sentence_words=min_sentence_words
         )
         
         # Export monolingual sentences (Cantonese and English, with/without fillers)
         logger.info("\nStep 3c: Exporting monolingual sentences...")
         cant_with, cant_without, eng_with, eng_without = export_monolingual_sentences(
             all_sentences,
-            config
+            config,
+            min_sentence_words=min_sentence_words
         )
         
         # Export translated code-switched sentences
         translated_df = None
         if not args.no_translation:
-            logger.info("\nStep 3d: Exporting and translating sentences...")
+            logger.info("\nExporting and translating sentences...")
             translated_df = export_translated_sentences(
                 all_sentences,
                 config,
-                do_translation=True
+                do_translation=True,
+                min_sentence_words=min_sentence_words
             )
         else:
-            logger.info("\nStep 3d: Skipping translation process (--no-translation flag set)")
+            logger.info("\nSkipping translation process (--no-translation flag set)")
             # Still create the structure but without translation
             translated_df = export_translated_sentences(
                 all_sentences,
                 config,
-                do_translation=False
+                do_translation=False,
+                min_sentence_words=min_sentence_words
             )
         
-        # Step 4: Generate visualizations
-        if not args.no_plots:
-            logger.info("\nStep 4: Generating visualizations...")
-            plot_matrix_language_distribution(with_fillers, without_fillers, figures_dir)
-            plot_equal_matrix_cases(with_fillers, without_fillers, figures_dir)
-            plot_filler_impact(with_fillers, without_fillers, figures_dir)
-            logger.info("Visualizations saved to " + figures_dir)
-        else:
-            logger.info("\nStep 4: Skipping visualizations (--no-plots flag set)")
+        # Generate visualizations
+        logger.info("\nGenerating visualizations...")
+        plot_matrix_language_distribution(with_fillers, without_fillers, figures_dir)
+        plot_equal_matrix_cases(with_fillers, without_fillers, figures_dir)
+        plot_filler_impact(with_fillers, without_fillers, figures_dir)
+        logger.info("Visualizations saved to " + figures_dir)
         
-        # Step 5: Print analysis summary
-        logger.info("\nStep 5: Analysis Summary")
+        # Print analysis summary
+        logger.info("\nAnalysis Summary")
         logger.info("="*80)
         print_analysis_summary(with_fillers, without_fillers)
         
@@ -191,8 +178,7 @@ def main():
         if not args.no_translation:
             logger.info("\nTranslated sentences:")
             logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")
-        if not args.no_plots:
-            logger.info(f"\nFigures saved to: {figures_dir}")
+        logger.info(f"\nFigures saved to: {figures_dir}")
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

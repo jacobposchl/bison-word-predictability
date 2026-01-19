@@ -8,106 +8,182 @@ and building code-switching patterns with and without fillers.
 from typing import List, Dict, Tuple, Optional
 import os
 import logging
-from ..data.eaf_processor import load_eaf_file, get_main_tier, extract_tiers, parse_participant_info, get_all_eaf_files
-from ..core.tokenization import tokenize_annotation
-from ..core.text_cleaning import is_filler
+import pycantonese
+from ..data.eaf_processor import load_eaf_file, get_main_tier, parse_participant_info, get_all_eaf_files
+from ..core.tokenization import per_word_times
+from ..core.text_cleaning import is_filler, clean_word, has_content, split_on_internal_dashes
 
 logger = logging.getLogger(__name__)
 
 
-def group_annotations_by_time_gap(
-    cant_annotations: List[Tuple[int, int, str]],
-    eng_annotations: List[Tuple[int, int, str]],
-    time_gap_threshold_ms: int = 1000
-) -> List[Dict]:
+def _is_cjk_character(char: str) -> bool:
     """
-    Group Cantonese and English annotations into logical sentences based on time gaps.
-    
-    Consecutive annotations (from either language) are merged into one sentence if
-    the time gap between them is less than the threshold.
+    Check if a character is a CJK (Chinese/Japanese/Korean) character.
     
     Args:
-        cant_annotations: List of (start, end, text) tuples for Cantonese tier
-        eng_annotations: List of (start, end, text) tuples for English tier
-        time_gap_threshold_ms: Maximum time gap (ms) to merge annotations (default: 1000ms)
+        char: Single character
         
     Returns:
-        List of grouped annotation dictionaries containing:
-        - 'start_time': Earliest start time in group
-        - 'end_time': Latest end time in group
-        - 'cant_annotations': List of Cantonese annotations in this group
-        - 'eng_annotations': List of English annotations in this group
-        - 'original_text': Combined text from all annotations
+        True if character is CJK, False otherwise
     """
-    # Combine all annotations with language labels
-    all_annotations = []
-    for start, end, text in cant_annotations:
-        all_annotations.append({'start': start, 'end': end, 'text': text, 'lang': 'C'})
-    for start, end, text in eng_annotations:
-        all_annotations.append({'start': start, 'end': end, 'text': text, 'lang': 'E'})
+    code_point = ord(char)
+    return (
+        (0x4E00 <= code_point <= 0x9FFF) or      # CJK Unified Ideographs
+        (0x3400 <= code_point <= 0x4DBF) or      # CJK Extension A
+        (0x20000 <= code_point <= 0x2A6DF) or    # CJK Extension B
+        (0x2A700 <= code_point <= 0x2B73F) or    # CJK Extension C
+        (0x2B740 <= code_point <= 0x2B81F) or    # CJK Extension D
+        (0xF900 <= code_point <= 0xFAFF) or      # CJK Compatibility Ideographs
+        (0x2F800 <= code_point <= 0x2FA1F)       # CJK Compatibility Ideographs Supplement
+    )
+
+
+def _is_ascii_alphabetic(char: str) -> bool:
+    """
+    Check if a character is an ASCII alphabetic character.
     
-    # Sort by start time
-    all_annotations.sort(key=lambda x: x['start'])
+    Args:
+        char: Single character
+        
+    Returns:
+        True if character is ASCII letter (a-z, A-Z), False otherwise
+    """
+    return ord(char) < 128 and char.isalpha()
+
+
+def segment_by_script(text: str) -> List[Tuple[str, str]]:
+    """
+    Segment text into runs of same script (CJK vs ASCII).
     
-    if not all_annotations:
+    This handles cases like "我local人" → [("我", "C"), ("local", "E"), ("人", "C")]
+    and "我 local 人" → [("我", "C"), ("local", "E"), ("人", "C")]
+    
+    Args:
+        text: Input text that may contain mixed scripts
+        
+    Returns:
+        List of (segment_text, language_code) tuples
+        language_code is 'C' for Cantonese (CJK) or 'E' for English (ASCII)
+    """
+    if not text:
         return []
     
-    # Group annotations based on time gaps
-    grouped_sentences = []
-    current_group = {
-        'start_time': all_annotations[0]['start'],
-        'end_time': all_annotations[0]['end'],
-        'cant_annotations': [],
-        'eng_annotations': [],
-        'texts': []
-    }
+    segments = []
+    current_segment = []
+    current_script = None
     
-    # Add first annotation to current group
-    first = all_annotations[0]
-    if first['lang'] == 'C':
-        current_group['cant_annotations'].append((first['start'], first['end'], first['text']))
-    else:
-        current_group['eng_annotations'].append((first['start'], first['end'], first['text']))
-    current_group['texts'].append(first['text'])
-    
-    # Process remaining annotations
-    for ann in all_annotations[1:]:
-        # Check time gap from end of current group to start of this annotation
-        time_gap = ann['start'] - current_group['end_time']
-        
-        if time_gap <= time_gap_threshold_ms:
-            # Merge into current group
-            current_group['end_time'] = max(current_group['end_time'], ann['end'])
-            if ann['lang'] == 'C':
-                current_group['cant_annotations'].append((ann['start'], ann['end'], ann['text']))
-            else:
-                current_group['eng_annotations'].append((ann['start'], ann['end'], ann['text']))
-            current_group['texts'].append(ann['text'])
+    for char in text:
+        # Determine script type for this character
+        if _is_cjk_character(char):
+            script = 'C'
+        elif _is_ascii_alphabetic(char):
+            script = 'E'
         else:
-            # Finalize current group
-            current_group['original_text'] = ' '.join(current_group['texts'])
-            del current_group['texts']
-            grouped_sentences.append(current_group)
+            # Punctuation, whitespace, numbers, etc.
+            # Attach to previous segment if exists, otherwise skip
+            if current_segment:
+                current_segment.append(char)
+            continue
+        
+        # Check if script changed
+        if current_script is None:
+            # First character
+            current_script = script
+            current_segment = [char]
+        elif current_script == script:
+            # Same script, continue segment
+            current_segment.append(char)
+        else:
+            # Script changed, finalize current segment and start new one
+            if current_segment:
+                segments.append((''.join(current_segment), current_script))
+            current_script = script
+            current_segment = [char]
+    
+    # Don't forget the last segment
+    if current_segment:
+        segments.append((''.join(current_segment), current_script))
+    
+    return segments
+
+
+def tokenize_main_tier_sentence(start: int, end: int, text: str) -> List[Tuple[float, str, str]]:
+    """
+    Tokenize a main tier sentence and assign language labels based on script.
+    
+    This handles mixed text with inconsistent spacing by using script-based segmentation.
+    
+    Args:
+        start: Start time (ms)
+        end: End time (ms)
+        text: Sentence text from main tier (may have mixed scripts, inconsistent spacing)
+        
+    Returns:
+        List of (timestamp, word, language) tuples
+    """
+    # First, segment by script boundaries
+    script_segments = segment_by_script(text)
+    
+    if not script_segments:
+        return []
+    
+    all_tokens = []
+    
+    for segment_text, lang in script_segments:
+        if not segment_text.strip():
+            continue
+        
+        # Tokenize based on language
+        if lang == 'C':
+            # Cantonese: use PyCantonese segmentation
+            raw_tokens = pycantonese.segment(segment_text)
+        else:
+            # English: split by whitespace
+            raw_tokens = segment_text.split()
+        
+        # Clean and process tokens (similar to tokenize_annotation)
+        for w in raw_tokens:
+            if not w.strip():
+                continue
             
-            # Start new group
-            current_group = {
-                'start_time': ann['start'],
-                'end_time': ann['end'],
-                'cant_annotations': [],
-                'eng_annotations': [],
-                'texts': [ann['text']]
-            }
-            if ann['lang'] == 'C':
-                current_group['cant_annotations'].append((ann['start'], ann['end'], ann['text']))
+            # Split on ellipses
+            ellipsis_parts = []
+            if '...' in w:
+                ellipsis_parts = w.split('...')
+            elif '…' in w:
+                ellipsis_parts = w.split('…')
             else:
-                current_group['eng_annotations'].append((ann['start'], ann['end'], ann['text']))
+                ellipsis_parts = [w]
+            
+            for part in ellipsis_parts:
+                if not part.strip():
+                    continue
+                
+                # Split on commas
+                comma_parts = part.split(',') if ',' in part else [part]
+                
+                for comma_part in comma_parts:
+                    if not comma_part.strip():
+                        continue
+                    
+                    # Split on internal dashes
+                    subparts = split_on_internal_dashes(comma_part)
+                    if not subparts:
+                        continue
+                    
+                    for piece in subparts:
+                        cw = clean_word(piece)
+                        if cw and has_content(cw):
+                            all_tokens.append((cw, lang))
     
-    # Don't forget the last group
-    current_group['original_text'] = ' '.join(current_group['texts'])
-    del current_group['texts']
-    grouped_sentences.append(current_group)
+    if not all_tokens:
+        return []
     
-    return grouped_sentences
+    # Assign timestamps
+    times = per_word_times(start, end, len(all_tokens))
+    return [(t, tok, lang) for t, (tok, lang) in zip(times, all_tokens)]
+
+
 
 
 def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
@@ -138,44 +214,25 @@ def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
     return "Equal"
 
 
-def process_sentence_from_grouped_annotations(
-    grouped_annotation: Dict
+def process_sentence_from_main_tier(
+    main_annotation: Tuple[int, int, str]
 ) -> Optional[Dict]:
     """
-    Process a grouped annotation set and create sentence data.
+    Process a main tier sentence annotation and create sentence data.
     
-    This function processes sentences derived from subtier annotations grouped by time gaps,
-    rather than using main tier sentence boundaries.
+    This function processes sentences from main tier annotations using script-based
+    segmentation to identify Cantonese and English words without relying on subtiers.
     
     Args:
-        grouped_annotation: Dictionary containing:
-            - 'start_time': Earliest start time
-            - 'end_time': Latest end time
-            - 'cant_annotations': List of (start, end, text) tuples for Cantonese
-            - 'eng_annotations': List of (start, end, text) tuples for English
-            - 'original_text': Combined text from all annotations
+        main_annotation: (start_time, end_time, text) tuple from main tier
         
     Returns:
         Dictionary with sentence data, or None if no words found
     """
-    start = grouped_annotation['start_time']
-    end = grouped_annotation['end_time']
-    original_text = grouped_annotation['original_text']
-    cant_annotations = grouped_annotation['cant_annotations']
-    eng_annotations = grouped_annotation['eng_annotations']
+    start, end, original_text = main_annotation
     
-    sentence_words = []
-    
-    # Tokenize all Cantonese annotations
-    for a_start, a_end, a_text in cant_annotations:
-        sentence_words.extend(tokenize_annotation(a_start, a_end, a_text, 'C'))
-    
-    # Tokenize all English annotations
-    for a_start, a_end, a_text in eng_annotations:
-        sentence_words.extend(tokenize_annotation(a_start, a_end, a_text, 'E'))
-    
-    # Sort by time to preserve spoken order
-    sentence_words.sort(key=lambda x: x[0])
+    # Tokenize the sentence using script-based segmentation
+    sentence_words = tokenize_main_tier_sentence(start, end, original_text)
     
     if not sentence_words:
         return None
@@ -311,20 +368,19 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
 
 
 def process_all_files(
-    data_path: str,
-    min_sentence_words: int = 2,
-    time_gap_threshold_ms: int = 1000
+    data_path: str
 ) -> List[Dict]:
     """
-    Process all EAF files in the data directory using subtier-based sentence grouping.
+    Process all EAF files in the data directory using main tier sentence boundaries.
     
-    This function groups Cantonese and English annotations by time gaps rather than
-    using main tier boundaries, which prevents duplicate sentences.
+    This function uses main tier annotations directly as sentence boundaries,
+    then extracts the relevant Cantonese and English subtier annotations for each sentence.
+    
+    Note: min_sentence_words filtering is applied later in export functions,
+    after filler removal, to ensure accurate word counts.
     
     Args:
         data_path: Path to directory containing EAF files
-        min_sentence_words: Minimum number of words to keep a sentence
-        time_gap_threshold_ms: Time gap threshold (ms) for grouping annotations into sentences
         
     Returns:
         List of sentence data dictionaries
@@ -333,7 +389,7 @@ def process_all_files(
     all_sentence_patterns = []
     
     logger.info(f"Found {len(eaf_files)} EAF files to process")
-    logger.info(f"Using time gap threshold: {time_gap_threshold_ms}ms for sentence grouping")
+    logger.info("Using main tier annotations for sentence boundaries")
     
     for file_idx, eaf_file in enumerate(eaf_files, 1):
         file_path = os.path.join(data_path, eaf_file)
@@ -353,21 +409,21 @@ def process_all_files(
             group_code = participant_info['group_code']
             group = participant_info['group']
             
-            # Get language tier annotations
-            cant_c, eng_c = extract_tiers(eaf, main_tier)
+            # Get main tier annotations (sentences)
+            try:
+                main_annotations = eaf.get_annotation_data_for_tier(main_tier)
+            except KeyError as e:
+                logger.warning(f"Skipping {eaf_file} - main tier not found: {e}")
+                continue
             
-            # Group annotations by time gaps (subtier-based approach)
-            grouped_annotations = group_annotations_by_time_gap(
-                cant_c, eng_c, time_gap_threshold_ms
-            )
-            
-            # Process each grouped annotation set as a sentence
+            # Process each main tier annotation as a sentence
             file_sentence_count = 0
-            for grouped_annotation in grouped_annotations:
-                sentence_data = process_sentence_from_grouped_annotations(grouped_annotation)
+            for main_annotation in main_annotations:
+                sentence_data = process_sentence_from_main_tier(main_annotation)
                 
-                # Only keep sentences with multiple words
-                if sentence_data and len(sentence_data['items']) >= min_sentence_words:
+                # Only keep sentences with at least some words (basic check)
+                # Full min_sentence_words filtering happens AFTER filler removal in export functions
+                if sentence_data and len(sentence_data['items']) > 0:
                     # Add participant info to the sentence data
                     sentence_data['participant_id'] = participant_id
                     sentence_data['group_code'] = group_code
