@@ -35,7 +35,7 @@ def get_previous_sentences(
     participant: str,
     start_time: float,
     num_previous: int = 3
-) -> List[str]:
+) -> List[Dict]:
     """
     Get k previous sentences from same speaker's conversation.
     
@@ -46,7 +46,8 @@ def get_previous_sentences(
         num_previous: Number of previous sentences to retrieve
         
     Returns:
-        List of previous sentences (may be < num_previous if not enough exist)
+        List of sentence dictionaries with 'sentence' and 'pattern' keys
+        (may be < num_previous if not enough exist)
     """
     # Filter to same participant, before current sentence
     previous = all_sentences_df[
@@ -54,32 +55,42 @@ def get_previous_sentences(
         (all_sentences_df['start_time'] < start_time)
     ].sort_values('start_time').tail(num_previous)
     
-    # Return reconstructed sentences
-    return previous['reconstructed_sentence'].tolist()
+    # Return as list of dicts with sentence and pattern
+    result = []
+    for _, row in previous.iterrows():
+        result.append({
+            'sentence': row.get('reconstructed_sentence', ''),
+            'pattern': row.get('pattern', '')
+        })
+    
+    return result
 
 
 def translate_context_sentences(
-    context_sentences: List[str],
+    context_sentences: List[Dict],
     translator,
     min_quality: float = 0.3
 ) -> Dict:
     """
     Translate context sentences and assess quality.
     
-    Removes untranslatable words (UNKNOWN tokens, English words) from translations.
+    Translates sentences (code-switched or English), removes fillers, and filters
+    untranslatable words (UNKNOWN tokens, English words) from translations.
     
     Args:
-        context_sentences: List of sentences to translate
+        context_sentences: List of sentence dicts with 'sentence' and 'pattern' keys
         translator: NLLBTranslator instance
-        min_quality: Minimum ratio of successfully translated words
+        min_quality: Minimum ratio of successfully completed translations
         
     Returns:
         Dict with:
-            - translated_context: Cleaned Cantonese context (space-separated)
-            - quality_score: Ratio of translated words to original words
+            - translated_context: Cleaned Cantonese context (space-separated, fillers removed)
+            - quality_score: Ratio of completed translations to attempted translations
             - is_valid: Whether quality meets minimum threshold
             - num_context_sentences: Number of context sentences
     """
+    from src.core.text_cleaning import remove_fillers_from_text
+    
     if not context_sentences:
         return {
             'translated_context': '',
@@ -89,34 +100,63 @@ def translate_context_sentences(
         }
     
     translations = []
-    total_original_words = 0
-    total_translated_words = 0
+    attempted_translations = len(context_sentences)
+    completed_translations = 0
     
-    for sent in context_sentences:
-        # Translate sentence
-        cantonese = translator.translate_english_to_cantonese(sent)
+    for sent_dict in context_sentences:
+        sentence = sent_dict.get('sentence', '')
+        pattern = sent_dict.get('pattern', '')
         
-        # Count original words
-        original_words = sent.split()
-        total_original_words += len(original_words)
+        if not sentence:
+            continue
         
-        # Clean translation - remove UNKNOWN/untranslatable tokens
-        translated_words = [
-            w for w in cantonese.split()
-            if w not in ['UNKNOWN', 'UNK', ''] and not is_english_word(w)
-        ]
+        try:
+            # Determine if sentence is code-switched based on pattern
+            is_code_switched = False
+            if pattern:
+                segments = parse_pattern_segments(pattern)
+                # Check if pattern has both C and E
+                languages = {lang for lang, _ in segments}
+                is_code_switched = 'C' in languages and 'E' in languages
+            
+            # Translate based on type
+            if is_code_switched:
+                # Use code-switched translation method
+                words = sentence.split()
+                translation_result = translator.translate_code_switched_sentence(
+                    sentence=sentence,
+                    pattern=pattern,
+                    words=words
+                )
+                cantonese = translation_result.get('translated_sentence', '')
+            else:
+                # Use English-to-Cantonese translation
+                cantonese = translator.translate_english_to_cantonese(sentence)
+            
+            # Remove fillers from translation
+            cantonese = remove_fillers_from_text(cantonese, lang=None)  # Remove both C and E fillers
+            
+            # Clean translation - remove UNKNOWN/untranslatable tokens and English words
+            translated_words = [
+                w for w in cantonese.split()
+                if w not in ['UNKNOWN', 'UNK', ''] and not is_english_word(w)
+            ]
+            
+            # Keep cleaned translation if it has content
+            if translated_words:
+                translations.append(' '.join(translated_words))
+                completed_translations += 1
         
-        total_translated_words += len(translated_words)
-        
-        # Keep cleaned translation
-        if translated_words:
-            translations.append(' '.join(translated_words))
+        except Exception as e:
+            # Translation failed for this sentence, skip it
+            logger.debug(f"Translation failed for sentence: {sentence[:50]}... Error: {e}")
+            continue
     
     # Join all context sentences
     full_context = ' '.join(translations)
     
-    # Calculate quality score
-    quality_score = total_translated_words / max(total_original_words, 1)
+    # Calculate quality score: completed translations / attempted translations
+    quality_score = completed_translations / max(attempted_translations, 1)
     is_valid = quality_score >= min_quality
     
     return {
@@ -406,14 +446,21 @@ def add_context_to_analysis_dataset(
                 'num_context_sentences': 0
             }
         
-        # Mono context doesn't need translation (already Cantonese)
-        # Just join with spaces for raw text
-        mono_context_result = {
-            'translated_context': ' '.join(mono_context_sents),
-            'quality_score': 1.0,  # Perfect quality (no translation)
-            'is_valid': len(mono_context_sents) >= min_required,
-            'num_context_sentences': len(mono_context_sents)
-        }
+        # Mono context also needs translation and filler removal (same as CS context)
+        # Pulls from all_sentences.csv which may contain code-switched sentences
+        if mono_context_sents:
+            mono_context_result = translate_context_sentences(
+                mono_context_sents,
+                translator,
+                min_quality
+            )
+        else:
+            mono_context_result = {
+                'translated_context': '',
+                'quality_score': 0.0,
+                'is_valid': False,
+                'num_context_sentences': 0
+            }
         
         # Add context data to row
         row_data.update({

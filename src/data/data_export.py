@@ -624,20 +624,23 @@ def export_translated_sentences(
                     segments = parse_pattern_segments(pattern)
                     if len(segments) >= 2 and segments[1][0] == 'E':
                         first_english_length = segments[1][1]
-                        # Calculate the end of our code-switched segment (Cantonese + first English)
-                        segment_end = switch_index + first_english_length
-                        
-                        # Check if all English words are AFTER the code-switched segment
+                        # switch_index is the last Cantonese word (0-based)
+                        # switch_index + 1 is where the first English segment starts
+                        # We only need to check the Cantonese portion (indices 0 to switch_index, inclusive)
+                        # English words in the first English segment (starting at switch_index+1) or after are allowed
                         translation_words = translation.split()
-                        english_in_segment = False
-                        for i, word in enumerate(translation_words[:segment_end]):
+                        english_in_cantonese_portion = False
+                        cantonese_end = switch_index + 1  # Exclusive end of Cantonese portion
+                        
+                        for i, word in enumerate(translation_words[:cantonese_end]):
                             # Simple check: if word contains only ASCII letters, it's likely English
                             if word and any(c.isascii() and c.isalpha() for c in word):
-                                english_in_segment = True
+                                english_in_cantonese_portion = True
                                 break
                         
-                        # If no English in the segment we care about, consider it valid
-                        if not english_in_segment:
+                        # If no English in the Cantonese portion, consider it valid
+                        # (English in the first English segment or after is fine)
+                        if not english_in_cantonese_portion:
                             is_valid = True
                             error_msg = ''
                 

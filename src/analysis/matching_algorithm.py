@@ -151,7 +151,7 @@ def rank_matches_by_context(
     source_sentence: Dict
 ) -> List[Dict]:
     """
-    Rank matches by contextual relevance: same group > same speaker > time proximity.
+    Rank matches by contextual relevance: same speaker > same group > time proximity (only for same speaker).
     
     Args:
         matches: List of match dictionaries from find_window_matches
@@ -170,6 +170,7 @@ def rank_matches_by_context(
         
         Returns tuple of (same_speaker_priority, same_group_priority, time_distance)
         where lower values are better (sorted ascending).
+        Time distance is only meaningful for same-speaker matches.
         """
         match_sent = match.get('match_sentence', {})
         match_group = match_sent.get('group', '')
@@ -182,8 +183,13 @@ def rank_matches_by_context(
         # Priority 2: Same group (0 if same, 1 if different)
         same_group_priority = 0 if match_group == source_group else 1
         
-        # Priority 3: Time proximity (smaller difference is better)
-        time_distance = abs(match_time - source_time)
+        # Priority 3: Time proximity (only meaningful for same speaker)
+        if match_speaker == source_speaker:
+            # Use actual time distance for same speaker
+            time_distance = abs(match_time - source_time)
+        else:
+            # Use large constant for different speakers (time proximity doesn't matter)
+            time_distance = float('inf')
         
         return (same_speaker_priority, same_group_priority, time_distance)
     

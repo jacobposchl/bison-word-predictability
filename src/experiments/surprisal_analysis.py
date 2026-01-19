@@ -81,13 +81,20 @@ def calculate_surprisal_for_dataset(
             # Use space-splitting to match how switch_index was calculated
             # (translations are already properly segmented and space-joined)
             cs_words = row['cs_translation'].split()
-            switch_idx = int(row['switch_index'])
+            # switch_index is stored as 1-based (pointing to last Cantonese word before switch)
+            # For surprisal, we want the first English word (the actual switch token)
+            # switch_index (1-based) = last Cantonese word
+            # switch_token_idx (0-based) = switch_index (1-based) = first English word
+            # Example: Pattern C49-E1, switch_index=49 (1-based, last C word)
+            #          In 0-based: words[48]=last C, words[49]=first E
+            #          So switch_token_idx = 49 (0-based) = first English word
+            switch_token_idx = int(row['switch_index'])  # Already points to first English word when used as 0-based
             
-            if switch_idx >= len(cs_words):
-                raise ValueError(f"Switch index {switch_idx} out of bounds for sentence with {len(cs_words)} words")
+            if switch_token_idx >= len(cs_words):
+                raise ValueError(f"Switch token index {switch_token_idx} out of bounds for sentence with {len(cs_words)} words")
             
             cs_result = surprisal_calc.calculate_surprisal(
-                word_index=switch_idx,
+                word_index=switch_token_idx,  # Calculate surprisal at the switch token (first English word)
                 words=cs_words,
                 context=cs_context  # Pass context
             )
