@@ -325,25 +325,37 @@ class AutoregressiveLMSurprisalCalculator:
         
         # Build full input with context if provided
         # Use consistent spacing: no spaces between Cantonese characters
-        # For autoregressive models, only include words UP TO and INCLUDING the target word
-        words_up_to_target = words[:word_index + 1]
-        
-        if context and context.strip():
-            # For autoregressive LM, prepend context to sentence
-            # Join context and words without spaces (Cantonese doesn't need them)
-            context_words = context.strip().split()
-            full_sentence = "".join(context_words) + "".join(words_up_to_target)
-            # Adjust word index to account for context words at the beginning
-            adjusted_word_index = len(context_words) + word_index
-            full_words = context_words + words_up_to_target
-        else:
-            full_sentence = "".join(words_up_to_target)
-            adjusted_word_index = word_index
-            full_words = words_up_to_target
+        # For autoregressive models, only include words UP TO (but NOT including) the target word
+        # We'll predict the target word given the preceding context
+        words_context = words[:word_index]  # Only context, not including target word
         
         target_word = words[word_index]
-
-        token_indices, token_strings = self._align_word_to_tokens(full_sentence, full_words, adjusted_word_index)
+        
+        # Build full sentence with target for token alignment purposes
+        # (We need to know which tokens the target word corresponds to)
+        if context and context.strip():
+            context_words = context.strip().split()
+            full_sentence_for_alignment = "".join(context_words) + "".join(words)
+            adjusted_word_index = len(context_words) + word_index
+            full_words_for_alignment = context_words + words
+        else:
+            full_sentence_for_alignment = "".join(words)
+            adjusted_word_index = word_index
+            full_words_for_alignment = words
+        
+        # Align target word to tokens (using full sentence to get correct tokenization)
+        token_indices, token_strings = self._align_word_to_tokens(
+            full_sentence_for_alignment, 
+            full_words_for_alignment, 
+            adjusted_word_index
+        )
+        
+        # Build input sentence WITHOUT target word (only context for prediction)
+        if context and context.strip():
+            context_words = context.strip().split()
+            input_sentence = "".join(context_words) + "".join(words_context)
+        else:
+            input_sentence = "".join(words_context)
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -360,20 +372,30 @@ class AutoregressiveLMSurprisalCalculator:
         token_surprisals = []
         token_probs = []
 
-        # Tokenize the full sentence once
+        # Tokenize the input sentence (context only, without target word)
         # Use the model's maximum length from its config
         max_length = getattr(self.tokenizer, 'model_max_length', 2048)
         # If the tokenizer has an unreasonably large default, cap it
         if max_length > 1000000:
             max_length = 2048
         
-        encoding = self.tokenizer(full_sentence, return_tensors="pt", add_special_tokens=True, 
+        encoding = self.tokenizer(input_sentence, return_tensors="pt", add_special_tokens=True, 
                                   truncation=True, max_length=max_length)
         input_ids = encoding['input_ids'].to(self.device)
         
-        # Check if target tokens are within the truncated sequence
-        if token_indices and max(token_indices) >= input_ids.shape[1]:
-            logger.warning(f"Target word tokens beyond truncation limit")
+        # Get the actual token IDs for the target word (for comparison)
+        # We need to tokenize the target word to know what tokens we're predicting
+        # Tokenize the full sentence (with target) to get actual token IDs
+        full_encoding = self.tokenizer(full_sentence_for_alignment, return_tensors="pt", 
+                                       add_special_tokens=True, truncation=True, max_length=max_length)
+        full_input_ids = full_encoding['input_ids'][0].tolist()
+        
+        # Get the position where predictions start (end of context in input)
+        context_token_length = input_ids.shape[1]
+        
+        # Check if target tokens are within bounds
+        if token_indices and max(token_indices) >= len(full_input_ids):
+            logger.warning(f"Target word tokens beyond tokenization limit")
             return {
                 'surprisal': float('nan'),
                 'probability': 0.0,
@@ -384,23 +406,31 @@ class AutoregressiveLMSurprisalCalculator:
                 'num_valid_tokens': 0
             }
 
-        with torch.no_grad():
-            outputs = self.model(input_ids)
-            logits = outputs.logits
-
-        # For each target token, calculate surprisal based on preceding context
-        for token_idx in token_indices:
-            if token_idx == 0:
-                # First token has no context, use uniform prior or skip
+        # For autoregressive models, we need to predict tokens iteratively:
+        # 1. Input context -> predict first target token
+        # 2. Input context + first token -> predict second target token
+        # 3. etc.
+        current_input_ids = input_ids.clone()
+        
+        for i, token_idx_in_full in enumerate(token_indices):
+            # Get the actual token ID from the full sequence
+            actual_token_id = full_input_ids[token_idx_in_full]
+            
+            if current_input_ids.shape[1] == 0:
                 logger.warning(f"Target word at first position, surprisal may be unreliable")
                 token_surprisal = float('nan')
                 token_prob = 0.0
             else:
-                # Get logits from previous position to predict current token
-                token_logits = logits[0, token_idx - 1, :]
+                with torch.no_grad():
+                    outputs = self.model(current_input_ids)
+                    logits = outputs.logits
+                
+                # Get logits from the last position (which predicts the next token)
+                last_position = current_input_ids.shape[1] - 1
+                token_logits = logits[0, last_position, :]
                 probs = torch.softmax(token_logits, dim=0)
                 
-                actual_token_id = input_ids[0, token_idx].item()
+                # Get probability of the actual token
                 token_prob = probs[actual_token_id].item()
 
                 if token_prob > 1e-10:  # Use small threshold to avoid log(0)
@@ -409,6 +439,17 @@ class AutoregressiveLMSurprisalCalculator:
                     # Cap at maximum reasonable surprisal (~ 33 bits for 1e-10 probability)
                     token_surprisal = 33.0
                     logger.debug(f"Very low probability {token_prob:.2e}, capping surprisal at 33.0")
+                
+                # Append the actual token to input for next iteration (if not last token)
+                if i < len(token_indices) - 1:
+                    # Add the actual token to the sequence for predicting next token
+                    new_token = torch.tensor([[actual_token_id]], device=self.device)
+                    current_input_ids = torch.cat([current_input_ids, new_token], dim=1)
+                    
+                    # Check for truncation
+                    if current_input_ids.shape[1] >= max_length:
+                        logger.warning(f"Sequence length exceeded during iterative prediction")
+                        break
 
             token_surprisals.append(token_surprisal)
             token_probs.append(token_prob)

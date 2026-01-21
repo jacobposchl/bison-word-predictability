@@ -697,10 +697,10 @@ def export_translated_sentences(
     
     # Calculate switch_index for each sentence (index where English starts)
     def get_switch_index(pattern: str) -> int:
-        """Extract the index of the last Cantonese word before the first English word.
+        """Extract the index of the first English word (the switch word).
         
-        For pattern C18-E1, returns 17 (the last Cantonese word, 0-based indexing).
-        This is the word immediately before the switch point.
+        For pattern C18-E1, returns 18 (the first English word, 0-based indexing).
+        This is the actual switch word position.
         """
         try:
             segments = parse_pattern_segments(pattern)
@@ -708,7 +708,7 @@ def export_translated_sentences(
                 return -1
             first_lang, first_count = segments[0]
             if first_lang == 'C' and first_count > 0:
-                return first_count - 1  # Last Cantonese word (0-based, so count-1)
+                return first_count  # First English word (0-based, so count is the index)
             return -1  # English starts at beginning, no Cantonese word before switch
         except Exception:
             return -1
@@ -804,13 +804,12 @@ def export_translated_sentences(
                     segments = parse_pattern_segments(pattern)
                     if len(segments) >= 2 and segments[1][0] == 'E':
                         first_english_length = segments[1][1]
-                        # switch_index is the last Cantonese word (0-based)
-                        # switch_index + 1 is where the first English segment starts
-                        # We only need to check the Cantonese portion (indices 0 to switch_index, inclusive)
-                        # English words in the first English segment (starting at switch_index+1) or after are allowed
+                        # switch_index is the first English word (0-based)
+                        # We only need to check the Cantonese portion (indices 0 to switch_index, exclusive)
+                        # English words at switch_index or after are allowed
                         translation_words = translation.split()
                         english_in_cantonese_portion = False
-                        cantonese_end = switch_index + 1  # Exclusive end of Cantonese portion
+                        cantonese_end = switch_index  # Exclusive end of Cantonese portion
                         
                         for i, word in enumerate(translation_words[:cantonese_end]):
                             # Simple check: if word contains only ASCII letters, it's likely English

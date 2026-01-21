@@ -31,7 +31,7 @@ def calculate_surprisal_for_dataset(
             - cs_sentence: Original code-switched sentence
             - cs_translation: Cantonese translation
             - matched_mono: Matched monolingual sentence
-            - switch_index: Position of switch in CS translation
+            - switch_index: Position of switch word (first English word) in CS translation
             - matched_switch_index: Corresponding position in matched sentence
             - similarity: Similarity score
             - pattern: Code-switch pattern
@@ -111,9 +111,9 @@ def calculate_surprisal_for_dataset(
             # which was created by re-segmenting with PyCantonese
             mono_words = pycantonese.segment(row['matched_mono'])
             # matched_switch_index is the direct mapping of switch_index from CS sentence to mono sentence
-            # It points to the equivalent of the last Cantonese word before the switch
-            # We want to measure surprisal at the equivalent of the switch word, so we add +1
-            matched_switch_idx = int(row['matched_switch_index']) + 1
+            # switch_index now points to the first English word (the switch word)
+            # So matched_switch_index also points to the equivalent switch word position
+            matched_switch_idx = int(row['matched_switch_index'])
             
             # Check if the switch word position is available in the matched sentence
             # If not, we can't measure surprisal at the correct position, so skip this row
