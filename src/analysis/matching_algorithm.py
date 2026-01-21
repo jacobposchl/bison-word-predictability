@@ -233,6 +233,7 @@ def find_window_matches(
     # Extract switch point information
     switch_index = code_switched_sentence.get('switch_index', -1)
     translated_pos = code_switched_sentence.get('translated_pos', '')
+    pattern = code_switched_sentence.get('pattern', '')
     
     if switch_index < 0 or not translated_pos:
         return []
@@ -243,11 +244,25 @@ def find_window_matches(
     if not pos_sequence:
         return []
     
+    # Validate switch_index is within bounds
+    if switch_index >= len(pos_sequence):
+        logger.warning(
+            f"switch_index ({switch_index}) is out of bounds for POS sequence length ({len(pos_sequence)}) "
+            f"for pattern '{pattern}'. Adjusting to last valid index."
+        )
+        switch_index = len(pos_sequence) - 1
+    
     # Extract POS window around switch point
-    pos_window = extract_pos_window(pos_sequence, switch_index, window_size)
+    window_start = max(0, switch_index - window_size)
+    window_end = min(len(pos_sequence), switch_index + window_size + 1)
+    pos_window = pos_sequence[window_start:window_end]
     
     if not pos_window:
         return []
+    
+    # Calculate the position of switch_index within the window
+    # This allows us to directly map the switch position to matched sentences
+    switch_index_in_window = switch_index - window_start
     
     matches = []
     window_len = len(pos_window)
@@ -293,10 +308,12 @@ def find_window_matches(
         
         # Keep if above threshold
         if best_similarity >= similarity_threshold:
-            # Calculate center of matched window, clamped to valid indices
-            matched_center_idx = best_start_idx + (len(best_window) // 2)
+            # Direct mapping: switch_index is at position switch_index_in_window within the CS window
+            # When we find a match starting at best_start_idx, the equivalent switch_index
+            # in the matched sentence is at best_start_idx + switch_index_in_window
+            matched_switch_index = best_start_idx + switch_index_in_window
             # Ensure index is within bounds of monolingual sentence
-            matched_center_idx = min(matched_center_idx, len(mono_pos_seq) - 1)
+            matched_switch_index = min(matched_switch_index, len(mono_pos_seq) - 1)
             
             matches.append({
                 'match_sentence': mono_sent,
@@ -305,7 +322,8 @@ def find_window_matches(
                 'pos_window': ' '.join(pos_window),
                 'matched_pos': ' '.join(best_window),
                 'matched_window_start': best_start_idx,
-                'matched_window_center': matched_center_idx
+                'matched_window_center': matched_switch_index,  # Direct mapping of switch_index position
+                'matched_switch_index': matched_switch_index  # Also provide as matched_switch_index for clarity
             })
     
     return matches

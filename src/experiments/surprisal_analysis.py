@@ -14,6 +14,7 @@ from tqdm import tqdm
 import pycantonese
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
+from src.analysis.pos_tagging import parse_pattern_segments
 
 
 def calculate_surprisal_for_dataset(
@@ -81,20 +82,20 @@ def calculate_surprisal_for_dataset(
             # Use space-splitting to match how switch_index was calculated
             # (translations are already properly segmented and space-joined)
             cs_words = row['cs_translation'].split()
-            # switch_index is stored as 1-based (pointing to last Cantonese word before switch)
-            # For surprisal, we want the first English word (the actual switch token)
-            # switch_index (1-based) = last Cantonese word
-            # switch_token_idx (0-based) = switch_index (1-based) = first English word
-            # Example: Pattern C49-E1, switch_index=49 (1-based, last C word)
-            #          In 0-based: words[48]=last C, words[49]=first E
-            #          So switch_token_idx = 49 (0-based) = first English word
-            switch_token_idx = int(row['switch_index'])  # Already points to first English word when used as 0-based
+            
+            # Get switch word index directly from pattern
+            # Pattern C8-E1 means 8 Cantonese words, then switch word at index 8 (0-based)
+            # This is simpler and more direct than using switch_index + 1
+            pattern = row.get('cs_pattern', row.get('pattern', ''))
+            segments = parse_pattern_segments(pattern)
+            # First segment is always Cantonese for our data, so switch word is at first_count (0-based)
+            switch_token_idx = segments[0][1]
             
             if switch_token_idx >= len(cs_words):
-                raise ValueError(f"Switch token index {switch_token_idx} out of bounds for sentence with {len(cs_words)} words")
+                raise ValueError(f"Switch token index {switch_token_idx} out of bounds for sentence with {len(cs_words)} words (pattern: {pattern})")
             
             cs_result = surprisal_calc.calculate_surprisal(
-                word_index=switch_token_idx,  # Calculate surprisal at the switch token (first English word)
+                word_index=switch_token_idx,  # Calculate surprisal at the switch token (first word that was English, now translated)
                 words=cs_words,
                 context=cs_context  # Pass context
             )
@@ -109,13 +110,18 @@ def calculate_surprisal_for_dataset(
             # Use PyCantonese segmentation because matched_switch_index is based on POS sequence,
             # which was created by re-segmenting with PyCantonese
             mono_words = pycantonese.segment(row['matched_mono'])
-            matched_switch_idx = int(row['matched_switch_index'])
+            # matched_switch_index is the direct mapping of switch_index from CS sentence to mono sentence
+            # It points to the equivalent of the last Cantonese word before the switch
+            # We want to measure surprisal at the equivalent of the switch word, so we add +1
+            matched_switch_idx = int(row['matched_switch_index']) + 1
             
+            # Check if the switch word position is available in the matched sentence
+            # If not, we can't measure surprisal at the correct position, so skip this row
             if matched_switch_idx >= len(mono_words):
-                raise ValueError(f"Matched switch index {matched_switch_idx} out of bounds for sentence with {len(mono_words)} words")
+                raise ValueError(f"Matched switch index {matched_switch_idx} out of bounds for sentence with {len(mono_words)} words. Cannot measure surprisal at switch word position (matched_switch_index={row['matched_switch_index']}, sentence_length={len(mono_words)}).")
             
             mono_result = surprisal_calc.calculate_surprisal(
-                word_index=matched_switch_idx,
+                word_index=matched_switch_idx,  # Calculate surprisal at equivalent of switch word
                 words=mono_words,
                 context=mono_context  # Pass context
             )

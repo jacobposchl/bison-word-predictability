@@ -15,7 +15,11 @@ processing:
 # Translation settings
 translation:
   # NLLB model settings (free, local translation)
-  model: "facebook/nllb-200-distilled-600M"  # Options: 600M, 1.3B, 3.3B
+  model: "facebook/nllb-200-3.3B" 
+  # Options:
+  # facebook/nllb-200-distilled-600M
+  # facebook/nllb-200-distilled-1.3B
+  # facebook/nllb-200-3.3B
   device: "cuda"
   
   # Whether to use caching for translations

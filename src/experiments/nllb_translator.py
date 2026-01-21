@@ -101,6 +101,11 @@ class NLLBTranslator:
         Returns:
             Cantonese translation
         """
+        # Validate input
+        if not english_text or not english_text.strip():
+            logger.warning("Empty or whitespace-only English text provided for translation")
+            return ""
+        
         # Set source language
         self.tokenizer.src_lang = self.ENGLISH_CODE
         
@@ -120,6 +125,13 @@ class NLLBTranslator:
         with torch.no_grad():
             # Get the token ID for Cantonese language code
             cantonese_token_id = self.tokenizer.convert_tokens_to_ids(self.CANTONESE_CODE)
+            
+            # Validate token ID
+            if cantonese_token_id is None:
+                raise ValueError(
+                    f"Could not find token ID for language code '{self.CANTONESE_CODE}'. "
+                    f"Please check that the tokenizer supports this language code."
+                )
             
             translated = self.model.generate(
                 **inputs,
@@ -157,6 +169,15 @@ class NLLBTranslator:
         # Parse pattern
         segments = self._parse_pattern(pattern)
         
+        # Validate pattern matches word count
+        total_pattern_words = sum(count for _, count in segments)
+        if total_pattern_words != len(words):
+            logger.warning(
+                f"Pattern word count ({total_pattern_words}) doesn't match sentence word count ({len(words)}) "
+                f"for pattern '{pattern}' and sentence '{sentence[:50]}...'"
+            )
+            # Continue anyway but log the mismatch
+        
         # Extract segments from words
         word_segments = []
         word_idx = 0
@@ -182,8 +203,18 @@ class NLLBTranslator:
                     'end_idx': end_idx
                 })
             else:  # lang == 'E'
-                # Translate English to Cantonese
+                # Check for empty segments before translation
+                if not segment_words:
+                    logger.warning(f"Empty English segment in pattern {pattern}, skipping")
+                    continue
+                
                 english_text = ' '.join(segment_words)
+                
+                # Additional safety check for empty or whitespace-only text
+                if not english_text.strip():
+                    logger.warning(f"Empty or whitespace-only English text in segment, skipping")
+                    continue
+                
                 cantonese_translation = self.translate_english_to_cantonese(english_text)
                 
                 # Add translation (preserve as space-separated)

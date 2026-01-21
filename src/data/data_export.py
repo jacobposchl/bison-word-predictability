@@ -25,16 +25,58 @@ def _is_english_word(word: str) -> bool:
     Returns:
         True if word appears to be English, False otherwise
     """
-    # Remove punctuation and whitespace
-    cleaned = re.sub(r'[^\w]', '', word)
-    
-    # If empty after cleaning, it's not an English word
-    if not cleaned:
+    if not word:
         return False
+    alpha_chars = [c for c in word if c.isalpha()]
+    if not alpha_chars:
+        return False
+    return all(ord(c) < 128 for c in alpha_chars)
+
+
+def _regenerate_pattern_from_sentence(sentence: str) -> str:
+    """
+    Regenerate pattern from actual sentence by detecting language of each word.
     
-    # Check if all characters are ASCII letters (a-z, A-Z)
-    # This is a simple heuristic: English words use ASCII, Cantonese uses Unicode
-    return all(ord(c) < 128 and c.isalpha() for c in cleaned)
+    This ensures the pattern matches the actual sentence structure (without fillers),
+    rather than using a pattern from a different version of the sentence.
+    
+    Args:
+        sentence: Space-separated sentence
+        
+    Returns:
+        Pattern string like "C5-E2-C3" representing language segments
+    """
+    if not sentence or not sentence.strip():
+        return ""
+    
+    words = sentence.split()
+    if not words:
+        return ""
+    
+    segments = []
+    current_lang = None
+    current_count = 0
+    
+    for word in words:
+        # Determine language of current word
+        is_english = _is_english_word(word)
+        word_lang = 'E' if is_english else 'C'
+        
+        if word_lang == current_lang:
+            # Continue current segment
+            current_count += 1
+        else:
+            # Start new segment
+            if current_lang is not None:
+                segments.append(f"{current_lang}{current_count}")
+            current_lang = word_lang
+            current_count = 1
+    
+    # Add final segment
+    if current_lang is not None:
+        segments.append(f"{current_lang}{current_count}")
+    
+    return '-'.join(segments) if segments else ""
 
 
 def _contains_english_words(text: str) -> Tuple[bool, List[str]]:
@@ -322,17 +364,46 @@ def export_all_sentences_to_csv(
     logger.info(f"Filtered to {len(filtered_sentences)} sentences with at least {min_sentence_words} words (after filler removal)")
     
     # Create DataFrame with all sentences
-    # Use pattern_content_only (WITHOUT fillers) for consistency
-    csv_all = pd.DataFrame({
-        'start_time': [s['start_time'] for s in filtered_sentences],
-        'end_time': [s['end_time'] for s in filtered_sentences],
-        'reconstructed_sentence': [s.get('reconstructed_text_without_fillers', s.get('reconstructed_text', '')) for s in filtered_sentences],
-        'sentence_original': [s['text'] for s in filtered_sentences],
-        'pattern': [s.get('pattern_content_only', s.get('pattern', '')) for s in filtered_sentences],
-        'matrix_language': [s.get('matrix_language', 'Unknown') for s in filtered_sentences],
-        'group': [s.get('group', '') for s in filtered_sentences],
-        'participant_id': [s.get('participant_id', '') for s in filtered_sentences]
-    })
+    # Regenerate patterns from actual sentences to ensure they match reconstructed_sentence
+    csv_all_data = []
+    patterns_regenerated = 0
+    patterns_unchanged = 0
+    
+    for s in filtered_sentences:
+        reconstructed = s.get('reconstructed_text_without_fillers', s.get('reconstructed_text', ''))
+        original_pattern = s.get('pattern_content_only', s.get('pattern', ''))
+        
+        # Regenerate pattern from actual sentence to ensure it matches
+        regenerated_pattern = _regenerate_pattern_from_sentence(reconstructed)
+        
+        # Use regenerated pattern if available, fallback to original
+        if regenerated_pattern:
+            pattern_to_use = regenerated_pattern
+            if regenerated_pattern != original_pattern:
+                patterns_regenerated += 1
+            else:
+                patterns_unchanged += 1
+        else:
+            # Fallback to original if regeneration failed (empty sentence, etc.)
+            pattern_to_use = original_pattern
+            patterns_unchanged += 1
+        
+        csv_all_data.append({
+            'start_time': s['start_time'],
+            'end_time': s['end_time'],
+            'reconstructed_sentence': reconstructed,
+            'sentence_original': s['text'],
+            'pattern': pattern_to_use,
+            'matrix_language': s.get('matrix_language', 'Unknown'),
+            'group': s.get('group', ''),
+            'participant_id': s.get('participant_id', '')
+        })
+    
+    csv_all = pd.DataFrame(csv_all_data)
+    
+    if patterns_regenerated > 0:
+        logger.info(f"Regenerated {patterns_regenerated} patterns to match actual sentences")
+    logger.info(f"Using {patterns_unchanged} original patterns (already matched)")
     csv_all = sort_dataframe(csv_all)
     
     # Create output directory if it doesn't exist

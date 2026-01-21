@@ -30,6 +30,52 @@ def is_english_word(word: str) -> bool:
     return all(ord(c) < 128 for c in alpha_chars)
 
 
+def regenerate_pattern_from_sentence(sentence: str) -> str:
+    """
+    Regenerate pattern from actual sentence by detecting language of each word.
+    
+    This ensures the pattern matches the actual sentence structure (without fillers),
+    rather than using a pattern from a different version of the sentence.
+    
+    Args:
+        sentence: Space-separated sentence
+        
+    Returns:
+        Pattern string like "C5-E2-C3" representing language segments
+    """
+    if not sentence or not sentence.strip():
+        return ""
+    
+    words = sentence.split()
+    if not words:
+        return ""
+    
+    segments = []
+    current_lang = None
+    current_count = 0
+    
+    for word in words:
+        # Determine language of current word
+        is_english = is_english_word(word)
+        word_lang = 'E' if is_english else 'C'
+        
+        if word_lang == current_lang:
+            # Continue current segment
+            current_count += 1
+        else:
+            # Start new segment
+            if current_lang is not None:
+                segments.append(f"{current_lang}{current_count}")
+            current_lang = word_lang
+            current_count = 1
+    
+    # Add final segment
+    if current_lang is not None:
+        segments.append(f"{current_lang}{current_count}")
+    
+    return '-'.join(segments) if segments else ""
+
+
 def get_previous_sentences(
     all_sentences_df: pd.DataFrame,
     participant: str,
@@ -111,13 +157,18 @@ def translate_context_sentences(
             continue
         
         try:
-            # Determine if sentence is code-switched based on pattern
+            # Determine sentence type based on pattern
             is_code_switched = False
+            is_pure_cantonese = False
+            is_pure_english = False
+            
             if pattern:
                 segments = parse_pattern_segments(pattern)
-                # Check if pattern has both C and E
+                # Check what languages are in the pattern
                 languages = {lang for lang, _ in segments}
                 is_code_switched = 'C' in languages and 'E' in languages
+                is_pure_cantonese = languages == {'C'}
+                is_pure_english = languages == {'E'}
             
             # Translate based on type
             if is_code_switched:
@@ -129,9 +180,16 @@ def translate_context_sentences(
                     words=words
                 )
                 cantonese = translation_result.get('translated_sentence', '')
-            else:
-                # Use English-to-Cantonese translation
+            elif is_pure_cantonese:
+                # Pure Cantonese - use as-is (no translation needed)
+                cantonese = sentence
+            elif is_pure_english:
+                # Pure English - translate to Cantonese
                 cantonese = translator.translate_english_to_cantonese(sentence)
+            else:
+                # No pattern or unknown pattern - skip for safety
+                logger.debug(f"Skipping sentence with invalid or missing pattern: {pattern}")
+                continue
             
             # Remove fillers from translation
             cantonese = remove_fillers_from_text(cantonese, lang=None)  # Remove both C and E fillers
