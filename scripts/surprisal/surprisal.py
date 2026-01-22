@@ -291,76 +291,107 @@ def main():
             print("-"*80)
             
             # Get context lengths from config
-            context_lengths = config.get('context.context_lengths', None)
-            if context_lengths is None:
-                # Fallback: if use_context, use default, otherwise empty list
-                context_lengths = [3] if use_context else []
+            if use_context:
+                context_lengths = config.get('context.context_lengths', None)
+                if context_lengths is None:
+                    raise ValueError("context.context_lengths must be specified in config when use_context=True")
+                if not isinstance(context_lengths, list) or len(context_lengths) == 0:
+                    raise ValueError("context.context_lengths must be a non-empty list")
+            else:
+                context_lengths = []
             
             results_df = calculate_surprisal_for_dataset(
                 analysis_df=analysis_df,
                 surprisal_calc=surprisal_calc,
                 show_progress=True,
                 use_context=use_context,
-                context_lengths=context_lengths if use_context else []
+                context_lengths=context_lengths
             )
             
             # Save results
             results_csv_path = mode_results_dir / "surprisal_results.csv"
             results_df.to_csv(results_csv_path, index=False)
             
-            # Compute statistics
+            # Compute statistics for each context length
             print("\n" + "-"*80)
             print("COMPUTING STATISTICS")
             print("-"*80)
             
-            stats_dict = compute_statistics(results_df)
-            print_statistics_summary(stats_dict)
+            # Compute statistics for each context length
+            all_stats = {}
+            for ctx_len in context_lengths:
+                print(f"\nComputing statistics for context length {ctx_len}...")
+                stats_dict = compute_statistics(results_df, context_length=ctx_len)
+                all_stats[ctx_len] = stats_dict
+                print_statistics_summary(stats_dict)
+            
+            # Use first context length for main statistics summary file
+            primary_context_length = context_lengths[0] if context_lengths else None
+            if primary_context_length:
+                stats_dict = all_stats[primary_context_length]
             
             # Save statistics to file
             stats_txt_path = mode_results_dir / "statistics_summary.txt"
             with open(stats_txt_path, 'w', encoding='utf-8') as f:
                 f.write("="*80 + "\n")
-            f.write("SURPRISAL COMPARISON STATISTICS\n")
-            f.write(f"Mode: {mode_name.replace('_', ' ').upper()}\n")
-            f.write("="*80 + "\n\n")
-            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Model type: {args.model}\n\n")
-            
-            f.write(f"Sample Size:\n")
-            f.write(f"  Total comparisons: {stats_dict['n_total']}\n")
-            if stats_dict.get('n_filtered', 0) > 0:
-                f.write(f"  Filtered out (failed calculations): {stats_dict['n_filtered']} ({stats_dict['n_filtered']/stats_dict['n_total']:.1%})\n")
-            f.write(f"  Valid calculations: {stats_dict['n_valid']}\n")
-            f.write(f"  Complete calculations: {stats_dict['n_complete']}\n")
-            f.write(f"  Success rate: {stats_dict['success_rate']:.1%}\n")
-            f.write(f"  Complete rate: {stats_dict['complete_rate']:.1%}\n")
-            
-            if 'n_with_context' in stats_dict:
-                f.write(f"\nContext Usage:\n")
-                f.write(f"  With context: {stats_dict['n_with_context']}\n")
-                f.write(f"  Without context: {stats_dict['n_without_context']}\n")
-            
-            f.write(f"\nCode-Switched Translation Surprisal:\n")
-            f.write(f"  Mean:   {stats_dict['cs_surprisal_mean']:.4f}\n")
-            f.write(f"  Median: {stats_dict['cs_surprisal_median']:.4f}\n")
-            f.write(f"  Std:    {stats_dict['cs_surprisal_std']:.4f}\n\n")
-            
-            f.write(f"Monolingual Baseline Surprisal:\n")
-            f.write(f"  Mean:   {stats_dict['mono_surprisal_mean']:.4f}\n")
-            f.write(f"  Median: {stats_dict['mono_surprisal_median']:.4f}\n")
-            f.write(f"  Std:    {stats_dict['mono_surprisal_std']:.4f}\n\n")
-            
-            f.write(f"  Difference (CS - Monolingual):\n")
-            f.write(f"  Mean:   {stats_dict['difference_mean']:.4f}\n")
-            f.write(f"  Median: {stats_dict['difference_median']:.4f}\n")
-            f.write(f"  Std:    {stats_dict['difference_std']:.4f}\n\n")
-            
-            f.write(f"Paired t-test:\n")
-            f.write(f"  t-statistic: {stats_dict['ttest_statistic']:.4f}\n")
-            f.write(f"  p-value:     {stats_dict['ttest_pvalue']:.6f}\n\n")
-            
-            f.write(f"Effect Size:\n")
-            f.write(f"  Cohen's d: {stats_dict['cohens_d']:.4f}\n\n")
+                f.write("SURPRISAL COMPARISON STATISTICS\n")
+                if primary_context_length:
+                    f.write(f"Context Length: {primary_context_length} sentences\n")
+                f.write(f"Mode: {mode_name.replace('_', ' ').upper()}\n")
+                f.write("="*80 + "\n\n")
+                f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Model type: {args.model}\n\n")
+                
+                f.write(f"Sample Size:\n")
+                f.write(f"  Total comparisons: {stats_dict['n_total']}\n")
+                if stats_dict.get('n_filtered', 0) > 0:
+                    f.write(f"  Filtered out (failed calculations): {stats_dict['n_filtered']} ({stats_dict['n_filtered']/stats_dict['n_total']:.1%})\n")
+                f.write(f"  Valid calculations: {stats_dict['n_valid']}\n")
+                f.write(f"  Complete calculations: {stats_dict['n_complete']}\n")
+                f.write(f"  Success rate: {stats_dict['success_rate']:.1%}\n")
+                f.write(f"  Complete rate: {stats_dict['complete_rate']:.1%}\n")
+                
+                if 'n_with_context' in stats_dict:
+                    f.write(f"\nContext Usage:\n")
+                    f.write(f"  With context: {stats_dict['n_with_context']}\n")
+                    f.write(f"  Without context: {stats_dict['n_without_context']}\n")
+                
+                f.write(f"\nCode-Switched Translation Surprisal:\n")
+                f.write(f"  Mean:   {stats_dict['cs_surprisal_mean']:.4f}\n")
+                f.write(f"  Median: {stats_dict['cs_surprisal_median']:.4f}\n")
+                f.write(f"  Std:    {stats_dict['cs_surprisal_std']:.4f}\n\n")
+                
+                f.write(f"Monolingual Baseline Surprisal:\n")
+                f.write(f"  Mean:   {stats_dict['mono_surprisal_mean']:.4f}\n")
+                f.write(f"  Median: {stats_dict['mono_surprisal_median']:.4f}\n")
+                f.write(f"  Std:    {stats_dict['mono_surprisal_std']:.4f}\n\n")
+                
+                f.write(f"  Difference (CS - Monolingual):\n")
+                f.write(f"  Mean:   {stats_dict['difference_mean']:.4f}\n")
+                f.write(f"  Median: {stats_dict['difference_median']:.4f}\n")
+                f.write(f"  Std:    {stats_dict['difference_std']:.4f}\n\n")
+                
+                f.write(f"Paired t-test:\n")
+                f.write(f"  t-statistic: {stats_dict['ttest_statistic']:.4f}\n")
+                f.write(f"  p-value:     {stats_dict['ttest_pvalue']:.6f}\n\n")
+                
+                f.write(f"Effect Size:\n")
+                f.write(f"  Cohen's d: {stats_dict['cohens_d']:.4f}\n\n")
+                
+                # Write statistics for all context lengths
+                if len(context_lengths) > 1:
+                    f.write("\n" + "="*80 + "\n")
+                    f.write("STATISTICS FOR ALL CONTEXT LENGTHS\n")
+                    f.write("="*80 + "\n\n")
+                    for ctx_len in context_lengths:
+                        if ctx_len in all_stats:
+                            ctx_stats = all_stats[ctx_len]
+                            f.write(f"Context Length {ctx_len}:\n")
+                            f.write(f"  Complete calculations: {ctx_stats['n_complete']}\n")
+                            f.write(f"  CS Mean: {ctx_stats['cs_surprisal_mean']:.4f}\n")
+                            f.write(f"  Mono Mean: {ctx_stats['mono_surprisal_mean']:.4f}\n")
+                            f.write(f"  Difference Mean: {ctx_stats['difference_mean']:.4f}\n")
+                            f.write(f"  p-value: {ctx_stats['ttest_pvalue']:.6f}\n\n")
             
             print(f"\nSaved statistics summary to {stats_txt_path}")
             
@@ -369,28 +400,33 @@ def main():
             print("GENERATING VISUALIZATIONS")
             print("-"*80)
             
-            # Distribution plots
+            # Distribution plots (use first context length for main plots)
+            plot_context_length = primary_context_length if primary_context_length else None
             plot_surprisal_distributions(
                 results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_distributions.png"
+                output_path=mode_figures_dir / "surprisal_distributions.png",
+                context_length=plot_context_length
             )
             
             # Scatter comparison
             plot_scatter_comparison(
                 results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_scatter.png"
+                output_path=mode_figures_dir / "surprisal_scatter.png",
+                context_length=plot_context_length
             )
             
             # Difference histogram
             plot_difference_histogram(
                 results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_differences.png"
+                output_path=mode_figures_dir / "surprisal_differences.png",
+                context_length=plot_context_length
             )
             
             # Summary figure
             plot_summary_statistics(
                 results_df=results_df,
                 output_path=mode_figures_dir / "surprisal_summary.png",
+                context_length=plot_context_length,
                 stats_dict=stats_dict
             )
             

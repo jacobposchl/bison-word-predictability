@@ -27,7 +27,8 @@ def setup_plot_style():
 
 def plot_surprisal_distributions(
     results_df: pd.DataFrame,
-    output_path: Path
+    output_path: Path,
+    context_length: Optional[int] = None
 ):
     """
     Plot distribution comparison between CS and monolingual surprisal.
@@ -36,8 +37,9 @@ def plot_surprisal_distributions(
     surprisal values for both conditions.
     
     Args:
-        results_df: DataFrame with cs_surprisal_total and mono_surprisal_total
+        results_df: DataFrame with cs_surprisal_total and mono_surprisal_total (or context-specific columns)
         output_path: Path to save the figure
+        context_length: Context length to use. If None, tries to find any context length column or uses old column names.
     """
     setup_plot_style()
     
@@ -48,9 +50,36 @@ def plot_surprisal_distributions(
         (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
     ].copy()
     
+    # Determine which columns to use
+    if context_length is not None:
+        cs_col = f'cs_surprisal_context_{context_length}'
+        mono_col = f'mono_surprisal_context_{context_length}'
+    else:
+        # Try to find context length columns, or fall back to old column names
+        context_cols = [col for col in complete_df.columns if 'cs_surprisal_context_' in col]
+        if context_cols:
+            import re
+            match = re.search(r'context_(\d+)', context_cols[0])
+            if match:
+                context_length = int(match.group(1))
+                cs_col = f'cs_surprisal_context_{context_length}'
+                mono_col = f'mono_surprisal_context_{context_length}'
+            else:
+                cs_col = 'cs_surprisal_total'
+                mono_col = 'mono_surprisal_total'
+        else:
+            cs_col = 'cs_surprisal_total'
+            mono_col = 'mono_surprisal_total'
+    
+    # Filter to rows with valid surprisal values
+    complete_df = complete_df[
+        pd.notna(complete_df[cs_col]) &
+        pd.notna(complete_df[mono_col])
+    ].copy()
+    
     # Prepare data for plotting
-    cs_data = complete_df['cs_surprisal_total'].values
-    mono_data = complete_df['mono_surprisal_total'].values
+    cs_data = complete_df[cs_col].values
+    mono_data = complete_df[mono_col].values
     
     # Create melted dataframe for seaborn
     plot_data = pd.DataFrame({
@@ -90,7 +119,8 @@ def plot_surprisal_distributions(
 
 def plot_scatter_comparison(
     results_df: pd.DataFrame,
-    output_path: Path
+    output_path: Path,
+    context_length: Optional[int] = None
 ):
     """
     Plot scatter comparison of CS vs monolingual surprisal.
@@ -99,31 +129,59 @@ def plot_scatter_comparison(
     the relationship between CS and monolingual surprisal values.
     
     Args:
-        results_df: DataFrame with cs_surprisal_total and mono_surprisal_total
+        results_df: DataFrame with cs_surprisal_total and mono_surprisal_total (or context-specific columns)
         output_path: Path to save the figure
+        context_length: Context length to use. If None, tries to find any context length column or uses old column names.
     """
     setup_plot_style()
     
     # Filter valid data
     valid_df = results_df[results_df['calculation_success'] == True].copy()
     
+    # Determine which columns to use
+    if context_length is not None:
+        cs_col = f'cs_surprisal_context_{context_length}'
+        mono_col = f'mono_surprisal_context_{context_length}'
+    else:
+        # Try to find context length columns, or fall back to old column names
+        context_cols = [col for col in valid_df.columns if 'cs_surprisal_context_' in col]
+        if context_cols:
+            import re
+            match = re.search(r'context_(\d+)', context_cols[0])
+            if match:
+                context_length = int(match.group(1))
+                cs_col = f'cs_surprisal_context_{context_length}'
+                mono_col = f'mono_surprisal_context_{context_length}'
+            else:
+                cs_col = 'cs_surprisal_total'
+                mono_col = 'mono_surprisal_total'
+        else:
+            cs_col = 'cs_surprisal_total'
+            mono_col = 'mono_surprisal_total'
+    
+    # Filter to rows with valid surprisal values
+    valid_df = valid_df[
+        pd.notna(valid_df[cs_col]) &
+        pd.notna(valid_df[mono_col])
+    ].copy()
+    
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     
     # Scatter plot
-    ax.scatter(valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total'],
+    ax.scatter(valid_df[mono_col], valid_df[cs_col],
                alpha=0.5, s=30, color='#66C2A5', edgecolors='black', linewidth=0.5)
     
     # Identity line
-    max_val = max(valid_df['cs_surprisal_total'].max(), valid_df['mono_surprisal_total'].max())
-    min_val = min(valid_df['cs_surprisal_total'].min(), valid_df['mono_surprisal_total'].min())
+    max_val = max(valid_df[cs_col].max(), valid_df[mono_col].max())
+    min_val = min(valid_df[cs_col].min(), valid_df[mono_col].min())
     ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, 
             label='Identity (CS = Mono)')
     
     # Add regression line
     from scipy.stats import linregress
     slope, intercept, r_value, p_value, std_err = linregress(
-        valid_df['mono_surprisal_total'], valid_df['cs_surprisal_total']
+        valid_df[mono_col], valid_df[cs_col]
     )
     x_line = np.array([min_val, max_val])
     y_line = slope * x_line + intercept
@@ -145,7 +203,8 @@ def plot_scatter_comparison(
 
 def plot_difference_histogram(
     results_df: pd.DataFrame,
-    output_path: Path
+    output_path: Path,
+    context_length: Optional[int] = None
 ):
     """
     Plot histogram of surprisal differences (CS - Monolingual).
@@ -154,8 +213,9 @@ def plot_difference_histogram(
     CS translations have systematically higher or lower surprisal.
     
     Args:
-        results_df: DataFrame with surprisal_difference column
+        results_df: DataFrame with surprisal_difference column (or context-specific)
         output_path: Path to save the figure
+        context_length: Context length to use. If None, tries to find any context length column or uses old column names.
     """
     setup_plot_style()
     
@@ -166,11 +226,31 @@ def plot_difference_histogram(
         (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
     ].copy()
     
+    # Determine which column to use
+    if context_length is not None:
+        diff_col = f'surprisal_difference_context_{context_length}'
+    else:
+        # Try to find context length columns, or fall back to old column names
+        context_cols = [col for col in complete_df.columns if 'surprisal_difference_context_' in col]
+        if context_cols:
+            import re
+            match = re.search(r'context_(\d+)', context_cols[0])
+            if match:
+                context_length = int(match.group(1))
+                diff_col = f'surprisal_difference_context_{context_length}'
+            else:
+                diff_col = 'surprisal_difference'
+        else:
+            diff_col = 'surprisal_difference'
+    
+    # Filter to rows with valid difference values
+    complete_df = complete_df[pd.notna(complete_df[diff_col])].copy()
+    
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     
     # Histogram
-    differences = complete_df['surprisal_difference'].values
+    differences = complete_df[diff_col].values
     
     ax.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
     ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero difference')
@@ -199,7 +279,8 @@ def plot_difference_histogram(
 def plot_summary_statistics(
     results_df: pd.DataFrame,
     output_path: Path,
-    stats_dict: dict
+    stats_dict: dict = None,
+    context_length: Optional[int] = None
 ):
     """
     Create a comprehensive multi-panel summary figure.
@@ -213,7 +294,8 @@ def plot_summary_statistics(
     Args:
         results_df: DataFrame with surprisal results
         output_path: Path to save the figure
-        stats_dict: Statistics dictionary from compute_statistics()
+        stats_dict: Statistics dictionary from compute_statistics() (optional)
+        context_length: Context length to use. If None, tries to find any context length column or uses old column names.
     """
     setup_plot_style()
     
@@ -224,6 +306,37 @@ def plot_summary_statistics(
         (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
     ].copy()
     
+    # Determine which columns to use
+    if context_length is not None:
+        cs_col = f'cs_surprisal_context_{context_length}'
+        mono_col = f'mono_surprisal_context_{context_length}'
+        diff_col = f'surprisal_difference_context_{context_length}'
+    else:
+        # Try to find context length columns, or fall back to old column names
+        context_cols = [col for col in complete_df.columns if 'cs_surprisal_context_' in col]
+        if context_cols:
+            import re
+            match = re.search(r'context_(\d+)', context_cols[0])
+            if match:
+                context_length = int(match.group(1))
+                cs_col = f'cs_surprisal_context_{context_length}'
+                mono_col = f'mono_surprisal_context_{context_length}'
+                diff_col = f'surprisal_difference_context_{context_length}'
+            else:
+                cs_col = 'cs_surprisal_total'
+                mono_col = 'mono_surprisal_total'
+                diff_col = 'surprisal_difference'
+        else:
+            cs_col = 'cs_surprisal_total'
+            mono_col = 'mono_surprisal_total'
+            diff_col = 'surprisal_difference'
+    
+    # Filter to rows with valid surprisal values
+    complete_df = complete_df[
+        pd.notna(complete_df[cs_col]) &
+        pd.notna(complete_df[mono_col])
+    ].copy()
+    
     # Create 2x2 subplot figure
     fig = plt.figure(figsize=(16, 12))
     gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
@@ -232,8 +345,8 @@ def plot_summary_statistics(
     ax1 = fig.add_subplot(gs[0, 0])
     plot_data = pd.DataFrame({
         'Surprisal': np.concatenate([
-            complete_df['cs_surprisal_total'].values,
-            complete_df['mono_surprisal_total'].values
+            complete_df[cs_col].values,
+            complete_df[mono_col].values
         ]),
         'Condition': ['CS Translation'] * len(complete_df) + ['Mono Baseline'] * len(complete_df)
     })
@@ -247,10 +360,10 @@ def plot_summary_statistics(
     
     # Panel 2: Scatter plot (top-right)
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.scatter(complete_df['mono_surprisal_total'], complete_df['cs_surprisal_total'],
+    ax2.scatter(complete_df[mono_col], complete_df[cs_col],
                alpha=0.5, s=25, color='#66C2A5', edgecolors='black', linewidth=0.5)
-    max_val = max(complete_df['cs_surprisal_total'].max(), complete_df['mono_surprisal_total'].max())
-    min_val = min(complete_df['cs_surprisal_total'].min(), complete_df['mono_surprisal_total'].min())
+    max_val = max(complete_df[cs_col].max(), complete_df[mono_col].max())
+    min_val = min(complete_df[cs_col].min(), complete_df[mono_col].min())
     ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2)
     ax2.set_xlabel('Monolingual Surprisal (bits)', fontweight='bold')
     ax2.set_ylabel('CS Translation Surprisal (bits)', fontweight='bold')
@@ -259,7 +372,7 @@ def plot_summary_statistics(
     
     # Panel 3: Difference histogram (bottom-left)
     ax3 = fig.add_subplot(gs[1, 0])
-    differences = complete_df['surprisal_difference'].values
+    differences = complete_df[diff_col].values
     ax3.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
     ax3.axvline(0, color='red', linestyle='--', linewidth=2)
     ax3.axvline(differences.mean(), color='darkblue', linestyle='-', linewidth=2)

@@ -94,11 +94,19 @@ def calculate_surprisal_for_dataset(
             if 'cs_context' in row and row.get('cs_context_valid', False):
                 cs_context_full = row['cs_context']
                 # Split by delimiter to get individual sentences
-                cs_context_sentences = [s.strip() for s in cs_context_full.split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                # Handle None, NaN, or empty string
+                if pd.notna(cs_context_full) and cs_context_full:
+                    cs_context_sentences = [s.strip() for s in str(cs_context_full).split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                else:
+                    cs_context_sentences = []
             if 'mono_context' in row and row.get('mono_context_valid', False):
                 mono_context_full = row['mono_context']
                 # Split by delimiter to get individual sentences
-                mono_context_sentences = [s.strip() for s in mono_context_full.split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                # Handle None, NaN, or empty string
+                if pd.notna(mono_context_full) and mono_context_full:
+                    mono_context_sentences = [s.strip() for s in str(mono_context_full).split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                else:
+                    mono_context_sentences = []
         
         try:
             # Calculate CS translation surprisal
@@ -270,7 +278,7 @@ def calculate_surprisal_for_dataset(
     return results_df
 
 
-def compute_statistics(results_df: pd.DataFrame) -> Dict:
+def compute_statistics(results_df: pd.DataFrame, context_length: Optional[int] = None) -> Dict:
     """
     Compute statistical comparisons between CS and monolingual surprisal.
     
@@ -279,6 +287,7 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     
     Args:
         results_df: DataFrame from calculate_surprisal_for_dataset() (already filtered for success)
+        context_length: Context length to compute statistics for. If None, tries to find any context length column.
         
     Returns:
         Dictionary containing:
@@ -302,10 +311,48 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     valid_df = results_df[results_df['calculation_success'] == True].copy()
     n_filtered = len(results_df) - len(valid_df)
     
+    # Determine which columns to use
+    if context_length is not None:
+        cs_surprisal_col = f'cs_surprisal_context_{context_length}'
+        mono_surprisal_col = f'mono_surprisal_context_{context_length}'
+        difference_col = f'surprisal_difference_context_{context_length}'
+        used_context_col = f'used_context_{context_length}'
+    else:
+        # Try to find context length columns, or fall back to old column names
+        context_cols = [col for col in results_df.columns if 'cs_surprisal_context_' in col]
+        if context_cols:
+            # Extract context length from first column found
+            import re
+            match = re.search(r'context_(\d+)', context_cols[0])
+            if match:
+                context_length = int(match.group(1))
+                cs_surprisal_col = f'cs_surprisal_context_{context_length}'
+                mono_surprisal_col = f'mono_surprisal_context_{context_length}'
+                difference_col = f'surprisal_difference_context_{context_length}'
+                used_context_col = f'used_context_{context_length}'
+            else:
+                raise ValueError("Could not determine context length from column names")
+        else:
+            # Fall back to old column names (for backward compatibility)
+            cs_surprisal_col = 'cs_surprisal_total'
+            mono_surprisal_col = 'mono_surprisal_total'
+            difference_col = 'surprisal_difference'
+            used_context_col = 'used_context'
+    
+    # Check if required columns exist
+    if cs_surprisal_col not in valid_df.columns or mono_surprisal_col not in valid_df.columns:
+        raise ValueError(f"Required columns not found: {cs_surprisal_col}, {mono_surprisal_col}")
+    
     # Further filter to only include complete calculations (all tokens valid)
     complete_df = valid_df[
         (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
         (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+    ].copy()
+    
+    # Filter to rows with valid surprisal values for this context length
+    complete_df = complete_df[
+        pd.notna(complete_df[cs_surprisal_col]) &
+        pd.notna(complete_df[mono_surprisal_col])
     ].copy()
     
     stats_dict = {
@@ -314,12 +361,13 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
         'n_complete': len(complete_df),
         'n_filtered': n_filtered,
         'success_rate': len(valid_df) / (len(results_df) + n_filtered) if (len(results_df) + n_filtered) > 0 else 0,
-        'complete_rate': len(complete_df) / (len(results_df) + n_filtered) if (len(results_df) + n_filtered) > 0 else 0
+        'complete_rate': len(complete_df) / (len(results_df) + n_filtered) if (len(results_df) + n_filtered) > 0 else 0,
+        'context_length': context_length
     }
     
     # Track context usage if column exists
-    if 'used_context' in complete_df.columns:
-        n_with_context = complete_df['used_context'].sum()
+    if used_context_col in complete_df.columns:
+        n_with_context = complete_df[used_context_col].sum()
         stats_dict['n_with_context'] = int(n_with_context)
         stats_dict['n_without_context'] = len(complete_df) - int(n_with_context)
     
@@ -328,28 +376,35 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     
     # Use complete_df for all statistics (only fully valid token calculations)
     # Basic statistics
-    stats_dict['cs_surprisal_mean'] = complete_df['cs_surprisal_total'].mean()
-    stats_dict['cs_surprisal_std'] = complete_df['cs_surprisal_total'].std()
-    stats_dict['cs_surprisal_median'] = complete_df['cs_surprisal_total'].median()
+    stats_dict['cs_surprisal_mean'] = complete_df[cs_surprisal_col].mean()
+    stats_dict['cs_surprisal_std'] = complete_df[cs_surprisal_col].std()
+    stats_dict['cs_surprisal_median'] = complete_df[cs_surprisal_col].median()
     
-    stats_dict['mono_surprisal_mean'] = complete_df['mono_surprisal_total'].mean()
-    stats_dict['mono_surprisal_std'] = complete_df['mono_surprisal_total'].std()
-    stats_dict['mono_surprisal_median'] = complete_df['mono_surprisal_total'].median()
+    stats_dict['mono_surprisal_mean'] = complete_df[mono_surprisal_col].mean()
+    stats_dict['mono_surprisal_std'] = complete_df[mono_surprisal_col].std()
+    stats_dict['mono_surprisal_median'] = complete_df[mono_surprisal_col].median()
     
-    stats_dict['difference_mean'] = complete_df['surprisal_difference'].mean()
-    stats_dict['difference_std'] = complete_df['surprisal_difference'].std()
-    stats_dict['difference_median'] = complete_df['surprisal_difference'].median()
+    if difference_col in complete_df.columns:
+        stats_dict['difference_mean'] = complete_df[difference_col].mean()
+        stats_dict['difference_std'] = complete_df[difference_col].std()
+        stats_dict['difference_median'] = complete_df[difference_col].median()
+    else:
+        # Calculate difference if column doesn't exist
+        diff = complete_df[cs_surprisal_col] - complete_df[mono_surprisal_col]
+        stats_dict['difference_mean'] = diff.mean()
+        stats_dict['difference_std'] = diff.std()
+        stats_dict['difference_median'] = diff.median()
     
     # Paired t-test (filter out any remaining infinite values)
     valid_pairs = complete_df[
-        np.isfinite(complete_df['cs_surprisal_total']) & 
-        np.isfinite(complete_df['mono_surprisal_total'])
+        np.isfinite(complete_df[cs_surprisal_col]) & 
+        np.isfinite(complete_df[mono_surprisal_col])
     ]
     
     if len(valid_pairs) >= 2:
         t_stat, p_value = stats.ttest_rel(
-            valid_pairs['cs_surprisal_total'],
-            valid_pairs['mono_surprisal_total']
+            valid_pairs[cs_surprisal_col],
+            valid_pairs[mono_surprisal_col]
         )
     else:
         t_stat, p_value = np.nan, np.nan
@@ -358,8 +413,11 @@ def compute_statistics(results_df: pd.DataFrame) -> Dict:
     stats_dict['ttest_pvalue'] = p_value
     
     # Cohen's d effect size
-    diff = complete_df['cs_surprisal_total'] - complete_df['mono_surprisal_total']
-    cohens_d = diff.mean() / diff.std()
+    diff = complete_df[cs_surprisal_col] - complete_df[mono_surprisal_col]
+    if diff.std() > 0:
+        cohens_d = diff.mean() / diff.std()
+    else:
+        cohens_d = np.nan
     stats_dict['cohens_d'] = cohens_d
     
     return stats_dict
