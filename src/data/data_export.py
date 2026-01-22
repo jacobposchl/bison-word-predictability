@@ -681,14 +681,15 @@ def export_translated_sentences(
     """
     Export code-switched sentences with full Cantonese translations.
     
-    Reads from code_switching_WITHOUT_fillers.csv, filters for Cantonese matrix language,
+    Filters code-switching sentences from all_sentences, filters for Cantonese matrix language,
     and creates a new CSV with code_switch_original and cantonese_translation columns.
     Optionally performs translation and POS tagging.
     
     Args:
-        all_sentences: List of all processed sentence data dictionaries (not used, kept for compatibility)
+        all_sentences: List of all processed sentence data dictionaries
         config: Config object with CSV path methods
         do_translation: If True, perform translation and POS tagging. If False, leave columns empty.
+        min_sentence_words: Minimum number of words required
         
     Returns:
         DataFrame with translated sentences structure
@@ -698,17 +699,17 @@ def export_translated_sentences(
     
     logger.info("Exporting translated code-switched sentences...")
     
-    # Read from code_switching_WITHOUT_fillers.csv
-    csv_without_fillers_path = config.get_csv_without_fillers_path()
+    # Filter code-switching sentences (without fillers)
+    code_switched_sentences = filter_code_switching_sentences(all_sentences, include_fillers=False)
+    logger.info(f"Found {len(code_switched_sentences)} code-switching sentences (without fillers)")
     
-    if not os.path.exists(csv_without_fillers_path):
-        logger.error(f"Source CSV not found: {csv_without_fillers_path}")
-        logger.error("Please run preprocessing first to generate code_switching_WITHOUT_fillers.csv")
+    # Convert to DataFrame for easier filtering
+    # Note: min_sentence_words filtering is applied later, after pattern filtering (matching original logic)
+    df_source = pd.DataFrame(code_switched_sentences)
+    
+    if len(df_source) == 0:
+        logger.warning("No code-switching sentences found!")
         return pd.DataFrame()
-    
-    logger.info(f"Reading from: {csv_without_fillers_path}")
-    df_source = pd.read_csv(csv_without_fillers_path)
-    logger.info(f"Loaded {len(df_source)} rows from source CSV")
     
     # Track filtering stats for summary
     stats = {
@@ -733,8 +734,10 @@ def export_translated_sentences(
     logger.info(f"Applying pattern filter: must start with at least {min_cantonese} Cantonese words followed by English")
     
     # Filter by pattern criteria - check if pattern starts with enough Cantonese words followed by English
+    # Use pattern_content_only from sentence dicts (without fillers)
+    pattern_col = 'pattern_content_only' if 'pattern_content_only' in df_cantonese.columns else 'pattern'
     valid_patterns = []
-    for pattern in df_cantonese['pattern'].values:
+    for pattern in df_cantonese[pattern_col].values:
         try:
             segments = parse_pattern_segments(pattern)
             if len(segments) >= 2:
@@ -753,7 +756,7 @@ def export_translated_sentences(
     
     # Apply min_sentence_words filtering (count words from pattern)
     if min_sentence_words > 0:
-        word_counts = [_count_words_from_pattern(p) for p in df_cantonese['pattern'].values]
+        word_counts = [_count_words_from_pattern(p) for p in df_cantonese[pattern_col].values]
         df_cantonese = df_cantonese[[wc >= min_sentence_words for wc in word_counts]].copy()
         logger.info(f"After min_sentence_words filtering (min={min_sentence_words}): {len(df_cantonese)} sentences")
     
@@ -782,18 +785,31 @@ def export_translated_sentences(
         except Exception:
             return -1
     
-    switch_indices = [get_switch_index(pattern) for pattern in df_cantonese['pattern'].values]
+    switch_indices = [get_switch_index(pattern) for pattern in df_cantonese[pattern_col].values]
+    
+    # Get reconstructed sentence (without fillers) - use the field from sentence dictionaries
+    if 'reconstructed_text_without_fillers' in df_cantonese.columns:
+        reconstructed_sentences = df_cantonese['reconstructed_text_without_fillers'].values
+    elif 'reconstructed_sentence' in df_cantonese.columns:
+        reconstructed_sentences = df_cantonese['reconstructed_sentence'].values
+    else:
+        # Fallback - shouldn't happen but handle gracefully
+        logger.warning("Could not find reconstructed sentence column, using empty strings")
+        reconstructed_sentences = [''] * len(df_cantonese)
+    
+    # Get pattern column (should be pattern_content_only from sentence dicts)
+    pattern_values = df_cantonese[pattern_col].values if pattern_col in df_cantonese.columns else df_cantonese.get('pattern', [''] * len(df_cantonese)).values
     
     df = pd.DataFrame({
         'start_time': df_cantonese['start_time'].values,
         'end_time': df_cantonese['end_time'].values,
-        'code_switch_original': df_cantonese['reconstructed_sentence'].values,
+        'code_switch_original': reconstructed_sentences,
         'cantonese_translation': '',  # Will be filled if do_translation is True
         'translated_pos': '',  # Will be filled if do_translation is True
         'switch_index': switch_indices,
-        'pattern': df_cantonese['pattern'].values,
-        'group': df_cantonese['group'].values,
-        'participant_id': df_cantonese['participant_id'].values
+        'pattern': pattern_values,
+        'group': df_cantonese['group'].values if 'group' in df_cantonese.columns else [''] * len(df_cantonese),
+        'participant_id': df_cantonese['participant_id'].values if 'participant_id' in df_cantonese.columns else [''] * len(df_cantonese)
     })
     
     # Define column order (used for saving)
