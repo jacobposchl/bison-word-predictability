@@ -50,6 +50,29 @@ def main():
         default=None,
         help='Number of sentences to process (default: process all sentences)'
     )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=None,
+        help='Number of sentences per batch (default: from config or process all at once)'
+    )
+    parser.add_argument(
+        '--checkpoint-dir',
+        type=str,
+        default=None,
+        help='Directory for checkpoint files (default: from config or no checkpoints)'
+    )
+    parser.add_argument(
+        '--no-resume',
+        action='store_true',
+        help='Disable resuming from checkpoints (default: resume enabled)'
+    )
+    parser.add_argument(
+        '--num-workers-free',
+        type=int,
+        default=None,
+        help='Number of CPU cores to leave free (default: from config or use all cores)'
+    )
     
     args = parser.parse_args()
     
@@ -103,6 +126,23 @@ def main():
         similarity_threshold = config.get_analysis_similarity_threshold()
         min_cantonese = config.get_analysis_min_cantonese_words()
         
+        # Get optimization parameters (CLI args override config)
+        # num_workers means "cores to leave free" - None means use all cores
+        num_workers = args.num_workers_free if args.num_workers_free is not None else config.get_analysis_num_workers()
+        batch_size = args.batch_size if args.batch_size is not None else config.get_analysis_batch_size()
+        checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else config.get_analysis_checkpoint_dir()
+        resume = not args.no_resume
+        
+        # Create checkpoint directory if specified
+        if checkpoint_dir:
+            checkpoint_path = Path(checkpoint_dir)
+            checkpoint_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Checkpoint directory: {checkpoint_path}")
+            if resume:
+                logger.info("Resume enabled: will load existing checkpoints")
+            else:
+                logger.info("Resume disabled: will reprocess all batches")
+        
         # Filter to sentences with valid switch indices
         translated_sentences = [s for s in translated_df.to_dict('records') if s.get('switch_index', -1) >= 0]
         
@@ -135,7 +175,11 @@ def main():
             monolingual_sentences=monolingual_sentences,
             window_sizes=[window_size],
             similarity_threshold=similarity_threshold,
-            top_k=5
+            top_k=5,
+            num_workers=num_workers,
+            batch_size=batch_size,
+            checkpoint_dir=checkpoint_dir,
+            resume=resume
         )
         
         # Create analysis dataset

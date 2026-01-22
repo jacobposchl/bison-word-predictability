@@ -6,6 +6,7 @@ import pandas as pd
 import logging
 from typing import List, Tuple, Optional, Dict
 from tqdm import tqdm
+from collections import defaultdict
 from src.analysis.pos_tagging import parse_pattern_segments
 from src.analysis.matching_algorithm import analyze_window_matching
 
@@ -112,10 +113,67 @@ def get_previous_sentences(
     return result
 
 
+def _build_participant_index(all_sentences_df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    """
+    Build an index of sentences grouped by participant for faster lookups.
+    
+    Args:
+        all_sentences_df: DataFrame with all sentences
+        
+    Returns:
+        Dictionary mapping participant_id to sorted DataFrame of their sentences
+    """
+    index = {}
+    for participant_id, group_df in all_sentences_df.groupby('participant_id'):
+        # Sort by start_time for efficient lookups
+        index[participant_id] = group_df.sort_values('start_time').reset_index(drop=True)
+    return index
+
+
+def _get_previous_sentences_indexed(
+    participant_index: Dict[str, pd.DataFrame],
+    participant: str,
+    start_time: float,
+    num_previous: int = 3
+) -> List[Dict]:
+    """
+    Get k previous sentences using pre-built index (optimized version).
+    
+    Args:
+        participant_index: Pre-built index from _build_participant_index
+        participant: Speaker participant ID
+        start_time: Start time of current sentence (milliseconds)
+        num_previous: Number of previous sentences to retrieve
+        
+    Returns:
+        List of sentence dictionaries with 'sentence' and 'pattern' keys
+    """
+    if participant not in participant_index:
+        return []
+    
+    participant_df = participant_index[participant]
+    
+    # Use binary search to find position (much faster than filtering)
+    # Find all rows with start_time < current start_time
+    mask = participant_df['start_time'] < start_time
+    previous = participant_df[mask].tail(num_previous)
+    
+    # Return as list of dicts
+    result = []
+    for _, row in previous.iterrows():
+        result.append({
+            'sentence': row.get('reconstructed_sentence', ''),
+            'pattern': row.get('pattern', '')
+        })
+    
+    return result
+
+
 def translate_context_sentences(
     context_sentences: List[Dict],
     translator,
-    min_quality: float = 0.3
+    min_quality: float = 0.3,
+    translation_cache: Optional[Dict[Tuple[str, str], str]] = None
 ) -> Dict:
     """
     Translate context sentences and assess quality.
@@ -127,6 +185,7 @@ def translate_context_sentences(
         context_sentences: List of sentence dicts with 'sentence' and 'pattern' keys
         translator: NLLBTranslator instance
         min_quality: Minimum ratio of successfully completed translations
+        translation_cache: Optional cache dict mapping (sentence, pattern) -> translated text
         
     Returns:
         Dict with:
@@ -145,6 +204,9 @@ def translate_context_sentences(
             'num_context_sentences': 0
         }
     
+    if translation_cache is None:
+        translation_cache = {}
+    
     translations = []
     attempted_translations = len(context_sentences)
     completed_translations = 0
@@ -156,59 +218,67 @@ def translate_context_sentences(
         if not sentence:
             continue
         
-        try:
-            # Determine sentence type based on pattern
-            is_code_switched = False
-            is_pure_cantonese = False
-            is_pure_english = False
+        # Check cache first
+        cache_key = (sentence, pattern)
+        if cache_key in translation_cache:
+            cantonese = translation_cache[cache_key]
+        else:
+            try:
+                # Determine sentence type based on pattern
+                is_code_switched = False
+                is_pure_cantonese = False
+                is_pure_english = False
+                
+                if pattern:
+                    segments = parse_pattern_segments(pattern)
+                    # Check what languages are in the pattern
+                    languages = {lang for lang, _ in segments}
+                    is_code_switched = 'C' in languages and 'E' in languages
+                    is_pure_cantonese = languages == {'C'}
+                    is_pure_english = languages == {'E'}
+                
+                # Translate based on type
+                if is_code_switched:
+                    # Use code-switched translation method
+                    words = sentence.split()
+                    translation_result = translator.translate_code_switched_sentence(
+                        sentence=sentence,
+                        pattern=pattern,
+                        words=words
+                    )
+                    cantonese = translation_result.get('translated_sentence', '')
+                elif is_pure_cantonese:
+                    # Pure Cantonese - use as-is (no translation needed)
+                    cantonese = sentence
+                elif is_pure_english:
+                    # Pure English - translate to Cantonese
+                    cantonese = translator.translate_english_to_cantonese(sentence)
+                else:
+                    # No pattern or unknown pattern - skip for safety
+                    logger.debug(f"Skipping sentence with invalid or missing pattern: {pattern}")
+                    continue
+                
+                # Cache the translation
+                translation_cache[cache_key] = cantonese
             
-            if pattern:
-                segments = parse_pattern_segments(pattern)
-                # Check what languages are in the pattern
-                languages = {lang for lang, _ in segments}
-                is_code_switched = 'C' in languages and 'E' in languages
-                is_pure_cantonese = languages == {'C'}
-                is_pure_english = languages == {'E'}
-            
-            # Translate based on type
-            if is_code_switched:
-                # Use code-switched translation method
-                words = sentence.split()
-                translation_result = translator.translate_code_switched_sentence(
-                    sentence=sentence,
-                    pattern=pattern,
-                    words=words
-                )
-                cantonese = translation_result.get('translated_sentence', '')
-            elif is_pure_cantonese:
-                # Pure Cantonese - use as-is (no translation needed)
-                cantonese = sentence
-            elif is_pure_english:
-                # Pure English - translate to Cantonese
-                cantonese = translator.translate_english_to_cantonese(sentence)
-            else:
-                # No pattern or unknown pattern - skip for safety
-                logger.debug(f"Skipping sentence with invalid or missing pattern: {pattern}")
+            except Exception as e:
+                # Translation failed for this sentence, skip it
+                logger.debug(f"Translation failed for sentence: {sentence[:50]}... Error: {e}")
                 continue
-            
-            # Remove fillers from translation
-            cantonese = remove_fillers_from_text(cantonese, lang=None)  # Remove both C and E fillers
-            
-            # Clean translation - remove UNKNOWN/untranslatable tokens and English words
-            translated_words = [
-                w for w in cantonese.split()
-                if w not in ['UNKNOWN', 'UNK', ''] and not is_english_word(w)
-            ]
-            
-            # Keep cleaned translation if it has content
-            if translated_words:
-                translations.append(' '.join(translated_words))
-                completed_translations += 1
         
-        except Exception as e:
-            # Translation failed for this sentence, skip it
-            logger.debug(f"Translation failed for sentence: {sentence[:50]}... Error: {e}")
-            continue
+        # Remove fillers from translation
+        cantonese = remove_fillers_from_text(cantonese, lang=None)  # Remove both C and E fillers
+        
+        # Clean translation - remove UNKNOWN/untranslatable tokens and English words
+        translated_words = [
+            w for w in cantonese.split()
+            if w not in ['UNKNOWN', 'UNK', ''] and not is_english_word(w)
+        ]
+        
+        # Keep cleaned translation if it has content
+        if translated_words:
+            translations.append(' '.join(translated_words))
+            completed_translations += 1
     
     # Join all context sentences
     full_context = ' '.join(translations)
@@ -223,6 +293,106 @@ def translate_context_sentences(
         'is_valid': is_valid,
         'num_context_sentences': len(context_sentences)
     }
+
+
+def _batch_translate_context_sentences(
+    all_context_sentences: List[Dict],
+    translator,
+    min_quality: float = 0.3
+) -> Dict[Tuple[str, str], str]:
+    """
+    Batch translate all context sentences and return a cache.
+    
+    This function collects all unique context sentences, translates them in batches,
+    and returns a cache mapping (sentence, pattern) -> translated text.
+    
+    Args:
+        all_context_sentences: List of all context sentence dicts from all rows
+        translator: NLLBTranslator instance
+        min_quality: Minimum quality threshold (not used here, but kept for consistency)
+        
+    Returns:
+        Dictionary mapping (sentence, pattern) tuple to translated Cantonese text
+    """
+    from src.core.text_cleaning import remove_fillers_from_text
+    
+    # Deduplicate context sentences
+    unique_sentences = {}
+    for sent_dict in all_context_sentences:
+        sentence = sent_dict.get('sentence', '')
+        pattern = sent_dict.get('pattern', '')
+        if sentence:
+            unique_sentences[(sentence, pattern)] = sent_dict
+    
+    logger.info(f"Translating {len(unique_sentences)} unique context sentences...")
+    
+    translation_cache = {}
+    
+    # Group sentences by type for batch processing
+    cs_sentences = []
+    cs_patterns = []
+    cs_words_list = []
+    english_sentences_with_patterns = []  # List of (sentence, pattern) tuples
+    cantonese_sentences = []
+    
+    for (sentence, pattern), sent_dict in unique_sentences.items():
+        if not pattern:
+            continue
+        
+        segments = parse_pattern_segments(pattern)
+        languages = {lang for lang, _ in segments}
+        is_code_switched = 'C' in languages and 'E' in languages
+        is_pure_cantonese = languages == {'C'}
+        is_pure_english = languages == {'E'}
+        
+        if is_code_switched:
+            cs_sentences.append(sentence)
+            cs_patterns.append(pattern)
+            cs_words_list.append(sentence.split())
+        elif is_pure_english:
+            english_sentences_with_patterns.append((sentence, pattern))
+        elif is_pure_cantonese:
+            # Pure Cantonese - no translation needed
+            translation_cache[(sentence, pattern)] = sentence
+    
+    # Batch translate code-switched sentences
+    if cs_sentences:
+        logger.info(f"Batch translating {len(cs_sentences)} code-switched context sentences...")
+        cs_results = translator.translate_batch(cs_sentences, cs_patterns, cs_words_list)
+        for (sentence, pattern), result in zip(zip(cs_sentences, cs_patterns), cs_results):
+            cantonese = result.get('translated_sentence', '')
+            translation_cache[(sentence, pattern)] = cantonese
+    
+    # Batch translate English sentences (one at a time, but more efficient than before)
+    if english_sentences_with_patterns:
+        logger.info(f"Translating {len(english_sentences_with_patterns)} English context sentences...")
+        for sentence, pattern in tqdm(english_sentences_with_patterns, desc="Translating English", leave=False):
+            try:
+                cantonese = translator.translate_english_to_cantonese(sentence)
+                translation_cache[(sentence, pattern)] = cantonese
+            except Exception as e:
+                logger.debug(f"Translation failed for English sentence: {sentence[:50]}... Error: {e}")
+                continue
+    
+    # Clean all translations (remove fillers, UNKNOWN tokens, etc.)
+    cleaned_cache = {}
+    for (sentence, pattern), cantonese in translation_cache.items():
+        # Remove fillers
+        cantonese = remove_fillers_from_text(cantonese, lang=None)
+        
+        # Clean translation - remove UNKNOWN/untranslatable tokens and English words
+        translated_words = [
+            w for w in cantonese.split()
+            if w not in ['UNKNOWN', 'UNK', ''] and not is_english_word(w)
+        ]
+        
+        if translated_words:
+            cleaned_cache[(sentence, pattern)] = ' '.join(translated_words)
+        else:
+            cleaned_cache[(sentence, pattern)] = ''
+    
+    logger.info(f"Translation cache built with {len(cleaned_cache)} entries")
+    return cleaned_cache
 
 
 def extract_code_switched_segment(
@@ -442,9 +612,10 @@ def add_context_to_analysis_dataset(
     config
 ) -> pd.DataFrame:
     """
-    Add discourse context columns to analysis dataset.
+    Add discourse context columns to analysis dataset (optimized version).
     
     Retrieves k previous sentences from same speaker and translates CS context.
+    Uses batch translation and indexing for better performance.
     
     Args:
         analysis_df: Analysis dataset with CS and mono sentence info
@@ -468,33 +639,70 @@ def add_context_to_analysis_dataset(
     
     logger.info(f"Context settings: {num_context} previous sentences, min {min_required} required, min quality {min_quality}")
     
+    # Build participant index for faster lookups
+    logger.info("Building participant index for faster context retrieval...")
+    participant_index = _build_participant_index(all_sentences_df)
+    logger.info(f"Indexed sentences for {len(participant_index)} participants")
+    
+    # Collect all context sentences first (before translation)
+    logger.info("Collecting all context sentences...")
+    all_cs_context_sents = []
+    all_mono_context_sents = []
+    
+    for _, row in tqdm(analysis_df.iterrows(), total=len(analysis_df), desc="Collecting context"):
+        # Get context for CS sentence (using indexed lookup)
+        cs_context_sents = _get_previous_sentences_indexed(
+            participant_index,
+            row['cs_participant'],
+            row['cs_start_time'],
+            num_context
+        )
+        all_cs_context_sents.extend(cs_context_sents)
+        
+        # Get context for matched mono sentence
+        mono_context_sents = _get_previous_sentences_indexed(
+            participant_index,
+            row['matched_participant'],
+            row['matched_start_time'],
+            num_context
+        )
+        all_mono_context_sents.extend(mono_context_sents)
+    
+    # Batch translate all context sentences
+    logger.info("Batch translating context sentences...")
+    cs_translation_cache = _batch_translate_context_sentences(all_cs_context_sents, translator, min_quality)
+    mono_translation_cache = _batch_translate_context_sentences(all_mono_context_sents, translator, min_quality)
+    
+    # Process rows and use cached translations
+    logger.info("Processing rows with cached translations...")
     results = []
     
     for _, row in tqdm(analysis_df.iterrows(), total=len(analysis_df), desc="Adding context"):
         row_data = row.to_dict()
         
-        # Get context for CS sentence
-        cs_context_sents = get_previous_sentences(
-            all_sentences_df,
+        # Get context for CS sentence (using indexed lookup)
+        cs_context_sents = _get_previous_sentences_indexed(
+            participant_index,
             row['cs_participant'],
             row['cs_start_time'],
             num_context
         )
         
         # Get context for matched mono sentence
-        mono_context_sents = get_previous_sentences(
-            all_sentences_df,
+        mono_context_sents = _get_previous_sentences_indexed(
+            participant_index,
             row['matched_participant'],
             row['matched_start_time'],
             num_context
         )
         
-        # Translate CS context
+        # Translate CS context using cache
         if cs_context_sents:
             cs_context_result = translate_context_sentences(
                 cs_context_sents,
                 translator,
-                min_quality
+                min_quality,
+                translation_cache=cs_translation_cache
             )
         else:
             cs_context_result = {
@@ -505,12 +713,12 @@ def add_context_to_analysis_dataset(
             }
         
         # Mono context also needs translation and filler removal (same as CS context)
-        # Pulls from all_sentences.csv which may contain code-switched sentences
         if mono_context_sents:
             mono_context_result = translate_context_sentences(
                 mono_context_sents,
                 translator,
-                min_quality
+                min_quality,
+                translation_cache=mono_translation_cache
             )
         else:
             mono_context_result = {

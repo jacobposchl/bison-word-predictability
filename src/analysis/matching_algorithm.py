@@ -7,6 +7,10 @@ following the methodology of Calvillo et al. (2020).
 """
 
 import logging
+import multiprocessing
+import os
+import pickle
+from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from Levenshtein import distance as levenshtein_distance
 from functools import lru_cache
@@ -24,6 +28,29 @@ logger = logging.getLogger(__name__)
 
 # Global cache for monolingual POS sequences
 _monolingual_pos_cache = {}
+
+
+def build_monolingual_pos_cache(monolingual_sentences: List[Dict]) -> Dict[int, List[str]]:
+    """
+    Pre-compute POS sequences for all monolingual sentences.
+    
+    This avoids repeated string splitting during matching, providing a significant
+    performance improvement when processing many sentences.
+    
+    Args:
+        monolingual_sentences: List of monolingual sentence dictionaries
+        
+    Returns:
+        Dictionary mapping sentence index to pre-computed POS sequence (list of strings)
+    """
+    cache = {}
+    for idx, mono_sent in enumerate(monolingual_sentences):
+        mono_pos_str = mono_sent.get('pos', '')
+        if mono_pos_str:
+            cache[idx] = mono_pos_str.split()
+        else:
+            cache[idx] = []
+    return cache
 
 
 def _sequence_edit_distance(seq1: List[str], seq2: List[str]) -> int:
@@ -203,7 +230,8 @@ def find_window_matches(
     code_switched_sentence: Dict,
     monolingual_sentences: List[Dict],
     window_size: int = 1,
-    similarity_threshold: float = 0.4
+    similarity_threshold: float = 0.4,
+    mono_pos_cache: Optional[Dict[int, List[str]]] = None
 ) -> List[Dict]:
     """
     Find monolingual sentences matching POS window around switch point.
@@ -220,6 +248,8 @@ def find_window_matches(
         monolingual_sentences: List of Cantonese monolingual sentence dicts
         window_size: Number of words before/after switch point (n)
         similarity_threshold: Minimum Levenshtein similarity (0-1)
+        mono_pos_cache: Optional pre-computed cache mapping sentence index to POS sequence.
+                       If provided, avoids repeated string splitting for better performance.
         
     Returns:
         List of match dictionaries with:
@@ -268,13 +298,15 @@ def find_window_matches(
     window_len = len(pos_window)
     
     # Search through all monolingual sentences
-    for mono_sent in monolingual_sentences:
-        mono_pos_str = mono_sent.get('pos', '')
-        
-        if not mono_pos_str:
-            continue
-        
-        mono_pos_seq = mono_pos_str.split()
+    for idx, mono_sent in enumerate(monolingual_sentences):
+        # Use cache if available, otherwise parse on the fly
+        if mono_pos_cache is not None:
+            mono_pos_seq = mono_pos_cache.get(idx, [])
+        else:
+            mono_pos_str = mono_sent.get('pos', '')
+            if not mono_pos_str:
+                continue
+            mono_pos_seq = mono_pos_str.split()
         
         if not mono_pos_seq:
             continue
@@ -329,12 +361,184 @@ def find_window_matches(
     return matches
 
 
+def _process_single_cs_sentence(
+    args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int]
+) -> Tuple[Dict, List[Dict], int, List[float]]:
+    """
+    Worker function to process a single code-switched sentence.
+    
+    This function is designed to be used with multiprocessing.Pool.
+    
+    Args:
+        args: Tuple containing:
+            - cs_sent: Code-switched sentence dictionary
+            - monolingual_sentences: List of monolingual sentence dictionaries
+            - window_size: Window size for matching
+            - similarity_threshold: Similarity threshold
+            - mono_pos_cache: Pre-computed POS cache
+            - top_k: Number of top matches to keep
+            
+    Returns:
+        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores) where:
+        - cs_sent: The original code-switched sentence
+        - detailed_matches: List of detailed match dictionaries (top_k matches)
+        - has_matches: 1 if matches found, 0 otherwise
+        - similarity_scores: List of similarity scores from ALL matches (not just top_k)
+    """
+    cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k = args
+    
+    # Find all matches for this sentence
+    matches = find_window_matches(
+        cs_sent,
+        monolingual_sentences,
+        window_size=window_size,
+        similarity_threshold=similarity_threshold,
+        mono_pos_cache=mono_pos_cache
+    )
+    
+    detailed_matches = []
+    has_matches = 0
+    similarity_scores = []
+    
+    if matches:
+        has_matches = 1
+        
+        # Collect similarity scores from ALL matches (before truncation)
+        similarity_scores = [m['similarity'] for m in matches]
+        
+        # Calculate stats from ALL matches (before truncation)
+        total_matches_count = len(matches)
+        all_matches_same_group = sum(1 for m in matches 
+                                    if m['match_sentence'].get('group', '') == cs_sent.get('group', ''))
+        all_matches_same_speaker = sum(1 for m in matches 
+                                      if m['match_sentence'].get('participant_id', '') == cs_sent.get('participant_id', ''))
+        
+        # Rank matches by context
+        ranked_matches = rank_matches_by_context(matches, cs_sent)
+        
+        # Keep only top-k matches for storage
+        top_matches = ranked_matches[:top_k]
+        
+        # Store detailed results
+        for rank, match in enumerate(top_matches, 1):
+            detailed_match = {
+                'cs_sentence': cs_sent.get('code_switch_original', ''),
+                'cs_translation': cs_sent.get('cantonese_translation', ''),
+                'cs_pattern': cs_sent.get('pattern', ''),
+                'cs_group': cs_sent.get('group', ''),
+                'cs_participant': cs_sent.get('participant_id', ''),
+                'cs_start_time': cs_sent.get('start_time', 0.0),
+                'switch_index': cs_sent.get('switch_index', -1),
+                'rank': rank,
+                'similarity': match['similarity'],
+                'pos_window': match['pos_window'],
+                'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
+                'matched_pos': match['matched_pos'],
+                'matched_window_start': match['matched_window_start'],
+                'matched_switch_index': match['matched_window_center'],
+                'matched_group': match['match_sentence'].get('group', ''),
+                'matched_participant': match['match_sentence'].get('participant_id', ''),
+                'matched_start_time': match['match_sentence'].get('start_time', 0.0),
+                'same_group': cs_sent.get('group', '') == match['match_sentence'].get('group', ''),
+                'same_speaker': cs_sent.get('participant_id', '') == match['match_sentence'].get('participant_id', ''),
+                'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0)),
+                # Statistics from ALL matches
+                'total_matches_above_threshold': total_matches_count,
+                'all_matches_same_group': all_matches_same_group,
+                'all_matches_same_speaker': all_matches_same_speaker
+            }
+            detailed_matches.append(detailed_match)
+    
+    return (cs_sent, detailed_matches, has_matches, similarity_scores)
+
+
+def _get_checkpoint_path(checkpoint_dir: str, window_size: int, batch_idx: int) -> Path:
+    """
+    Get the path for a checkpoint file.
+    
+    Args:
+        checkpoint_dir: Directory for checkpoint files
+        window_size: Window size being processed
+        batch_idx: Batch index (0-based)
+        
+    Returns:
+        Path to checkpoint file
+    """
+    checkpoint_path = Path(checkpoint_dir)
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    return checkpoint_path / f"window_{window_size}_batch_{batch_idx}.pkl"
+
+
+def _load_batch_checkpoint(checkpoint_path: Path) -> Dict:
+    """
+    Load a batch checkpoint from disk.
+    
+    Args:
+        checkpoint_path: Path to checkpoint file
+        
+    Returns:
+        Dictionary containing batch results
+    """
+    with open(checkpoint_path, 'rb') as f:
+        return pickle.load(f)
+
+
+def _save_batch_checkpoint(checkpoint_path: Path, batch_results: Dict) -> None:
+    """
+    Save a batch checkpoint to disk.
+    
+    Args:
+        checkpoint_path: Path to checkpoint file
+        batch_results: Dictionary containing batch results to save
+    """
+    with open(checkpoint_path, 'wb') as f:
+        pickle.dump(batch_results, f)
+
+
+def _merge_batch_results(all_batch_results: List[Dict]) -> Dict:
+    """
+    Merge results from multiple batches into a single result dictionary.
+    
+    Args:
+        all_batch_results: List of batch result dictionaries
+        
+    Returns:
+        Merged result dictionary with combined statistics
+    """
+    if not all_batch_results:
+        return {
+            'detailed_matches': [],
+            'similarity_scores': [],
+            'sentences_with_matches': 0
+        }
+    
+    # Merge all detailed matches
+    all_detailed_matches = []
+    all_similarity_scores = []
+    total_sentences_with_matches = 0
+    
+    for batch_result in all_batch_results:
+        all_detailed_matches.extend(batch_result.get('detailed_matches', []))
+        all_similarity_scores.extend(batch_result.get('similarity_scores', []))
+        total_sentences_with_matches += batch_result.get('sentences_with_matches', 0)
+    
+    return {
+        'detailed_matches': all_detailed_matches,
+        'similarity_scores': all_similarity_scores,
+        'sentences_with_matches': total_sentences_with_matches
+    }
+
+
 def analyze_window_matching(
     translated_sentences: List[Dict],
     monolingual_sentences: List[Dict],
     window_sizes: List[int] = [1, 2, 3],
     similarity_threshold: float = 0.4,
-    top_k: int = 5
+    top_k: int = 5,
+    num_workers: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    checkpoint_dir: Optional[str] = None,
+    resume: bool = True
 ) -> Dict:
     """
     Analyze POS window matching across multiple window sizes.
@@ -351,6 +555,16 @@ def analyze_window_matching(
         window_sizes: List of window sizes to analyze (default: [1, 2, 3])
         similarity_threshold: Minimum similarity threshold (default: 0.4)
         top_k: Number of top matches to keep per sentence (default: 5)
+        num_workers: Number of CPU cores to leave free. If None, uses all available cores (leaves 0 free).
+                     If set to a number, that many cores will be left free.
+                     Example: On an 8-core system, num_workers=2 means use 6 workers, leaving 2 free.
+                     Default: None (uses all cores).
+        batch_size: Number of sentences per batch. If None, processes all sentences at once.
+                    Default: None.
+        checkpoint_dir: Directory for saving batch checkpoints. If None, no checkpoints are saved.
+                        Default: None.
+        resume: If True, load existing checkpoints and skip already processed batches.
+                Default: True.
         
     Returns:
         Dictionary with results for each window size:
@@ -373,72 +587,152 @@ def analyze_window_matching(
     
     results = {}
     
+    # Build POS cache once for all window sizes
+    logger.info("Building monolingual POS cache...")
+    mono_pos_cache = build_monolingual_pos_cache(monolingual_sentences)
+    logger.info(f"Cached POS sequences for {len(mono_pos_cache)} monolingual sentences")
+    
+    # Determine number of workers
+    # num_workers parameter now means "cores to leave free"
+    total_cores = os.cpu_count() or 1
+    
+    if num_workers is None:
+        # Default: use all cores (leave 0 free)
+        actual_workers = total_cores
+        logger.info(f"Using all available CPU cores ({actual_workers} workers, leaving 0 free)")
+    else:
+        # Calculate actual workers: total_cores - cores_to_leave_free
+        # Ensure at least 1 worker is used
+        actual_workers = max(1, total_cores - num_workers)
+        if actual_workers == 1:
+            logger.info(f"Leaving {num_workers} cores free, using sequential processing (1 worker)")
+        else:
+            logger.info(f"Leaving {num_workers} cores free, using {actual_workers} parallel workers (out of {total_cores} total)")
+    
+    num_workers = actual_workers  # Update num_workers to actual workers for rest of function
+    
     for window_size in window_sizes:
         logger.info(f"\nAnalyzing window size n={window_size}...")
         
         window_key = f'window_{window_size}'
-        detailed_matches = []
-        similarity_scores = []
-        sentences_with_matches = 0
         
-        # Process each code-switched sentence
-        for cs_sent in tqdm(translated_sentences, desc=f"Window n={window_size}", leave=False):
-            # Find all matches for this sentence
-            matches = find_window_matches(
-                cs_sent,
-                monolingual_sentences,
-                window_size=window_size,
-                similarity_threshold=similarity_threshold
-            )
+        # Determine if batching is enabled
+        use_batching = batch_size is not None and batch_size > 0
+        
+        if use_batching:
+            # Split sentences into batches
+            num_batches = (len(translated_sentences) + batch_size - 1) // batch_size
+            logger.info(f"Processing {len(translated_sentences)} sentences in {num_batches} batches (batch_size={batch_size})")
             
-            if matches:
-                sentences_with_matches += 1
+            all_batch_results = []
+            
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(translated_sentences))
+                batch_sentences = translated_sentences[start_idx:end_idx]
                 
-                # Calculate stats from ALL matches (before truncation)
-                total_matches_count = len(matches)
-                all_matches_same_group = sum(1 for m in matches 
-                                            if m['match_sentence'].get('group', '') == cs_sent.get('group', ''))
-                all_matches_same_speaker = sum(1 for m in matches 
-                                              if m['match_sentence'].get('participant_id', '') == cs_sent.get('participant_id', ''))
+                # Check for checkpoint
+                checkpoint_path = None
+                if checkpoint_dir:
+                    checkpoint_path = _get_checkpoint_path(checkpoint_dir, window_size, batch_idx)
+                    
+                    if resume and checkpoint_path.exists():
+                        logger.info(f"Loading checkpoint for batch {batch_idx + 1}/{num_batches}...")
+                        batch_result = _load_batch_checkpoint(checkpoint_path)
+                        all_batch_results.append(batch_result)
+                        continue
                 
-                # Rank matches by context
-                ranked_matches = rank_matches_by_context(matches, cs_sent)
+                logger.info(f"Processing batch {batch_idx + 1}/{num_batches} ({len(batch_sentences)} sentences)...")
                 
-                # Keep only top-k matches for storage
-                top_matches = ranked_matches[:top_k]
+                # Prepare arguments for workers
+                worker_args = [
+                    (cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k)
+                    for cs_sent in batch_sentences
+                ]
                 
-                # Collect similarity scores for distribution analysis
-                similarity_scores.extend([m['similarity'] for m in matches])
+                # Process batch in parallel or sequentially
+                if num_workers == 1:
+                    # Sequential processing with progress bar
+                    batch_results = []
+                    for args in tqdm(worker_args, desc=f"Batch {batch_idx + 1}/{num_batches}", leave=False):
+                        result = _process_single_cs_sentence(args)
+                        batch_results.append(result)
+                else:
+                    # Parallel processing
+                    with multiprocessing.Pool(processes=num_workers) as pool:
+                        batch_results = list(tqdm(
+                            pool.imap(_process_single_cs_sentence, worker_args),
+                            total=len(worker_args),
+                            desc=f"Batch {batch_idx + 1}/{num_batches}",
+                            leave=False
+                        ))
                 
-                # Store detailed results
-                for rank, match in enumerate(top_matches, 1):
-                    detailed_match = {
-                        'cs_sentence': cs_sent.get('code_switch_original', ''),
-                        'cs_translation': cs_sent.get('cantonese_translation', ''),
-                        'cs_pattern': cs_sent.get('pattern', ''),
-                        'cs_group': cs_sent.get('group', ''),
-                        'cs_participant': cs_sent.get('participant_id', ''),
-                        'cs_start_time': cs_sent.get('start_time', 0.0),
-                        'switch_index': cs_sent.get('switch_index', -1),
-                        'rank': rank,
-                        'similarity': match['similarity'],
-                        'pos_window': match['pos_window'],
-                        'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
-                        'matched_pos': match['matched_pos'],
-                        'matched_window_start': match['matched_window_start'],
-                        'matched_switch_index': match['matched_window_center'],
-                        'matched_group': match['match_sentence'].get('group', ''),
-                        'matched_participant': match['match_sentence'].get('participant_id', ''),
-                        'matched_start_time': match['match_sentence'].get('start_time', 0.0),
-                        'same_group': cs_sent.get('group', '') == match['match_sentence'].get('group', ''),
-                        'same_speaker': cs_sent.get('participant_id', '') == match['match_sentence'].get('participant_id', ''),
-                        'time_distance': abs(cs_sent.get('start_time', 0.0) - match['match_sentence'].get('start_time', 0.0)),
-                        # Statistics from ALL matches
-                        'total_matches_above_threshold': total_matches_count,
-                        'all_matches_same_group': all_matches_same_group,
-                        'all_matches_same_speaker': all_matches_same_speaker
-                    }
-                    detailed_matches.append(detailed_match)
+                # Process batch results
+                batch_detailed_matches = []
+                batch_similarity_scores = []
+                batch_sentences_with_matches = 0
+                
+                for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in batch_results:
+                    if has_matches:
+                        batch_sentences_with_matches += 1
+                        batch_detailed_matches.extend(sent_detailed_matches)
+                        batch_similarity_scores.extend(sent_similarity_scores)
+                
+                # Save checkpoint if enabled
+                batch_result = {
+                    'detailed_matches': batch_detailed_matches,
+                    'similarity_scores': batch_similarity_scores,
+                    'sentences_with_matches': batch_sentences_with_matches
+                }
+                
+                if checkpoint_path:
+                    _save_batch_checkpoint(checkpoint_path, batch_result)
+                    logger.info(f"Saved checkpoint for batch {batch_idx + 1}/{num_batches}")
+                
+                all_batch_results.append(batch_result)
+            
+            # Merge all batch results
+            merged_results = _merge_batch_results(all_batch_results)
+            detailed_matches = merged_results['detailed_matches']
+            similarity_scores = merged_results['similarity_scores']
+            sentences_with_matches = merged_results['sentences_with_matches']
+            
+        else:
+            # Process all sentences at once (no batching)
+            detailed_matches = []
+            similarity_scores = []
+            sentences_with_matches = 0
+            
+            # Prepare arguments for workers
+            worker_args = [
+                (cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k)
+                for cs_sent in translated_sentences
+            ]
+            
+            # Process sentences in parallel or sequentially
+            if num_workers == 1:
+                # Sequential processing with progress bar
+                processing_results = []
+                for args in tqdm(worker_args, desc=f"Window n={window_size}", leave=False):
+                    result = _process_single_cs_sentence(args)
+                    processing_results.append(result)
+            else:
+                # Parallel processing
+                with multiprocessing.Pool(processes=num_workers) as pool:
+                    processing_results = list(tqdm(
+                        pool.imap(_process_single_cs_sentence, worker_args),
+                        total=len(worker_args),
+                        desc=f"Window n={window_size}",
+                        leave=False
+                    ))
+            
+            # Process results
+            for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in processing_results:
+                if has_matches:
+                    sentences_with_matches += 1
+                    detailed_matches.extend(sent_detailed_matches)
+                    # Collect similarity scores from ALL matches (not just top_k)
+                    similarity_scores.extend(sent_similarity_scores)
         
         # Calculate statistics
         total_sentences = len(translated_sentences)

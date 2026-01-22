@@ -7,7 +7,7 @@ This module loads and validates configuration from YAML files.
 import os
 import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -209,3 +209,22 @@ class Config:
     def get_analysis_similarity_threshold(self) -> float:
         """Get minimum Levenshtein similarity threshold for matches."""
         return self.get('analysis.similarity_threshold')
+    
+    def get_analysis_num_workers(self) -> Optional[int]:
+        """Get number of CPU cores to leave free. Returns None to use all available cores."""
+        return self.get('analysis.parallel.num_workers', None)
+    
+    def get_analysis_batch_size(self) -> Optional[int]:
+        """Get batch size for processing. Returns None if batching is disabled."""
+        return self.get('analysis.batch_size', None)
+    
+    def get_analysis_checkpoint_dir(self) -> Optional[str]:
+        """Get checkpoint directory path. Returns None if checkpoints are disabled."""
+        checkpoint_dir = self.get('analysis.checkpoint_dir', None)
+        if checkpoint_dir is None:
+            return None
+        # If relative path, make it relative to project root
+        if not os.path.isabs(checkpoint_dir):
+            project_root = Path(__file__).parent.parent.parent
+            checkpoint_dir = str(project_root / checkpoint_dir)
+        return checkpoint_dir

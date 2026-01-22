@@ -39,6 +39,21 @@ analysis:
   
   # Minimum Levenshtein similarity threshold for matches (0-1)
   similarity_threshold: 0.4
+  
+  # Parallel processing settings
+  parallel:
+    # Number of CPU cores to leave free. If null, uses all available cores (leaves 0 free).
+    # Set to a number to reserve that many cores for other tasks.
+    # Example: On an 8-core system, num_workers=2 means use 6 workers, leaving 2 cores free.
+    num_workers: null
+  
+  # Batch processing settings
+  # Number of sentences per batch. If null, processes all sentences at once.
+  batch_size: null
+  
+  # Directory for saving batch checkpoints (relative to project root)
+  # If null, no checkpoints are saved.
+  checkpoint_dir: null
 
 # Discourse context settings
 context:
