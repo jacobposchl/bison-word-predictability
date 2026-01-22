@@ -34,8 +34,9 @@ analysis:
   # for inclusion in analysis dataset
   min_cantonese_words: 2
   
-  # Window size for POS matching around switch points
-  window_size: 2
+  # Window sizes for POS matching around switch points
+  # List of window sizes to analyze (creates separate dataset for each)
+  window_sizes: [1, 2, 3]
   
   # Minimum Levenshtein similarity threshold for matches (0-1)
   similarity_threshold: 0.4
@@ -57,8 +58,10 @@ analysis:
 
 # Discourse context settings
 context:
-  # Number of previous sentences to include as discourse context
-  num_previous_sentences: 3
+  # List of context lengths to analyze (in number of previous sentences)
+  # Surprisal will be calculated for each length, creating separate columns
+  # Matching script will automatically store max(context_lengths) sentences
+  context_lengths: [1, 2, 3]
   
   # Minimum number of context sentences required to include sentence in analysis
   # Sentences with fewer context sentences will still be included but flagged
@@ -103,15 +106,19 @@ output:
   results:
     # Directory for preprocessing CSV files
     preprocessing_dir: "results/preprocessing"
-    # Directory for exploratory analysis results
-    exploratory_dir: "results/exploratory"
+    # Directory for matching analysis results
+    matching_dir: "results/matching"
+    # Directory for surprisal experiment results
+    surprisal_dir: "results/surprisal"
   
   # Figures subdirectories
   figures:
     # Directory for preprocessing figures
     preprocessing_dir: "figures/preprocessing"
-    # Directory for exploratory analysis figures
-    exploratory_dir: "figures/exploratory"
+    # Directory for matching analysis figures
+    matching_dir: "figures/matching"
+    # Directory for surprisal experiment figures
+    surprisal_dir: "figures/surprisal"
   
   # Output filename for CSV with fillers included in pattern analysis
   csv_with_fillers: "code_switching_WITH_fillers.csv"

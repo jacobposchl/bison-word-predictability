@@ -462,6 +462,75 @@ def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str, is_
     return df
 
 
+def export_cantonese_monolingual(
+    all_sentences: List[Dict],
+    config,
+    min_sentence_words: int = 2
+) -> pd.DataFrame:
+    """
+    Export only Cantonese monolingual sentences WITHOUT fillers.
+    
+    This is the only monolingual dataset needed for downstream analysis.
+    
+    Args:
+        all_sentences: List of all processed sentence data dictionaries
+        config: Config object with CSV path methods
+        min_sentence_words: Minimum number of words required
+        
+    Returns:
+        DataFrame with Cantonese monolingual sentences (WITHOUT fillers)
+    """
+    logger.info("Exporting Cantonese monolingual sentences (WITHOUT fillers)...")
+    
+    # Helper function to determine if sentence is monolingual Cantonese
+    def is_monolingual_cantonese(pattern: str) -> bool:
+        """Check if pattern represents pure Cantonese (only C, no E)."""
+        return 'C' in pattern and 'E' not in pattern and pattern != 'FILLER_ONLY'
+    
+    # Filter sentences - must be monolingual in BOTH patterns
+    cantonese_sentences = []
+    
+    for s in all_sentences:
+        pattern_with = s.get('pattern_with_fillers', '')
+        pattern_without = s.get('pattern_content_only', '')
+        
+        # Must be monolingual in BOTH patterns to avoid code-switched sentences
+        # that become "monolingual" after filler removal
+        if is_monolingual_cantonese(pattern_with) and is_monolingual_cantonese(pattern_without):
+            cantonese_sentences.append(s)
+    
+    # Apply min_sentence_words filtering AFTER filler removal
+    cantonese_sentences = _filter_by_min_words(cantonese_sentences, min_sentence_words, use_without_fillers=True)
+    
+    logger.info(f"Found {len(cantonese_sentences)} Cantonese monolingual sentences (after filtering)")
+    
+    # Create DataFrame
+    df = pd.DataFrame({
+        'start_time': [s['start_time'] for s in cantonese_sentences],
+        'end_time': [s['end_time'] for s in cantonese_sentences],
+        'reconstructed_sentence': [s['reconstructed_text_without_fillers'] for s in cantonese_sentences],
+        'pattern': [s.get('pattern_content_only', '') for s in cantonese_sentences],
+        'group': [s.get('group', '') for s in cantonese_sentences],
+        'participant_id': [s.get('participant_id', '') for s in cantonese_sentences]
+    })
+    
+    df = sort_dataframe(df)
+    
+    # Add POS tagging
+    df = _add_pos_to_dataframe(df, 'reconstructed_sentence', 'pos', is_cantonese=True)
+    
+    # Save CSV
+    csv_path = config.get_csv_cantonese_mono_without_fillers_path()
+    csv_dir = os.path.dirname(csv_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+    
+    df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+    logger.info(f"Saved '{csv_path}' - {len(df)} Cantonese monolingual sentences")
+    
+    return df
+
+
 def export_monolingual_sentences(
     all_sentences: List[Dict],
     config,

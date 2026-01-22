@@ -1,11 +1,11 @@
 """
-Main script for running exploratory analysis.
+Main script for running matching analysis.
 
-This script orchestrates the exploratory analysis pipeline:
+This script orchestrates the matching analysis pipeline:
 1. Load translated code-switched sentences
 2. Load monolingual Cantonese sentences
 3. Analyze POS window matching
-4. Create final analysis dataset
+4. Create final analysis dataset for each window size
 5. Save results
 """
 
@@ -40,7 +40,7 @@ def setup_logging() -> None:
 
 
 def main():
-    """Main entry point for exploratory analysis."""
+    """Main entry point for matching analysis."""
     parser = argparse.ArgumentParser(
         description='POS window matching analysis for code-switching'
     )
@@ -83,8 +83,8 @@ def main():
     config = Config()
     
     # Get output and figures directories from config
-    output_dir = Path(config.get_exploratory_results_dir())
-    figures_dir = Path(config.get_exploratory_figures_dir())
+    output_dir = Path(config.get_matching_results_dir())
+    figures_dir = Path(config.get_matching_figures_dir())
     preprocessing_dir = Path(config.get_preprocessing_results_dir())
     
     logger.info("Starting POS window matching analysis...")
@@ -122,7 +122,7 @@ def main():
         )
         
         # Get parameters from config
-        window_size = config.get_analysis_window_size()
+        window_sizes = config.get_analysis_window_sizes()
         similarity_threshold = config.get_analysis_similarity_threshold()
         min_cantonese = config.get_analysis_min_cantonese_words()
         
@@ -168,12 +168,13 @@ def main():
             filtered_translated_sentences = filtered_translated_sentences[:args.sample_size]
         
         logger.info(f"Analyzing {len(filtered_translated_sentences)} sentences...")
+        logger.info(f"Window sizes to process: {window_sizes}")
         
-        # Run window matching
+        # Run window matching for all window sizes
         window_results = analyze_window_matching(
             translated_sentences=filtered_translated_sentences,
             monolingual_sentences=monolingual_sentences,
-            window_sizes=[window_size],
+            window_sizes=window_sizes,
             similarity_threshold=similarity_threshold,
             top_k=5,
             num_workers=num_workers,
@@ -182,38 +183,47 @@ def main():
             resume=resume
         )
         
-        # Create analysis dataset
-        analysis_df = create_analysis_dataset(
-            config,
-            filtered_translated_sentences,
-            window_results,
-            all_sentences_df,
-            translator
-        )
-        
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)
         figures_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save unified analysis dataset (includes all CS sentence info, matched mono info, and statistics)
-        analysis_csv_path = output_dir / "analysis_dataset.csv"
-        analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
+        # Create and save analysis dataset for each window size
+        logger.info("\nCreating analysis datasets for each window size...")
+        for window_size in window_sizes:
+            logger.info(f"\nProcessing window size {window_size}...")
+            
+            # Create analysis dataset for this window size
+            analysis_df = create_analysis_dataset(
+                config,
+                filtered_translated_sentences,
+                window_results,
+                all_sentences_df,
+                translator,
+                window_size=window_size
+            )
+            
+            if len(analysis_df) == 0:
+                logger.warning(f"No data for window size {window_size}, skipping...")
+                continue
+            
+            # Save dataset with window size in filename
+            analysis_csv_path = output_dir / f"analysis_dataset_window_{window_size}.csv"
+            analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
+            logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
         
-        # Generate and save similarity distribution plot
+        # Generate and save similarity distribution plot (for all window sizes)
         plot_path = plot_similarity_distributions(window_results, str(figures_dir))
         
-        # Generate window matching report
+        # Generate window matching report (for all window sizes)
         window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
         
-        # Log summary of excluded sentences
-        window_key = f'window_{window_size}'
-        if window_key in window_results:
-            # Save window matching report
-            window_report_path = output_dir / "window_matching_report.txt"
-            with open(window_report_path, 'w', encoding='utf-8') as f:
-                f.write(window_report)
-
-        logger.info(f"Analysis complete! Results saved to: {output_dir}")
+        # Save window matching report
+        window_report_path = output_dir / "window_matching_report.txt"
+        with open(window_report_path, 'w', encoding='utf-8') as f:
+            f.write(window_report)
+        
+        logger.info(f"\nAnalysis complete! Results saved to: {output_dir}")
+        logger.info(f"Created {len(window_sizes)} analysis datasets (one per window size)")
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

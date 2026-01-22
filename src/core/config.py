@@ -7,7 +7,7 @@ This module loads and validates configuration from YAML files.
 import os
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -112,17 +112,25 @@ class Config:
         """Get directory for preprocessing results (CSV files)."""
         return self.get('output.results.preprocessing_dir')
     
-    def get_exploratory_results_dir(self) -> str:
-        """Get directory for exploratory analysis results."""
-        return self.get('output.results.exploratory_dir')
+    def get_matching_results_dir(self) -> str:
+        """Get directory for matching analysis results."""
+        return self.get('output.results.matching_dir')
+    
+    def get_surprisal_results_dir(self) -> str:
+        """Get directory for surprisal experiment results."""
+        return self.get('output.results.surprisal_dir')
     
     def get_preprocessing_figures_dir(self) -> str:
         """Get directory for preprocessing figures."""
         return self.get('output.figures.preprocessing_dir')
     
-    def get_exploratory_figures_dir(self) -> str:
-        """Get directory for exploratory analysis figures."""
-        return self.get('output.figures.exploratory_dir')
+    def get_matching_figures_dir(self) -> str:
+        """Get directory for matching analysis figures."""
+        return self.get('output.figures.matching_dir')
+    
+    def get_surprisal_figures_dir(self) -> str:
+        """Get directory for surprisal experiment figures."""
+        return self.get('output.figures.surprisal_dir')
     
     def get_processed_data_dir(self) -> str:
         """Get output directory for processed data (CSV files)."""
@@ -202,9 +210,14 @@ class Config:
         """Get minimum number of Cantonese words required at sentence start for analysis dataset."""
         return self.get('analysis.min_cantonese_words')
     
-    def get_analysis_window_size(self) -> int:
-        """Get window size for POS matching around switch points."""
-        return self.get('analysis.window_size')
+    def get_analysis_window_sizes(self) -> List[int]:
+        """Get list of window sizes for POS matching around switch points."""
+        window_sizes = self.get('analysis.window_sizes', None)
+        if window_sizes is not None:
+            if isinstance(window_sizes, list):
+                return window_sizes
+            # If single value, convert to list
+            return [window_sizes]
     
     def get_analysis_similarity_threshold(self) -> float:
         """Get minimum Levenshtein similarity threshold for matches."""

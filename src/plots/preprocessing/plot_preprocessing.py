@@ -2,6 +2,9 @@
 Visualization and analysis summaries for code-switching data.
 
 This module provides functions for creating plots and printing analysis summaries.
+
+NOTE: This module contains functions that compare WITH and WITHOUT fillers datasets.
+For simplified functions that only work with WITHOUT fillers data, see plot_preprocessing_simple.py
 """
 
 import matplotlib.pyplot as plt

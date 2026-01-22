@@ -280,8 +280,11 @@ def translate_context_sentences(
             translations.append(' '.join(translated_words))
             completed_translations += 1
     
-    # Join all context sentences
-    full_context = ' '.join(translations)
+    # Join all context sentences with a delimiter to preserve sentence boundaries
+    # This allows extracting different context lengths later
+    # Use ||| as delimiter (unlikely to appear in Cantonese text)
+    CONTEXT_SENTENCE_DELIMITER = ' ||| '
+    full_context = CONTEXT_SENTENCE_DELIMITER.join(translations)
     
     # Calculate quality score: completed translations / attempted translations
     quality_score = completed_translations / max(attempted_translations, 1)
@@ -463,7 +466,8 @@ def create_analysis_dataset(
     filtered_translated_sentences: List[Dict],
     window_results: Dict,
     all_sentences_df: pd.DataFrame = None,
-    translator = None
+    translator = None,
+    window_size: int = None
 ) -> pd.DataFrame:
     """
     Create analysis dataset from pre-computed window matching results.
@@ -482,6 +486,7 @@ def create_analysis_dataset(
             detailed matches for each window size
         all_sentences_df: Optional DataFrame with all sentences for context retrieval
         translator: Optional NLLBTranslator for translating CS context
+        window_size: Window size to use (if None, uses first window size from config)
         
     Returns:
         DataFrame with columns:
@@ -493,8 +498,9 @@ def create_analysis_dataset(
     """
     logger.info("Creating analysis dataset from pre-computed window matching results...")
     
-    # Get window size from config to extract the right results
-    window_size = config.get_analysis_window_size()
+    # Get window size (must be provided)
+    if window_size is None:
+        raise ValueError("window_size must be provided to create_analysis_dataset()")
     
     logger.info(f"Using window size: {window_size}")
     logger.info(f"Processing {len(filtered_translated_sentences)} filtered sentences")
@@ -552,31 +558,29 @@ def create_analysis_dataset(
         if best_match:
             analysis_rows.append({
                 # Code-switched sentence info
-                'cs_sentence': data['cs_sentence'],
                 'cs_translation': cs_translation,
                 'cs_pattern': data['cs_pattern'],
                 'cs_group': data['cs_group'],
-                'cs_participant': data['cs_participant'],
                 'cs_start_time': data['cs_start_time'],
                 'switch_index': data['switch_index'],
                 'pos_window': data['pos_window'],
+                # Keep cs_participant temporarily for context retrieval (removed later)
+                'cs_participant': data['cs_participant'],
                 
                 # Best matched monolingual sentence info
                 'matched_mono': best_match['matched_sentence'],
                 'matched_group': best_match['matched_group'],
-                'matched_participant': best_match['matched_participant'],
                 'matched_start_time': best_match['matched_start_time'],
                 'matched_pos': best_match['matched_pos'],
                 'matched_switch_index': best_match['matched_switch_index'],  # Center of matched POS window
                 'similarity': best_match['similarity'],
+                # Keep matched_participant temporarily for context retrieval (removed later)
+                'matched_participant': best_match['matched_participant'],
                 
                 # Match statistics (from ALL matches, not just those in all_matches list)
                 'total_matches_above_threshold': best_match.get('total_matches_above_threshold', len(all_matches)),
                 'matches_same_group': best_match.get('all_matches_same_group', sum(1 for m in all_matches if m['same_group'])),
-                'matches_same_speaker': best_match.get('all_matches_same_speaker', sum(1 for m in all_matches if m['same_speaker'])),
-                'selected_match_time_distance_sec': best_match['time_distance'] / 1000.0,  # Convert ms to seconds
-                'same_group': best_match['same_group'],
-                'same_speaker': best_match['same_speaker']
+                'matches_same_speaker': best_match.get('all_matches_same_speaker', sum(1 for m in all_matches if m['same_speaker']))
             })
     
     # Count sentences without matches
@@ -602,6 +606,13 @@ def create_analysis_dataset(
             config
         )
     
+    # Remove temporary columns used only for context retrieval
+    columns_to_remove = ['cs_participant', 'matched_participant']
+    existing_columns_to_remove = [col for col in columns_to_remove if col in analysis_df.columns]
+    if existing_columns_to_remove:
+        analysis_df = analysis_df.drop(columns=existing_columns_to_remove)
+        logger.info(f"Removed temporary columns used for context retrieval: {existing_columns_to_remove}")
+    
     return analysis_df
 
 
@@ -626,14 +637,23 @@ def add_context_to_analysis_dataset(
     Returns:
         DataFrame with added context columns:
             - cs_context: Translated context for CS sentence
-            - mono_context: Context for mono sentence (already Cantonese)
-            - cs_context_quality: Translation quality score for CS context
             - cs_context_valid: Whether CS context meets quality threshold
-            - mono_context_valid: Whether mono context has enough sentences
-            - cs_context_count: Number of CS context sentences
-            - mono_context_count: Number of mono context sentences
+            - mono_context: Context for mono sentence (already Cantonese)
+            - mono_context_valid: Whether mono context meets quality threshold
+            
+    Note: Rows with low context quality (below min_quality threshold) are NOT automatically
+    removed. They are kept in the dataset but marked with cs_context_valid=False or
+    mono_context_valid=False. Context will only be used in surprisal calculation if both
+    cs_context_valid and mono_context_valid are True.
     """
-    num_context = config.get('context.num_previous_sentences', 3)
+    # Calculate max context length from context_lengths list
+    # This ensures we store enough context for all context_lengths in surprisal analysis
+    context_lengths = config.get('context.context_lengths', [3])
+    if isinstance(context_lengths, list) and len(context_lengths) > 0:
+        num_context = max(context_lengths)
+    else:
+        # Fallback if context_lengths is not a valid list
+        num_context = 3
     min_required = config.get('context.min_required_sentences', 2)
     min_quality = config.get('context.min_translation_quality', 0.3)
     
@@ -731,14 +751,10 @@ def add_context_to_analysis_dataset(
         # Add context data to row
         row_data.update({
             'cs_context': cs_context_result['translated_context'],
-            'cs_context_quality': cs_context_result['quality_score'],
             'cs_context_valid': cs_context_result['is_valid'],
-            'cs_context_count': cs_context_result['num_context_sentences'],
             
             'mono_context': mono_context_result['translated_context'],
-            'mono_context_quality': mono_context_result['quality_score'],
-            'mono_context_valid': mono_context_result['is_valid'],
-            'mono_context_count': mono_context_result['num_context_sentences']
+            'mono_context_valid': mono_context_result['is_valid']
         })
         
         results.append(row_data)
@@ -749,9 +765,7 @@ def add_context_to_analysis_dataset(
     logger.info(f"\nContext statistics:")
     logger.info(f"  CS context valid: {result_df['cs_context_valid'].sum()} / {len(result_df)}")
     logger.info(f"  Mono context valid: {result_df['mono_context_valid'].sum()} / {len(result_df)}")
-    logger.info(f"  Average CS context quality: {result_df['cs_context_quality'].mean():.2f}")
-    logger.info(f"  Average CS context count: {result_df['cs_context_count'].mean():.1f}")
-    logger.info(f"  Average mono context count: {result_df['mono_context_count'].mean():.1f}")
+    logger.info(f"  Both contexts valid: {((result_df['cs_context_valid']) & (result_df['mono_context_valid'])).sum()} / {len(result_df)}")
     
     return result_df
 

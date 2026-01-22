@@ -4,10 +4,15 @@ Preprocessor for code-switching predictability analysis.
 This script preprocesses raw EAF annotation files into processed data:
 1. Load EAF files from raw data directory
 2. Process all files (clean, tokenize, extract patterns)
-3. Build code-switching patterns (with and without fillers)
-4. Export processed data to CSV files
+3. Build code-switching patterns (without fillers)
+4. Export processed data to CSV files (only datasets needed for downstream analysis)
 5. Generate visualizations
 6. Print analysis summaries
+
+Exports only:
+- all_sentences.csv: All sentences for context retrieval
+- cantonese_monolingual_WITHOUT_fillers.csv: Monolingual Cantonese for matching
+- cantonese_translated_WITHOUT_fillers.csv: Translated code-switched sentences
 """
 
 import argparse
@@ -22,17 +27,14 @@ sys.path.insert(0, str(project_root))
 from src.core.config import Config
 from src.analysis.pattern_analysis import process_all_files
 from src.data.data_export import (
-    export_to_csv,
     filter_code_switching_sentences,
     export_all_sentences_to_csv,
-    export_monolingual_sentences,
+    export_cantonese_monolingual,
     export_translated_sentences
 )
-from src.plots.preprocessing.plot_preprocessing import (
-    print_analysis_summary,
-    plot_matrix_language_distribution,
-    plot_equal_matrix_cases,
-    plot_filler_impact
+from src.plots.preprocessing.plot_preprocessing_simple import (
+    print_analysis_summary_simple,
+    plot_matrix_language_distribution_simple
 )
 
 
@@ -70,8 +72,6 @@ def main():
         
         data_path = config.get_data_path()
         min_sentence_words = config.get_min_sentence_words()
-        csv_with_fillers_path = config.get_csv_with_fillers_path()
-        csv_without_fillers_path = config.get_csv_without_fillers_path()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
         figures_dir = config.get_preprocessing_figures_dir()
         
@@ -96,34 +96,23 @@ def main():
         
         logger.info(f"Processed {len(all_sentences)} total sentences")
         
-        # Filter code-switching sentences
+        # Filter code-switching sentences (for visualization only)
         logger.info("\nFiltering code-switching sentences...")
-        with_fillers = filter_code_switching_sentences(all_sentences, include_fillers=True)
         without_fillers = filter_code_switching_sentences(all_sentences, include_fillers=False)
         
-        logger.info(f"Code-switching sentences WITH fillers: {len(with_fillers)}")
         logger.info(f"Code-switching sentences WITHOUT fillers: {len(without_fillers)}")
         
-        # Export to CSV
-        logger.info("\nExporting processed data to CSV...")
-        csv_with_fillers_df, csv_without_fillers_df = export_to_csv(
-            all_sentences,
-            csv_with_fillers_path,
-            csv_without_fillers_path,
-            min_sentence_words=min_sentence_words
-        )
-        
-        # Also export ALL sentences (monolingual + code-switched) for exploratory analysis
-        logger.info("\nStep 3b: Exporting ALL sentences (monolingual + code-switched)...")
+        # Export ALL sentences (monolingual + code-switched) for context retrieval
+        logger.info("\nExporting ALL sentences (monolingual + code-switched)...")
         csv_all_sentences_df = export_all_sentences_to_csv(
             all_sentences,
             csv_all_sentences_path,
             min_sentence_words=min_sentence_words
         )
         
-        # Export monolingual sentences (Cantonese and English, with/without fillers)
-        logger.info("\nStep 3c: Exporting monolingual sentences...")
-        cant_with, cant_without, eng_with, eng_without = export_monolingual_sentences(
+        # Export only Cantonese monolingual sentences WITHOUT fillers (needed for matching)
+        logger.info("\nExporting Cantonese monolingual sentences (WITHOUT fillers)...")
+        cant_without = export_cantonese_monolingual(
             all_sentences,
             config,
             min_sentence_words=min_sentence_words
@@ -149,32 +138,24 @@ def main():
                 min_sentence_words=min_sentence_words
             )
         
-        # Generate visualizations
+        # Generate visualizations (using only WITHOUT fillers data)
         logger.info("\nGenerating visualizations...")
-        plot_matrix_language_distribution(with_fillers, without_fillers, figures_dir)
-        plot_equal_matrix_cases(with_fillers, without_fillers, figures_dir)
-        plot_filler_impact(with_fillers, without_fillers, figures_dir)
+        plot_matrix_language_distribution_simple(without_fillers, figures_dir)
         logger.info("Visualizations saved to " + figures_dir)
         
         # Print analysis summary
         logger.info("\nAnalysis Summary")
         logger.info("="*80)
-        print_analysis_summary(with_fillers, without_fillers)
+        print_analysis_summary_simple(without_fillers)
         
         logger.info("\n" + "="*80)
         logger.info("Preprocessing complete!")
         logger.info("="*80)
         logger.info(f"Processed data saved to {config.get_preprocessing_results_dir()}/")
-        logger.info("\nCode-switching datasets:")
-        logger.info(f"  - {csv_with_fillers_path}")
-        logger.info(f"  - {csv_without_fillers_path}")
         logger.info("\nAll sentences:")
         logger.info(f"  - {csv_all_sentences_path}")
         logger.info("\nMonolingual sentences:")
-        logger.info(f"  - {config.get_csv_cantonese_mono_with_fillers_path()} ({len(cant_with)} sentences)")
         logger.info(f"  - {config.get_csv_cantonese_mono_without_fillers_path()} ({len(cant_without)} sentences)")
-        logger.info(f"  - {config.get_csv_english_mono_with_fillers_path()} ({len(eng_with)} sentences)")
-        logger.info(f"  - {config.get_csv_english_mono_without_fillers_path()} ({len(eng_without)} sentences)")
         if not args.no_translation:
             logger.info("\nTranslated sentences:")
             logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")

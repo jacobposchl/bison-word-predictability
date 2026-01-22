@@ -9,13 +9,13 @@ Supports discourse context by using k previous sentences from the same speaker.
 
 Usage:
     # With context (default)
-    python scripts/main_experiment/run_surprisal_experiment.py --model _
+    python scripts/surprisal/surprisal.py --model masked
     
     # Without context
-    python scripts/main_experiment/run_surprisal_experiment.py --model _ --no-context
+    python scripts/surprisal/surprisal.py --model autoregressive --no-context
     
     # Compare both modes
-    python scripts/main_experiment/run_surprisal_experiment.py --model _ --compare-context
+    python scripts/surprisal/surprisal.py --model masked --compare-context
     
     Required arguments:
         --model: Type of model - "masked" for BERT-style or "autoregressive" for GPT-style
@@ -103,7 +103,7 @@ def load_analysis_dataset(dataset_path: str) -> pd.DataFrame:
     if not dataset_path.exists():
         raise FileNotFoundError(
             f"Analysis dataset not found at path: {dataset_path}\n"
-            f"Please run scripts/exploratory/exploratory_analysis.py first!"
+            f"Please run scripts/matching/matching.py first!"
         )
     
     print(f"Loading analysis dataset from {dataset_path}")
@@ -172,11 +172,11 @@ def setup_output_directories(config: Config, model_type: str) -> tuple:
     Returns:
         Tuple of (results_dir, figures_dir) as Path objects
     """
-    results_base = Path(config.get_results_dir())
-    base_dir = results_base / f"main_experiment_{model_type}"
+    results_base = Path(config.get_surprisal_results_dir())
+    base_dir = results_base / model_type
     
     results_dir = base_dir
-    figures_dir = Path(config.get_figures_dir()) / f"main_experiment_{model_type}"
+    figures_dir = Path(config.get_surprisal_figures_dir()) / model_type
     
     # Create directories
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -200,23 +200,24 @@ def main():
     print(f"Loading configuration from {config_path}")
     config = Config(config_path)
     
-    # Setup output directories
-    results_dir, figures_dir = setup_output_directories(config, args.model)
+    # Setup base output directories
+    base_results_dir, base_figures_dir = setup_output_directories(config, args.model)
     
-    # Load analysis dataset
-    dataset_path = "results/exploratory/analysis_dataset.csv"
-    analysis_df = load_analysis_dataset(dataset_path)
+    # Find all window size datasets
+    matching_results_dir = Path(config.get_matching_results_dir())
+    window_datasets = sorted(matching_results_dir.glob("analysis_dataset_window_*.csv"))
     
-    # Apply sample size limit if specified
-    if args.sample_size:
-        print(f"\nLimiting to {args.sample_size} sentences (from {len(analysis_df)} total)")
-        # Sample unique CS sentences
-        unique_cs = analysis_df['cs_translation'].unique()
-        sampled_cs = pd.Series(unique_cs).sample(n=min(args.sample_size, len(unique_cs)), random_state=42)
-        analysis_df = analysis_df[analysis_df['cs_translation'].isin(sampled_cs)]
-        print(f"Selected {len(analysis_df)} comparisons")
+    if not window_datasets:
+        raise FileNotFoundError(
+            f"No analysis datasets found in {matching_results_dir}. "
+            f"Please run scripts/matching/matching.py first!"
+        )
     
-    # Initialize surprisal calculator
+    print(f"\nFound {len(window_datasets)} window size dataset(s):")
+    for ds in window_datasets:
+        print(f"  - {ds.name}")
+    
+    # Initialize surprisal calculator (reused for all window sizes)
     surprisal_calc = initialize_surprisal_calculator(
         model_type=args.model,
         config=config
@@ -236,50 +237,89 @@ def main():
         context_modes = [True]
         mode_names = ['with_context']
     
-    # Run analysis for each context mode
-    for use_context, mode_name in zip(context_modes, mode_names):
-        print("\n" + "="*80)
-        print(f"ANALYSIS MODE: {mode_name.upper().replace('_', ' ')}")
-        print("="*80)
+    # Process each window size dataset
+    for dataset_path in window_datasets:
+        # Extract window size from filename (e.g., "analysis_dataset_window_2.csv" -> 2)
+        import re
+        match = re.search(r'window_(\d+)', dataset_path.name)
+        if not match:
+            print(f"Warning: Could not extract window size from {dataset_path.name}, skipping...")
+            continue
+        window_size = int(match.group(1))
         
-        # Setup mode-specific output directories
-        if len(context_modes) > 1:
-            mode_results_dir = results_dir / mode_name
-            mode_figures_dir = figures_dir / mode_name
-            mode_results_dir.mkdir(parents=True, exist_ok=True)
-            mode_figures_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            mode_results_dir = results_dir
-            mode_figures_dir = figures_dir
+        print(f"\n{'='*80}")
+        print(f"Processing window size {window_size}")
+        print(f"{'='*80}")
         
-        # Calculate surprisal values
-        print("\n" + "-"*80)
-        print("CALCULATING SURPRISAL VALUES")
-        print("-"*80)
+        # Load analysis dataset for this window size
+        analysis_df = load_analysis_dataset(str(dataset_path))
         
-        results_df = calculate_surprisal_for_dataset(
-            analysis_df=analysis_df,
-            surprisal_calc=surprisal_calc,
-            show_progress=True,
-            use_context=use_context
-        )
+        # Apply sample size limit if specified
+        if args.sample_size:
+            print(f"\nLimiting to {args.sample_size} sentences (from {len(analysis_df)} total)")
+            # Sample unique CS sentences
+            unique_cs = analysis_df['cs_translation'].unique()
+            sampled_cs = pd.Series(unique_cs).sample(n=min(args.sample_size, len(unique_cs)), random_state=42)
+            analysis_df = analysis_df[analysis_df['cs_translation'].isin(sampled_cs)]
+            print(f"Selected {len(analysis_df)} comparisons")
         
-        # Save results
-        results_csv_path = mode_results_dir / "surprisal_results.csv"
-        results_df.to_csv(results_csv_path, index=False)
+        # Create window-specific output directories
+        window_results_dir = base_results_dir / f"window_{window_size}"
+        window_figures_dir = base_figures_dir / f"window_{window_size}"
+        window_results_dir.mkdir(parents=True, exist_ok=True)
+        window_figures_dir.mkdir(parents=True, exist_ok=True)
         
-        # Compute statistics
-        print("\n" + "-"*80)
-        print("COMPUTING STATISTICS")
-        print("-"*80)
+        # Run analysis for each context mode
+        for use_context, mode_name in zip(context_modes, mode_names):
+            print("\n" + "="*80)
+            print(f"ANALYSIS MODE: {mode_name.upper().replace('_', ' ')}")
+            print("="*80)
+            
+            # Setup mode-specific output directories
+            if len(context_modes) > 1:
+                mode_results_dir = window_results_dir / mode_name
+                mode_figures_dir = window_figures_dir / mode_name
+                mode_results_dir.mkdir(parents=True, exist_ok=True)
+                mode_figures_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                mode_results_dir = window_results_dir
+                mode_figures_dir = window_figures_dir
         
-        stats_dict = compute_statistics(results_df)
-        print_statistics_summary(stats_dict)
-        
-        # Save statistics to file
-        stats_txt_path = mode_results_dir / "statistics_summary.txt"
-        with open(stats_txt_path, 'w', encoding='utf-8') as f:
-            f.write("="*80 + "\n")
+            # Calculate surprisal values
+            print("\n" + "-"*80)
+            print("CALCULATING SURPRISAL VALUES")
+            print("-"*80)
+            
+            # Get context lengths from config
+            context_lengths = config.get('context.context_lengths', None)
+            if context_lengths is None:
+                # Fallback: if use_context, use default, otherwise empty list
+                context_lengths = [3] if use_context else []
+            
+            results_df = calculate_surprisal_for_dataset(
+                analysis_df=analysis_df,
+                surprisal_calc=surprisal_calc,
+                show_progress=True,
+                use_context=use_context,
+                context_lengths=context_lengths if use_context else []
+            )
+            
+            # Save results
+            results_csv_path = mode_results_dir / "surprisal_results.csv"
+            results_df.to_csv(results_csv_path, index=False)
+            
+            # Compute statistics
+            print("\n" + "-"*80)
+            print("COMPUTING STATISTICS")
+            print("-"*80)
+            
+            stats_dict = compute_statistics(results_df)
+            print_statistics_summary(stats_dict)
+            
+            # Save statistics to file
+            stats_txt_path = mode_results_dir / "statistics_summary.txt"
+            with open(stats_txt_path, 'w', encoding='utf-8') as f:
+                f.write("="*80 + "\n")
             f.write("SURPRISAL COMPARISON STATISTICS\n")
             f.write(f"Mode: {mode_name.replace('_', ' ').upper()}\n")
             f.write("="*80 + "\n\n")
@@ -288,6 +328,8 @@ def main():
             
             f.write(f"Sample Size:\n")
             f.write(f"  Total comparisons: {stats_dict['n_total']}\n")
+            if stats_dict.get('n_filtered', 0) > 0:
+                f.write(f"  Filtered out (failed calculations): {stats_dict['n_filtered']} ({stats_dict['n_filtered']/stats_dict['n_total']:.1%})\n")
             f.write(f"  Valid calculations: {stats_dict['n_valid']}\n")
             f.write(f"  Complete calculations: {stats_dict['n_complete']}\n")
             f.write(f"  Success rate: {stats_dict['success_rate']:.1%}\n")
@@ -319,50 +361,53 @@ def main():
             
             f.write(f"Effect Size:\n")
             f.write(f"  Cohen's d: {stats_dict['cohens_d']:.4f}\n\n")
+            
+            print(f"\nSaved statistics summary to {stats_txt_path}")
+            
+            # Generate visualizations
+            print("\n" + "-"*80)
+            print("GENERATING VISUALIZATIONS")
+            print("-"*80)
+            
+            # Distribution plots
+            plot_surprisal_distributions(
+                results_df=results_df,
+                output_path=mode_figures_dir / "surprisal_distributions.png"
+            )
+            
+            # Scatter comparison
+            plot_scatter_comparison(
+                results_df=results_df,
+                output_path=mode_figures_dir / "surprisal_scatter.png"
+            )
+            
+            # Difference histogram
+            plot_difference_histogram(
+                results_df=results_df,
+                output_path=mode_figures_dir / "surprisal_differences.png"
+            )
+            
+            # Summary figure
+            plot_summary_statistics(
+                results_df=results_df,
+                output_path=mode_figures_dir / "surprisal_summary.png",
+                stats_dict=stats_dict
+            )
+            
+            print(f"\nSaved visualizations to {mode_figures_dir}")
+            
+            print(f"\nResults saved to: {mode_results_dir}")
+            print(f"Figures saved to: {mode_figures_dir}")
         
-        print(f"\nSaved statistics summary to {stats_txt_path}")
-        
-        # Generate visualizations
-        print("\n" + "-"*80)
-        print("GENERATING VISUALIZATIONS")
-        print("-"*80)
-        
-        # Distribution plots
-        plot_surprisal_distributions(
-            results_df=results_df,
-            output_path=mode_figures_dir / "surprisal_distributions.png"
-        )
-        
-        # Scatter comparison
-        plot_scatter_comparison(
-            results_df=results_df,
-            output_path=mode_figures_dir / "surprisal_scatter.png"
-        )
-        
-        # Difference histogram
-        plot_difference_histogram(
-            results_df=results_df,
-            output_path=mode_figures_dir / "surprisal_differences.png"
-        )
-        
-        # Summary figure
-        plot_summary_statistics(
-            results_df=results_df,
-            output_path=mode_figures_dir / "surprisal_summary.png",
-            stats_dict=stats_dict
-        )
-        
-        print("\nAll visualizations generated successfully!")
+        print(f"\n{'='*80}")
+        print(f"Completed processing window size {window_size}")
+        print(f"{'='*80}")
     
-    # Final summary
-    print("\n" + "="*80)
-    print("EXPERIMENT COMPLETED SUCCESSFULLY")
-    print("="*80)
-    print(f"\nResults saved to:")
-    print(f"  - Detailed results: {results_csv_path}")
-    print(f"  - Statistics: {stats_txt_path}")
-    print(f"  - Figures: {figures_dir}")
-    print("\n" + "="*80)
+    print(f"\n{'='*80}")
+    print("ALL WINDOW SIZES PROCESSED")
+    print(f"{'='*80}")
+    print(f"\nResults saved to: {base_results_dir}")
+    print(f"Figures saved to: {base_figures_dir}")
 
 
 if __name__ == "__main__":

@@ -141,6 +141,7 @@ class MaskedLMSurprisalCalculator:
             return {
                 'surprisal': float('nan'),
                 'probability': 0.0,
+                'entropy': float('nan'),
                 'word': target_word,
                 'tokens': [],
                 'token_surprisals': [],
@@ -150,6 +151,7 @@ class MaskedLMSurprisalCalculator:
 
         token_surprisals = []
         token_probs = []
+        token_entropies = []
 
         # Tokenize once before the loop for efficiency
         tokens = self.tokenizer.tokenize(full_sentence, add_special_tokens = True)
@@ -171,6 +173,11 @@ class MaskedLMSurprisalCalculator:
             probs = torch.softmax(masked_token_logits, dim = 0)
 
             token_prob = probs[original_token_id].item()
+            
+            # Calculate entropy: H = -sum(p * log2(p)) for all tokens
+            # Add small epsilon to avoid log(0)
+            epsilon = 1e-10
+            token_entropy = -torch.sum(probs * torch.log2(probs + epsilon)).item()
 
             if token_prob > 0:
                 token_surprisal = -np.log2(token_prob)
@@ -180,16 +187,20 @@ class MaskedLMSurprisalCalculator:
 
             token_surprisals.append(token_surprisal)
             token_probs.append(token_prob)
+            token_entropies.append(token_entropy)
 
         # Filter out invalid values for validation
         valid_surprisals = [s for s in token_surprisals if not np.isnan(s) and not np.isinf(s)]
         
         total_surprisal = sum(token_surprisals)
         total_prob = np.prod(token_probs)
+        # Average entropy across tokens (entropy is already per-token measure)
+        avg_entropy = np.mean(token_entropies) if token_entropies else np.nan
 
         return {
             'surprisal': total_surprisal,
             'probability': total_prob,
+            'entropy': avg_entropy,
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
@@ -362,6 +373,7 @@ class AutoregressiveLMSurprisalCalculator:
             return {
                 'surprisal': float('nan'),
                 'probability': 0.0,
+                'entropy': float('nan'),
                 'word': target_word,
                 'tokens': [],
                 'token_surprisals': [],
@@ -399,6 +411,7 @@ class AutoregressiveLMSurprisalCalculator:
             return {
                 'surprisal': float('nan'),
                 'probability': 0.0,
+                'entropy': float('nan'),
                 'word': target_word,
                 'tokens': token_strings,
                 'token_surprisals': [],
@@ -411,6 +424,7 @@ class AutoregressiveLMSurprisalCalculator:
         # 2. Input context + first token -> predict second target token
         # 3. etc.
         current_input_ids = input_ids.clone()
+        token_entropies = []
         
         for i, token_idx_in_full in enumerate(token_indices):
             # Get the actual token ID from the full sequence
@@ -420,6 +434,7 @@ class AutoregressiveLMSurprisalCalculator:
                 logger.warning(f"Target word at first position, surprisal may be unreliable")
                 token_surprisal = float('nan')
                 token_prob = 0.0
+                token_entropy = float('nan')
             else:
                 with torch.no_grad():
                     outputs = self.model(current_input_ids)
@@ -432,6 +447,11 @@ class AutoregressiveLMSurprisalCalculator:
                 
                 # Get probability of the actual token
                 token_prob = probs[actual_token_id].item()
+                
+                # Calculate entropy: H = -sum(p * log2(p)) for all tokens
+                # Add small epsilon to avoid log(0)
+                epsilon = 1e-10
+                token_entropy = -torch.sum(probs * torch.log2(probs + epsilon)).item()
 
                 if token_prob > 1e-10:  # Use small threshold to avoid log(0)
                     token_surprisal = -np.log2(token_prob)
@@ -453,10 +473,12 @@ class AutoregressiveLMSurprisalCalculator:
 
             token_surprisals.append(token_surprisal)
             token_probs.append(token_prob)
+            token_entropies.append(token_entropy)
 
         # Filter out NaN values for aggregation
         valid_surprisals = [s for s in token_surprisals if not np.isnan(s) and not np.isinf(s)]
         valid_probs = [p for p in token_probs if p > 0]
+        valid_entropies = [e for e in token_entropies if not np.isnan(e)]
 
         if valid_surprisals:
             total_surprisal = sum(valid_surprisals)
@@ -467,10 +489,14 @@ class AutoregressiveLMSurprisalCalculator:
             total_prob = np.prod(valid_probs)
         else:
             total_prob = 0.0
+        
+        # Average entropy across tokens (entropy is already per-token measure)
+        avg_entropy = np.mean(valid_entropies) if valid_entropies else float('nan')
 
         return {
             'surprisal': total_surprisal,
             'probability': total_prob,
+            'entropy': avg_entropy,
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
