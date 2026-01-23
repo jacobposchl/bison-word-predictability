@@ -181,8 +181,6 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
             'word_length': len(str(cs_word)) if pd.notna(cs_word) else 0,
             'sentence_length': cs_sentence_length,
             'position_normalized': cs_position_norm,
-            'is_first_word': 1 if cs_switch_idx == 0 else 0,
-            'is_last_word': 1 if cs_switch_idx == cs_sentence_length - 1 else 0,
             'pos_tag': cs_pos,
             'word_frequency': row.get(cs_probability_col, np.nan),  # Use probability as frequency proxy
             'surprisal': row.get(cs_surprisal_col, np.nan),
@@ -222,8 +220,6 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
             'word_length': len(str(mono_word)) if pd.notna(mono_word) else 0,
             'sentence_length': mono_sentence_length,
             'position_normalized': mono_position_norm,
-            'is_first_word': 1 if mono_switch_idx == 0 else 0,
-            'is_last_word': 1 if mono_switch_idx == mono_sentence_length - 1 else 0,
             'pos_tag': mono_pos,
             'word_frequency': row.get(mono_probability_col, np.nan),  # Use probability as frequency proxy
             'surprisal': row.get(mono_surprisal_col, np.nan),
@@ -271,8 +267,6 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
         'word_length',
         'sentence_length', 
         'position_normalized',
-        'is_first_word',
-        'is_last_word',
         'word_frequency'
     ]
     
@@ -314,8 +308,7 @@ def fit_models(
     
     # Define feature sets
     control_features = [
-        'word_length', 'sentence_length', 'position_normalized',
-        'is_first_word', 'is_last_word', 'word_frequency'
+        'word_length', 'sentence_length', 'position_normalized', 'word_frequency'
     ] + [f for f in feature_names if f.startswith('pos_')]
     
     surprisal_features = control_features + ['surprisal']
@@ -430,16 +423,6 @@ def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
     comparison_df = pd.DataFrame(comparison_data)
     comparison_df = comparison_df.sort_values('auc', ascending=False)
     
-    # Likelihood ratio tests (comparing nested models)
-    if 'control' in results and 'surprisal' in results:
-        # Compare control vs surprisal
-        control_ll = results['control']['model'].score(
-            results['control']['scaler'].transform(
-                pd.DataFrame([results['control']['features']], columns=results['control']['features'])
-            ),
-            y_test[:1]
-        )  # This is approximate - would need proper log-likelihood calculation
-        
     logger.info("\nModel Comparison:")
     logger.info(comparison_df.to_string(index=False))
     
@@ -678,10 +661,11 @@ def main():
             # Save results
             save_results(results, comparison_df, output_dir, args.model)
             
-            # Create plots
-            plot_results(results, y_test, output_dir)
+            # Note: Plots can be generated separately using:
+            # python scripts/plots/figures.py --regression --model {args.model}
             
             logger.info(f"\nResults saved to: {output_dir}")
+            logger.info(f"To generate figures, run: python scripts/plots/figures.py --regression --model {args.model}")
     
     logger.info("\n" + "="*80)
     logger.info("ANALYSIS COMPLETE")

@@ -23,8 +23,7 @@ sys.path.insert(0, str(project_root))
 from src.core.config import Config
 from src.data.analysis_dataset import create_analysis_dataset
 from src.experiments.nllb_translator import NLLBTranslator
-from src.plots.exploratory.plot_functions import plot_similarity_distributions
-from src.plots.exploratory.report_generator import generate_window_matching_report
+from src.plots.matching.report_generator import generate_window_matching_report
 from src.analysis.matching_algorithm import analyze_window_matching
 from src.analysis.pos_tagging import parse_pattern_segments
 
@@ -82,9 +81,8 @@ def main():
     # Load configuration
     config = Config()
     
-    # Get output and figures directories from config
+    # Get output directories from config
     output_dir = Path(config.get_matching_results_dir())
-    figures_dir = Path(config.get_matching_figures_dir())
     preprocessing_dir = Path(config.get_preprocessing_results_dir())
     
     logger.info("Starting POS window matching analysis...")
@@ -185,7 +183,6 @@ def main():
         
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)
-        figures_dir.mkdir(parents=True, exist_ok=True)
         
         # Create and save analysis dataset for each window size
         logger.info("\nCreating analysis datasets for each window size...")
@@ -211,8 +208,8 @@ def main():
             analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
             logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
         
-        # Generate and save similarity distribution plot (for all window sizes)
-        plot_path = plot_similarity_distributions(window_results, str(figures_dir))
+        # Note: Similarity distribution plots can be generated separately using:
+        # python scripts/plots/figures.py --matching
         
         # Generate window matching report (for all window sizes)
         window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
@@ -224,6 +221,7 @@ def main():
         
         logger.info(f"\nAnalysis complete! Results saved to: {output_dir}")
         logger.info(f"Created {len(window_sizes)} analysis datasets (one per window size)")
+        logger.info(f"To generate figures, run: python scripts/plots/figures.py --matching")
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

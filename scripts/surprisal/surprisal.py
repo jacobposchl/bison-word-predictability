@@ -45,12 +45,7 @@ from src.experiments.surprisal_analysis import (
     compute_statistics,
     print_statistics_summary
 )
-from src.experiments.visualization import (
-    plot_surprisal_distributions,
-    plot_scatter_comparison,
-    plot_difference_histogram,
-    plot_summary_statistics
-)
+# Note: Visualization functions are now called from scripts/plots/figures.py
 
 
 def parse_arguments():
@@ -163,7 +158,7 @@ def initialize_surprisal_calculator(
 
 def setup_output_directories(config: Config, model_type: str) -> tuple:
     """
-    Create output directories for results and figures.
+    Create output directories for results.
     
     Args:
         config: Configuration object
@@ -171,6 +166,7 @@ def setup_output_directories(config: Config, model_type: str) -> tuple:
         
     Returns:
         Tuple of (results_dir, figures_dir) as Path objects
+        (figures_dir is kept for compatibility but not used)
     """
     results_base = Path(config.get_surprisal_results_dir())
     base_dir = results_base / model_type
@@ -180,7 +176,7 @@ def setup_output_directories(config: Config, model_type: str) -> tuple:
     
     # Create directories
     results_dir.mkdir(parents=True, exist_ok=True)
-    figures_dir.mkdir(parents=True, exist_ok=True)
+    # Note: figures_dir will be created when generating figures
     
     return results_dir, figures_dir
 
@@ -265,9 +261,7 @@ def main():
         
         # Create window-specific output directories
         window_results_dir = base_results_dir / f"window_{window_size}"
-        window_figures_dir = base_figures_dir / f"window_{window_size}"
         window_results_dir.mkdir(parents=True, exist_ok=True)
-        window_figures_dir.mkdir(parents=True, exist_ok=True)
         
         # Run analysis for each context mode
         for use_context, mode_name in zip(context_modes, mode_names):
@@ -278,12 +272,9 @@ def main():
             # Setup mode-specific output directories
             if len(context_modes) > 1:
                 mode_results_dir = window_results_dir / mode_name
-                mode_figures_dir = window_figures_dir / mode_name
                 mode_results_dir.mkdir(parents=True, exist_ok=True)
-                mode_figures_dir.mkdir(parents=True, exist_ok=True)
             else:
                 mode_results_dir = window_results_dir
-                mode_figures_dir = window_figures_dir
         
             # Calculate surprisal values
             print("\n" + "-"*80)
@@ -395,45 +386,11 @@ def main():
             
             print(f"\nSaved statistics summary to {stats_txt_path}")
             
-            # Generate visualizations
-            print("\n" + "-"*80)
-            print("GENERATING VISUALIZATIONS")
-            print("-"*80)
-            
-            # Distribution plots (use first context length for main plots)
-            plot_context_length = primary_context_length if primary_context_length else None
-            plot_surprisal_distributions(
-                results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_distributions.png",
-                context_length=plot_context_length
-            )
-            
-            # Scatter comparison
-            plot_scatter_comparison(
-                results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_scatter.png",
-                context_length=plot_context_length
-            )
-            
-            # Difference histogram
-            plot_difference_histogram(
-                results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_differences.png",
-                context_length=plot_context_length
-            )
-            
-            # Summary figure
-            plot_summary_statistics(
-                results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_summary.png",
-                context_length=plot_context_length,
-                stats_dict=stats_dict
-            )
-            
-            print(f"\nSaved visualizations to {mode_figures_dir}")
+            # Note: Visualizations can be generated separately using:
+            # python scripts/plots/figures.py --surprisal --model {args.model}
             
             print(f"\nResults saved to: {mode_results_dir}")
-            print(f"Figures saved to: {mode_figures_dir}")
+            print(f"To generate figures, run: python scripts/plots/figures.py --surprisal --model {args.model}")
         
         print(f"\n{'='*80}")
         print(f"Completed processing window size {window_size}")
@@ -443,7 +400,7 @@ def main():
     print("ALL WINDOW SIZES PROCESSED")
     print(f"{'='*80}")
     print(f"\nResults saved to: {base_results_dir}")
-    print(f"Figures saved to: {base_figures_dir}")
+    print(f"To generate figures, run: python scripts/plots/figures.py --surprisal --model {args.model}")
 
 
 if __name__ == "__main__":

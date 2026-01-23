@@ -32,9 +32,8 @@ from src.data.data_export import (
     export_cantonese_monolingual,
     export_translated_sentences
 )
-from src.plots.preprocessing.plot_preprocessing_simple import (
-    print_analysis_summary_simple,
-    plot_matrix_language_distribution_simple
+from src.plots.preprocessing.plot_preprocessing import (
+    print_analysis_summary_simple
 )
 
 
@@ -138,10 +137,8 @@ def main():
                 min_sentence_words=min_sentence_words
             )
         
-        # Generate visualizations (using only WITHOUT fillers data)
-        logger.info("\nGenerating visualizations...")
-        plot_matrix_language_distribution_simple(without_fillers, figures_dir)
-        logger.info("Visualizations saved to " + figures_dir)
+        # Note: Visualizations can be generated separately using:
+        # python scripts/plots/figures.py --preprocess
         
         # Print analysis summary
         logger.info("\nAnalysis Summary")
@@ -159,7 +156,7 @@ def main():
         if not args.no_translation:
             logger.info("\nTranslated sentences:")
             logger.info(f"  - {config.get_csv_cantonese_translated_path()} ({len(translated_df)} sentences)")
-        logger.info(f"\nFigures saved to: {figures_dir}")
+        logger.info(f"\nTo generate figures, run: python scripts/plots/figures.py --preprocess")
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
