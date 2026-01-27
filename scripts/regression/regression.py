@@ -3,13 +3,24 @@ Logistic Regression Analysis for Code-Switch Detection
 
 This script performs logistic regression to test whether surprisal and entropy
 improve prediction of code-switched vs monolingual sentences beyond baseline
-features (frequency, word length, sentence length, POS).
+features (frequency, word length, sentence length, POS, group).
+
+Features:
+- word_frequency: Retrieved from surprisal results (calculated using pycantonese corpus data)
+- group: Speaker group (Heritage/Homeland/Immersed) - one-hot encoded
+- word_length, sentence_length, position_normalized: Basic linguistic features
+- pos_tag: Part-of-speech tags - one-hot encoded
+- surprisal: Surprisal values from language models
+- entropy: Entropy values from language models
 
 Models:
-1. Control model: frequency + word_length + sentence_length + position + POS
+1. Control model: frequency + word_length + sentence_length + position + POS + group
 2. Surprisal model: control features + surprisal
 3. Entropy model: control features + entropy
 4. Surprisal + Entropy model: control features + surprisal + entropy
+
+The script saves the regression datasets to:
+results/regression/{model}/window_{N}/context_{M}/dataset.csv
 
 Usage:
     python scripts/regression/regression.py --model autoregressive
@@ -154,6 +165,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         cs_word = row.get('cs_word', '')
         cs_sentence = row.get('cs_translation', '')
         cs_switch_idx = int(row.get('switch_index', 0))
+        cs_group = row.get('cs_group', 'Unknown')
         
         # Calculate sentence length
         cs_words_list = cs_sentence.split() if pd.notna(cs_sentence) else []
@@ -165,14 +177,15 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         # Extract POS tag
         cs_pos = extract_pos_at_position(cs_sentence, cs_switch_idx)
         
+        # Get word frequency from surprisal results (already calculated)
+        cs_word_frequency = row.get('cs_word_frequency', np.nan)
+        
         # Get surprisal and entropy columns (with context length suffix if specified)
         if context_length is not None:
             cs_surprisal_col = f'cs_surprisal_context_{context_length}'
-            cs_probability_col = f'cs_probability_context_{context_length}'
             cs_entropy_col = f'cs_entropy_context_{context_length}'
         else:
             cs_surprisal_col = 'cs_surprisal_total'
-            cs_probability_col = 'cs_probability'
             cs_entropy_col = 'cs_entropy'
         
         rows.append({
@@ -182,7 +195,8 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
             'sentence_length': cs_sentence_length,
             'position_normalized': cs_position_norm,
             'pos_tag': cs_pos,
-            'word_frequency': row.get(cs_probability_col, np.nan),  # Use probability as frequency proxy
+            'word_frequency': cs_word_frequency,
+            'group': cs_group if pd.notna(cs_group) else 'Unknown',
             'surprisal': row.get(cs_surprisal_col, np.nan),
             'entropy': row.get(cs_entropy_col, np.nan),
             'sentence_id': f"{idx}_cs",
@@ -193,6 +207,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         mono_word = row.get('mono_word', '')
         mono_sentence = row.get('matched_mono', '')
         mono_switch_idx = int(row.get('matched_switch_index', 0))
+        mono_group = row.get('matched_group', 'Unknown')
         
         # Calculate sentence length
         mono_words_list = mono_sentence.split() if pd.notna(mono_sentence) else []
@@ -204,14 +219,15 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         # Extract POS tag
         mono_pos = extract_pos_at_position(mono_sentence, mono_switch_idx)
         
+        # Get word frequency from surprisal results (already calculated)
+        mono_word_frequency = row.get('mono_word_frequency', np.nan)
+        
         # Get surprisal and entropy columns (with context length suffix if specified)
         if context_length is not None:
             mono_surprisal_col = f'mono_surprisal_context_{context_length}'
-            mono_probability_col = f'mono_probability_context_{context_length}'
             mono_entropy_col = f'mono_entropy_context_{context_length}'
         else:
             mono_surprisal_col = 'mono_surprisal_total'
-            mono_probability_col = 'mono_probability'
             mono_entropy_col = 'mono_entropy'
         
         rows.append({
@@ -221,7 +237,8 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
             'sentence_length': mono_sentence_length,
             'position_normalized': mono_position_norm,
             'pos_tag': mono_pos,
-            'word_frequency': row.get(mono_probability_col, np.nan),  # Use probability as frequency proxy
+            'word_frequency': mono_word_frequency,
+            'group': mono_group if pd.notna(mono_group) else 'Unknown',
             'surprisal': row.get(mono_surprisal_col, np.nan),
             'entropy': row.get(mono_entropy_col, np.nan),
             'sentence_id': f"{idx}_mono",
@@ -231,12 +248,18 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
     result_df = pd.DataFrame(rows)
     
     # Remove rows with missing critical values
+    # Note: entropy is optional (may be NaN if not calculated)
     n_before = len(result_df)
-    result_df = result_df.dropna(subset=['word_frequency', 'surprisal', 'entropy'])
+    result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
     n_after = len(result_df)
     
     if n_before > n_after:
         logger.info(f"Removed {n_before - n_after} rows with missing values")
+    
+    # Check if entropy is available
+    entropy_available = result_df['entropy'].notna().any()
+    if not entropy_available:
+        logger.warning("Entropy values are not available in the data. Entropy-based models will be skipped.")
     
     logger.info(f"Created {len(result_df)} observations ({len(result_df[result_df['is_code_switched']==1])} CS, {len(result_df[result_df['is_code_switched']==0])} mono)")
     
@@ -245,7 +268,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
 
 def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     """
-    Prepare feature matrix with one-hot encoding for POS tags.
+    Prepare feature matrix with one-hot encoding for POS tags and group.
     
     Args:
         df: DataFrame from prepare_data_for_regression()
@@ -262,6 +285,10 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     pos_dummies = pd.get_dummies(feature_df['pos_tag'], prefix='pos')
     feature_df = pd.concat([feature_df, pos_dummies], axis=1)
     
+    # One-hot encode group
+    group_dummies = pd.get_dummies(feature_df['group'], prefix='group')
+    feature_df = pd.concat([feature_df, group_dummies], axis=1)
+    
     # Get feature names
     numeric_features = [
         'word_length',
@@ -271,15 +298,17 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     ]
     
     pos_feature_names = [col for col in pos_dummies.columns]
+    group_feature_names = [col for col in group_dummies.columns]
     
-    feature_names = numeric_features + pos_feature_names
+    feature_names = numeric_features + pos_feature_names + group_feature_names
     
     # Select only feature columns
-    feature_df = feature_df[numeric_features + pos_feature_names]
+    feature_df = feature_df[numeric_features + pos_feature_names + group_feature_names]
     
     logger.info(f"Prepared {len(feature_names)} features")
     logger.info(f"  Numeric features: {len(numeric_features)}")
     logger.info(f"  POS features: {len(pos_feature_names)}")
+    logger.info(f"  Group features: {len(group_feature_names)}")
     
     return feature_df, feature_names
 
@@ -309,7 +338,7 @@ def fit_models(
     # Define feature sets
     control_features = [
         'word_length', 'sentence_length', 'position_normalized', 'word_frequency'
-    ] + [f for f in feature_names if f.startswith('pos_')]
+    ] + [f for f in feature_names if f.startswith('pos_')] + [f for f in feature_names if f.startswith('group_')]
     
     surprisal_features = control_features + ['surprisal']
     entropy_features = control_features + ['entropy']
@@ -429,72 +458,60 @@ def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
     return comparison_df
 
 
-def save_results(
+def create_results_row(
     results: Dict[str, Dict],
     comparison_df: pd.DataFrame,
-    output_dir: Path,
-    model_type: str
-):
-    """Save regression results to files."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+    model_type: str,
+    window_size: int,
+    context_length: int,
+    n_train: int,
+    n_test: int
+) -> Dict:
+    """
+    Create a single row of results for the consolidated results CSV.
     
-    # Save model comparison
-    comparison_path = output_dir / "model_comparison.csv"
-    comparison_df.to_csv(comparison_path, index=False)
-    logger.info(f"Saved model comparison to {comparison_path}")
+    Args:
+        results: Dictionary of model results
+        comparison_df: DataFrame with model comparison
+        model_type: Type of model (masked/autoregressive)
+        window_size: Window size used
+        context_length: Context length used
+        n_train: Number of training samples
+        n_test: Number of test samples
+        
+    Returns:
+        Dictionary with all relevant results for one configuration
+    """
+    row = {
+        'model_type': model_type,
+        'window_size': window_size,
+        'context_length': context_length,
+        'n_train': n_train,
+        'n_test': n_test,
+    }
     
-    # Save detailed results for each model
-    for model_name, result in results.items():
-        # Save coefficients
-        coeff_df = pd.DataFrame([
-            {'feature': feat, 'coefficient': coeff}
-            for feat, coeff in result['coefficients'].items()
-        ])
-        coeff_df = coeff_df.sort_values('coefficient', key=abs, ascending=False)
-        
-        coeff_path = output_dir / f"{model_name}_coefficients.csv"
-        coeff_df.to_csv(coeff_path, index=False)
-        
-        # Save classification report
-        report_df = pd.DataFrame(result['classification_report']).transpose()
-        report_path = output_dir / f"{model_name}_classification_report.csv"
-        report_df.to_csv(report_path)
+    # Add metrics for each model
+    for model_name in ['control', 'surprisal', 'entropy', 'surprisal_entropy']:
+        if model_name in results:
+            result = results[model_name]
+            row[f'{model_name}_auc'] = result['auc']
+            row[f'{model_name}_accuracy'] = result['accuracy']
+            row[f'{model_name}_precision'] = result['precision']
+            row[f'{model_name}_recall'] = result['recall']
+            row[f'{model_name}_f1'] = result['f1']
+            row[f'{model_name}_n_features'] = len(result['features'])
+            row[f'{model_name}_intercept'] = result['intercept']
+        else:
+            # Model not available (e.g., entropy model when entropy not available)
+            row[f'{model_name}_auc'] = np.nan
+            row[f'{model_name}_accuracy'] = np.nan
+            row[f'{model_name}_precision'] = np.nan
+            row[f'{model_name}_recall'] = np.nan
+            row[f'{model_name}_f1'] = np.nan
+            row[f'{model_name}_n_features'] = np.nan
+            row[f'{model_name}_intercept'] = np.nan
     
-    # Save summary text file
-    summary_path = output_dir / "regression_summary.txt"
-    with open(summary_path, 'w', encoding='utf-8') as f:
-        f.write("="*80 + "\n")
-        f.write("LOGISTIC REGRESSION ANALYSIS SUMMARY\n")
-        f.write("="*80 + "\n\n")
-        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Model type: {model_type}\n\n")
-        
-        f.write("MODEL COMPARISON\n")
-        f.write("-"*80 + "\n")
-        f.write(comparison_df.to_string(index=False))
-        f.write("\n\n")
-        
-        f.write("DETAILED RESULTS\n")
-        f.write("-"*80 + "\n")
-        for model_name, result in results.items():
-            f.write(f"\n{model_name.upper()} MODEL:\n")
-            f.write(f"  AUC: {result['auc']:.4f}\n")
-            f.write(f"  Accuracy: {result['accuracy']:.4f}\n")
-            f.write(f"  Precision: {result['precision']:.4f}\n")
-            f.write(f"  Recall: {result['recall']:.4f}\n")
-            f.write(f"  F1 Score: {result['f1']:.4f}\n")
-            f.write(f"  Number of features: {len(result['features'])}\n")
-            f.write(f"  Intercept: {result['intercept']:.4f}\n")
-            f.write(f"\n  Top 10 Coefficients (by absolute value):\n")
-            coeff_df = pd.DataFrame([
-                {'feature': feat, 'coefficient': coeff}
-                for feat, coeff in result['coefficients'].items()
-            ])
-            coeff_df = coeff_df.sort_values('coefficient', key=abs, ascending=False)
-            for _, row in coeff_df.head(10).iterrows():
-                f.write(f"    {row['feature']}: {row['coefficient']:.4f}\n")
-    
-    logger.info(f"Saved summary to {summary_path}")
+    return row
 
 
 def plot_results(results: Dict[str, Dict], y_test: pd.Series, output_dir: Path):
@@ -585,6 +602,9 @@ def main():
     
     output_base.mkdir(parents=True, exist_ok=True)
     
+    # Collect all results for consolidated output
+    all_results = []
+    
     # Process each window size and context length combination
     for window_size in window_sizes:
         window_results_dir = results_base / f"window_{window_size}"
@@ -625,11 +645,18 @@ def main():
             # Prepare features (include surprisal and entropy in base features)
             X_base, feature_names = prepare_features(regression_df)
             
-            # Add surprisal and entropy to feature matrix
+            # Add surprisal to feature matrix
             X = X_base.copy()
             X['surprisal'] = regression_df['surprisal'].values
-            X['entropy'] = regression_df['entropy'].values
-            feature_names = feature_names + ['surprisal', 'entropy']
+            feature_names = feature_names + ['surprisal']
+            
+            # Only add entropy if it's available (not all NaN)
+            entropy_available = regression_df['entropy'].notna().any()
+            if entropy_available:
+                X['entropy'] = regression_df['entropy'].values
+                feature_names = feature_names + ['entropy']
+            else:
+                logger.warning("Entropy is not available - entropy-based models will be skipped")
             
             y = regression_df['is_code_switched']
             
@@ -654,23 +681,36 @@ def main():
             # Compare models
             comparison_df = compare_models(results, y_test)
             
-            # Create output directory for this combination
-            output_dir = output_base / f"window_{window_size}" / f"context_{context_length}"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # Create results row for consolidated output
+            results_row = create_results_row(
+                results=results,
+                comparison_df=comparison_df,
+                model_type=args.model,
+                window_size=window_size,
+                context_length=context_length,
+                n_train=len(X_train),
+                n_test=len(X_test)
+            )
+            all_results.append(results_row)
             
-            # Save results
-            save_results(results, comparison_df, output_dir, args.model)
-            
-            # Note: Plots can be generated separately using:
-            # python scripts/plots/figures.py --regression --model {args.model}
-            
-            logger.info(f"\nResults saved to: {output_dir}")
-            logger.info(f"To generate figures, run: python scripts/plots/figures.py --regression --model {args.model}")
+            logger.info(f"Completed analysis for window {window_size}, context {context_length}")
+    
+    # Save consolidated results to single CSV
+    if all_results:
+        results_df = pd.DataFrame(all_results)
+        results_csv_path = output_base / "regression_results.csv"
+        results_df.to_csv(results_csv_path, index=False)
+        logger.info(f"\n{'='*80}")
+        logger.info(f"Saved consolidated results to: {results_csv_path}")
+        logger.info(f"Total configurations: {len(all_results)}")
+    else:
+        logger.warning("No results to save!")
     
     logger.info("\n" + "="*80)
     logger.info("ANALYSIS COMPLETE")
     logger.info("="*80)
-    logger.info(f"\nAll results saved to: {output_base}")
+    logger.info(f"\nResults saved to: {output_base}")
+    logger.info(f"To generate figures, run: python scripts/plots/figures.py --regression --model {args.model}")
 
 
 if __name__ == "__main__":

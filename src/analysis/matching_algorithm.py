@@ -9,7 +9,6 @@ following the methodology of Calvillo et al. (2020).
 import logging
 import multiprocessing
 import os
-import pickle
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from Levenshtein import distance as levenshtein_distance
@@ -452,93 +451,13 @@ def _process_single_cs_sentence(
     return (cs_sent, detailed_matches, has_matches, similarity_scores)
 
 
-def _get_checkpoint_path(checkpoint_dir: str, window_size: int, batch_idx: int) -> Path:
-    """
-    Get the path for a checkpoint file.
-    
-    Args:
-        checkpoint_dir: Directory for checkpoint files
-        window_size: Window size being processed
-        batch_idx: Batch index (0-based)
-        
-    Returns:
-        Path to checkpoint file
-    """
-    checkpoint_path = Path(checkpoint_dir)
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-    return checkpoint_path / f"window_{window_size}_batch_{batch_idx}.pkl"
-
-
-def _load_batch_checkpoint(checkpoint_path: Path) -> Dict:
-    """
-    Load a batch checkpoint from disk.
-    
-    Args:
-        checkpoint_path: Path to checkpoint file
-        
-    Returns:
-        Dictionary containing batch results
-    """
-    with open(checkpoint_path, 'rb') as f:
-        return pickle.load(f)
-
-
-def _save_batch_checkpoint(checkpoint_path: Path, batch_results: Dict) -> None:
-    """
-    Save a batch checkpoint to disk.
-    
-    Args:
-        checkpoint_path: Path to checkpoint file
-        batch_results: Dictionary containing batch results to save
-    """
-    with open(checkpoint_path, 'wb') as f:
-        pickle.dump(batch_results, f)
-
-
-def _merge_batch_results(all_batch_results: List[Dict]) -> Dict:
-    """
-    Merge results from multiple batches into a single result dictionary.
-    
-    Args:
-        all_batch_results: List of batch result dictionaries
-        
-    Returns:
-        Merged result dictionary with combined statistics
-    """
-    if not all_batch_results:
-        return {
-            'detailed_matches': [],
-            'similarity_scores': [],
-            'sentences_with_matches': 0
-        }
-    
-    # Merge all detailed matches
-    all_detailed_matches = []
-    all_similarity_scores = []
-    total_sentences_with_matches = 0
-    
-    for batch_result in all_batch_results:
-        all_detailed_matches.extend(batch_result.get('detailed_matches', []))
-        all_similarity_scores.extend(batch_result.get('similarity_scores', []))
-        total_sentences_with_matches += batch_result.get('sentences_with_matches', 0)
-    
-    return {
-        'detailed_matches': all_detailed_matches,
-        'similarity_scores': all_similarity_scores,
-        'sentences_with_matches': total_sentences_with_matches
-    }
-
-
 def analyze_window_matching(
     translated_sentences: List[Dict],
     monolingual_sentences: List[Dict],
     window_sizes: List[int] = [1, 2, 3],
     similarity_threshold: float = 0.4,
     top_k: int = 5,
-    num_workers: Optional[int] = None,
-    batch_size: Optional[int] = None,
-    checkpoint_dir: Optional[str] = None,
-    resume: bool = True
+    num_workers: Optional[int] = None
 ) -> Dict:
     """
     Analyze POS window matching across multiple window sizes.
@@ -559,12 +478,6 @@ def analyze_window_matching(
                      If set to a number, that many cores will be left free.
                      Example: On an 8-core system, num_workers=2 means use 6 workers, leaving 2 free.
                      Default: None (uses all cores).
-        batch_size: Number of sentences per batch. If None, processes all sentences at once.
-                    Default: None.
-        checkpoint_dir: Directory for saving batch checkpoints. If None, no checkpoints are saved.
-                        Default: None.
-        resume: If True, load existing checkpoints and skip already processed batches.
-                Default: True.
         
     Returns:
         Dictionary with results for each window size:
@@ -616,123 +529,41 @@ def analyze_window_matching(
         
         window_key = f'window_{window_size}'
         
-        # Determine if batching is enabled
-        use_batching = batch_size is not None and batch_size > 0
+        # Process all sentences
+        detailed_matches = []
+        similarity_scores = []
+        sentences_with_matches = 0
         
-        if use_batching:
-            # Split sentences into batches
-            num_batches = (len(translated_sentences) + batch_size - 1) // batch_size
-            logger.info(f"Processing {len(translated_sentences)} sentences in {num_batches} batches (batch_size={batch_size})")
-            
-            all_batch_results = []
-            
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, len(translated_sentences))
-                batch_sentences = translated_sentences[start_idx:end_idx]
-                
-                # Check for checkpoint
-                checkpoint_path = None
-                if checkpoint_dir:
-                    checkpoint_path = _get_checkpoint_path(checkpoint_dir, window_size, batch_idx)
-                    
-                    if resume and checkpoint_path.exists():
-                        logger.info(f"Loading checkpoint for batch {batch_idx + 1}/{num_batches}...")
-                        batch_result = _load_batch_checkpoint(checkpoint_path)
-                        all_batch_results.append(batch_result)
-                        continue
-                
-                logger.info(f"Processing batch {batch_idx + 1}/{num_batches} ({len(batch_sentences)} sentences)...")
-                
-                # Prepare arguments for workers
-                worker_args = [
-                    (cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k)
-                    for cs_sent in batch_sentences
-                ]
-                
-                # Process batch in parallel or sequentially
-                if num_workers == 1:
-                    # Sequential processing with progress bar
-                    batch_results = []
-                    for args in tqdm(worker_args, desc=f"Batch {batch_idx + 1}/{num_batches}", leave=False):
-                        result = _process_single_cs_sentence(args)
-                        batch_results.append(result)
-                else:
-                    # Parallel processing
-                    with multiprocessing.Pool(processes=num_workers) as pool:
-                        batch_results = list(tqdm(
-                            pool.imap(_process_single_cs_sentence, worker_args),
-                            total=len(worker_args),
-                            desc=f"Batch {batch_idx + 1}/{num_batches}",
-                            leave=False
-                        ))
-                
-                # Process batch results
-                batch_detailed_matches = []
-                batch_similarity_scores = []
-                batch_sentences_with_matches = 0
-                
-                for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in batch_results:
-                    if has_matches:
-                        batch_sentences_with_matches += 1
-                        batch_detailed_matches.extend(sent_detailed_matches)
-                        batch_similarity_scores.extend(sent_similarity_scores)
-                
-                # Save checkpoint if enabled
-                batch_result = {
-                    'detailed_matches': batch_detailed_matches,
-                    'similarity_scores': batch_similarity_scores,
-                    'sentences_with_matches': batch_sentences_with_matches
-                }
-                
-                if checkpoint_path:
-                    _save_batch_checkpoint(checkpoint_path, batch_result)
-                    logger.info(f"Saved checkpoint for batch {batch_idx + 1}/{num_batches}")
-                
-                all_batch_results.append(batch_result)
-            
-            # Merge all batch results
-            merged_results = _merge_batch_results(all_batch_results)
-            detailed_matches = merged_results['detailed_matches']
-            similarity_scores = merged_results['similarity_scores']
-            sentences_with_matches = merged_results['sentences_with_matches']
-            
+        # Prepare arguments for workers
+        worker_args = [
+            (cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k)
+            for cs_sent in translated_sentences
+        ]
+        
+        # Process sentences in parallel or sequentially
+        if num_workers == 1:
+            # Sequential processing with progress bar
+            processing_results = []
+            for args in tqdm(worker_args, desc=f"Window n={window_size}", leave=False):
+                result = _process_single_cs_sentence(args)
+                processing_results.append(result)
         else:
-            # Process all sentences at once (no batching)
-            detailed_matches = []
-            similarity_scores = []
-            sentences_with_matches = 0
-            
-            # Prepare arguments for workers
-            worker_args = [
-                (cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k)
-                for cs_sent in translated_sentences
-            ]
-            
-            # Process sentences in parallel or sequentially
-            if num_workers == 1:
-                # Sequential processing with progress bar
-                processing_results = []
-                for args in tqdm(worker_args, desc=f"Window n={window_size}", leave=False):
-                    result = _process_single_cs_sentence(args)
-                    processing_results.append(result)
-            else:
-                # Parallel processing
-                with multiprocessing.Pool(processes=num_workers) as pool:
-                    processing_results = list(tqdm(
-                        pool.imap(_process_single_cs_sentence, worker_args),
-                        total=len(worker_args),
-                        desc=f"Window n={window_size}",
-                        leave=False
-                    ))
-            
-            # Process results
-            for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in processing_results:
-                if has_matches:
-                    sentences_with_matches += 1
-                    detailed_matches.extend(sent_detailed_matches)
-                    # Collect similarity scores from ALL matches (not just top_k)
-                    similarity_scores.extend(sent_similarity_scores)
+            # Parallel processing
+            with multiprocessing.Pool(processes=num_workers) as pool:
+                processing_results = list(tqdm(
+                    pool.imap(_process_single_cs_sentence, worker_args),
+                    total=len(worker_args),
+                    desc=f"Window n={window_size}",
+                    leave=False
+                ))
+        
+        # Process results
+        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in processing_results:
+            if has_matches:
+                sentences_with_matches += 1
+                detailed_matches.extend(sent_detailed_matches)
+                # Collect similarity scores from ALL matches (not just top_k)
+                similarity_scores.extend(sent_similarity_scores)
         
         # Calculate statistics
         total_sentences = len(translated_sentences)

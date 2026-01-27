@@ -227,17 +227,3 @@ class Config:
         """Get number of CPU cores to leave free. Returns None to use all available cores."""
         return self.get('analysis.parallel.num_workers', None)
     
-    def get_analysis_batch_size(self) -> Optional[int]:
-        """Get batch size for processing. Returns None if batching is disabled."""
-        return self.get('analysis.batch_size', None)
-    
-    def get_analysis_checkpoint_dir(self) -> Optional[str]:
-        """Get checkpoint directory path. Returns None if checkpoints are disabled."""
-        checkpoint_dir = self.get('analysis.checkpoint_dir', None)
-        if checkpoint_dir is None:
-            return None
-        # If relative path, make it relative to project root
-        if not os.path.isabs(checkpoint_dir):
-            project_root = Path(__file__).parent.parent.parent
-            checkpoint_dir = str(project_root / checkpoint_dir)
-        return checkpoint_dir

@@ -28,7 +28,9 @@ def setup_plot_style():
 def plot_surprisal_distributions(
     results_df: pd.DataFrame,
     output_path: Path,
-    context_length: Optional[int] = None
+    context_length: Optional[int] = None,
+    window_size: Optional[int] = None,
+    model_type: Optional[str] = None
 ):
     """
     Plot distribution comparison between CS and monolingual surprisal.
@@ -81,35 +83,48 @@ def plot_surprisal_distributions(
     cs_data = complete_df[cs_col].values
     mono_data = complete_df[mono_col].values
     
-    # Create melted dataframe for seaborn
-    plot_data = pd.DataFrame({
-        'Surprisal': np.concatenate([cs_data, mono_data]),
-        'Condition': ['Code-Switched\nTranslation'] * len(cs_data) + ['Monolingual\nBaseline'] * len(mono_data)
-    })
+    # Create DataFrames for plotting
+    cs_df = pd.DataFrame({'surprisal': cs_data, 'type': 'Code-Switched'})
+    mono_df = pd.DataFrame({'surprisal': mono_data, 'type': 'Monolingual'})
     
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+    fig, ax = plt.subplots(1, 1, figsize=(11, 7))
     
-    # Violin + box plot
-    sns.violinplot(data=plot_data, x='Condition', y='Surprisal', ax=ax, palette='Set2')
-    sns.boxplot(data=plot_data, x='Condition', y='Surprisal', ax=ax, 
-                width=0.3, palette='Set2', showfliers=False, 
-                boxprops=dict(alpha=0.7))
+    # Plot KDE distributions separately to ensure proper legend
+    sns.kdeplot(data=cs_df, x='surprisal', label='Code-Switched',
+               color='#e74c3c', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+    sns.kdeplot(data=mono_df, x='surprisal', label='Monolingual',
+               color='#3498db', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     
-    ax.set_ylabel('Surprisal (bits)', fontweight='bold')
-    ax.set_xlabel('')
-    ax.set_title(f'Surprisal Distribution Comparison\n(n={len(valid_df)} comparisons)', 
-                 fontweight='bold', fontsize=14)
-    ax.grid(True, alpha=0.3)
-    
-    # Add mean lines
+    # Add mean lines (dotted)
     cs_mean = cs_data.mean()
     mono_mean = mono_data.mean()
-    ax.axhline(cs_mean, color='#8DA0CB', linestyle='--', alpha=0.7, linewidth=1.5, 
-               label=f'CS mean: {cs_mean:.2f}')
-    ax.axhline(mono_mean, color='#FC8D62', linestyle='--', alpha=0.7, linewidth=1.5,
-               label=f'Mono mean: {mono_mean:.2f}')
-    ax.legend(loc='upper right', frameon=True, fancybox=True)
+    ax.axvline(cs_mean, color='#e74c3c', linestyle='--', linewidth=2, alpha=0.8,
+               label=f'CS Mean: {cs_mean:.2f}')
+    ax.axvline(mono_mean, color='#3498db', linestyle='--', linewidth=2, alpha=0.8,
+               label=f'Mono Mean: {mono_mean:.2f}')
+    
+    # Build title based on available information
+    title_parts = ['Surprisal Distribution: Code-Switched vs Monolingual']
+    if model_type:
+        title_parts.append(f'{model_type.capitalize()} Model')
+    if window_size:
+        title_parts.append(f'Window Size {window_size}')
+    if context_length:
+        title_parts.append(f'Context Length {context_length}')
+    title_parts.append(f'(n={len(complete_df)} complete comparisons)')
+    
+    ax.set_xlabel('Surprisal', fontsize=13, fontweight='medium')
+    ax.set_ylabel('Density', fontsize=13, fontweight='medium')
+    ax.set_title('\n'.join(title_parts),
+                fontsize=15, fontweight='bold', pad=20)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -247,28 +262,31 @@ def plot_difference_histogram(
     complete_df = complete_df[pd.notna(complete_df[diff_col])].copy()
     
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    fig, ax = plt.subplots(1, 1, figsize=(11, 7))
     
-    # Histogram
+    # Histogram with KDE overlay
     differences = complete_df[diff_col].values
     
-    ax.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
-    ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero difference')
-    ax.axvline(differences.mean(), color='darkblue', linestyle='-', linewidth=2,
-              label=f'Mean: {differences.mean():.2f}')
+    # Plot histogram with KDE overlay for smoothed curve
+    sns.histplot(data=complete_df, x=diff_col, bins=30, kde=True,
+                color='#8DA0CB', ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
     
-    ax.set_xlabel('Surprisal Difference (CS - Mono, bits)', fontweight='bold')
-    ax.set_ylabel('Frequency', fontweight='bold')
+    # Add mean line
+    mean_diff = differences.mean()
+    ax.axvline(mean_diff, color='#333333', linestyle='-', linewidth=2.5,
+              label=f'Mean: {mean_diff:.2f}')
+    
+    ax.set_xlabel('Surprisal Difference (CS - Mono, bits)', fontsize=13, fontweight='medium')
+    ax.set_ylabel('Count', fontsize=13, fontweight='medium')
     ax.set_title(f'Distribution of Surprisal Differences\n(n={len(complete_df)} complete comparisons)',
-                fontweight='bold', fontsize=14)
-    ax.legend(loc='upper right', frameon=True, fancybox=True)
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    # Add text box with statistics
-    textstr = f'Mean: {differences.mean():.3f}\nMedian: {np.median(differences):.3f}\nStd: {differences.std():.3f}'
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=10,
-           verticalalignment='top', bbox=props)
+                fontsize=15, fontweight='bold', pad=20)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')

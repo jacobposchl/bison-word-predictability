@@ -247,30 +247,14 @@ def plot_matches_per_sentence_distribution(window_datasets: list, output_dir: st
     
     window_sizes = sorted(datasets.keys())
     
-    # Create figure with subplots
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    # Create figure (single plot)
+    fig, ax = plt.subplots(figsize=(11, 7))
     
-    # Subplot 1: Histogram by window size
-    ax1 = axes[0]
-    for window_size in window_sizes:
-        df = datasets[window_size]
-        if 'total_matches_above_threshold' not in df.columns:
-            continue
-        matches = df['total_matches_above_threshold'].dropna()
-        if len(matches) > 0:
-            ax1.hist(matches, bins=range(0, int(matches.max())+2), alpha=0.6, 
-                    label=f'n={window_size}', density=True)
-    
-    ax1.set_xlabel('Number of Matches per Sentence', fontsize=12)
-    ax1.set_ylabel('Density', fontsize=12)
-    ax1.set_title('Distribution of Matches per Sentence', fontsize=14, fontweight='bold')
-    ax1.legend()
-    ax1.grid(axis='y', alpha=0.3)
-    
-    # Subplot 2: Box plot by window size
-    ax2 = axes[1]
+    # Box plot by window size (no outliers)
     data_for_box = []
     labels_for_box = []
+    window_colors = {1: '#e74c3c', 2: '#3498db', 3: '#2ecc71'}
+    
     for window_size in window_sizes:
         df = datasets[window_size]
         if 'total_matches_above_threshold' in df.columns:
@@ -280,15 +264,37 @@ def plot_matches_per_sentence_distribution(window_datasets: list, output_dir: st
                 labels_for_box.append(f'n={window_size}')
     
     if data_for_box:
-        bp = ax2.boxplot(data_for_box, labels=labels_for_box, patch_artist=True)
-        for patch in bp['boxes']:
-            patch.set_facecolor('#9b59b6')
-            patch.set_alpha(0.7)
+        bp = ax.boxplot(data_for_box, labels=labels_for_box, patch_artist=True,
+                       showfliers=False,  # Remove outliers
+                       widths=0.6,
+                       medianprops=dict(linewidth=2.5, color='#333333'),
+                       boxprops=dict(linewidth=1.5),
+                       whiskerprops=dict(linewidth=1.5),
+                       capprops=dict(linewidth=1.5))
+        
+        # Color each box by window size
+        for i, patch in enumerate(bp['boxes']):
+            window_size = window_sizes[i]
+            patch.set_facecolor(window_colors.get(window_size, '#9b59b6'))
+            patch.set_alpha(0.8)
+            patch.set_edgecolor('white')
+            patch.set_linewidth(1.5)
+        
+        # Style median, whiskers, and caps
+        for element in ['medians', 'whiskers', 'caps']:
+            if element in bp:
+                for item in bp[element]:
+                    item.set_color('#333333')
     
-    ax2.set_ylabel('Number of Matches', fontsize=12)
-    ax2.set_xlabel('Window Size', fontsize=12)
-    ax2.set_title('Matches per Sentence by Window Size', fontsize=14, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3)
+    ax.set_ylabel('Number of Matches', fontsize=13, fontweight='medium')
+    ax.set_xlabel('Window Size', fontsize=13, fontweight='medium')
+    ax.set_title('Matches per Sentence by Window Size', fontsize=15, fontweight='bold', pad=20)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     
@@ -726,59 +732,45 @@ def plot_similarity_threshold_analysis(window_datasets: list, output_dir: str) -
         logger.warning("No valid datasets found")
         return ""
     
-    # Combine all similarity scores
-    all_scores = []
-    for df in datasets.values():
+    # Create figure (single plot - distribution with three window sizes overlapping)
+    fig, ax = plt.subplots(figsize=(11, 7))
+    
+    window_sizes = sorted(datasets.keys())
+    window_colors = {1: '#e74c3c', 2: '#3498db', 3: '#2ecc71'}
+    
+    # Similarity threshold (default is 0.4)
+    similarity_threshold = 0.4
+    
+    # Plot KDE distributions for each window size (only scores >= threshold)
+    for window_size in window_sizes:
+        df = datasets[window_size]
         if 'similarity' in df.columns:
-            scores = df['similarity'].dropna().tolist()
-            all_scores.extend(scores)
+            scores = df['similarity'].dropna()
+            # Filter to only scores above threshold
+            scores_above_threshold = scores[scores >= similarity_threshold]
+            if len(scores_above_threshold) > 0:
+                sns.kdeplot(data=scores_above_threshold, label=f'n={window_size}',
+                           color=window_colors.get(window_size, '#95a5a6'),
+                           ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     
-    if not all_scores:
-        logger.warning("No similarity scores found")
-        return ""
+    # Add threshold line for reference
+    ax.axvline(similarity_threshold, color='#333333', linestyle='--', linewidth=2, 
+              alpha=0.7, label=f'Threshold ({similarity_threshold})')
     
-    # Create figure with subplots
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    # Set x-axis to start at threshold (0.4)
+    ax.set_xlim(left=similarity_threshold)
     
-    thresholds = [0.4, 0.5, 0.6, 0.7]
-    threshold_colors = ['#e74c3c', '#f39c12', '#3498db', '#2ecc71']
-    
-    # Subplot 1: Histogram with threshold lines
-    ax1 = axes[0]
-    n, bins, patches = ax1.hist(all_scores, bins=30, edgecolor='black', alpha=0.7, color='#95a5a6')
-    
-    # Color bars based on thresholds
-    for i, (threshold, color) in enumerate(zip(thresholds, threshold_colors)):
-        ax1.axvline(threshold, color=color, linestyle='--', linewidth=2, 
-                   label=f'Threshold {threshold}')
-    
-    ax1.set_xlabel('Similarity Score', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Frequency', fontsize=12, fontweight='bold')
-    ax1.set_title('Similarity Score Distribution with Thresholds', fontsize=14, fontweight='bold')
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-    
-    # Subplot 2: Cumulative distribution with threshold annotations
-    ax2 = axes[1]
-    sorted_scores = sorted(all_scores)
-    cumulative = np.arange(1, len(sorted_scores) + 1) / len(sorted_scores) * 100
-    
-    ax2.plot(sorted_scores, cumulative, linewidth=2, color='#3498db')
-    
-    # Add threshold lines and annotations
-    for threshold, color in zip(thresholds, threshold_colors):
-        above_threshold = sum(1 for s in all_scores if s >= threshold)
-        pct_above = (above_threshold / len(all_scores)) * 100
-        ax2.axvline(threshold, color=color, linestyle='--', linewidth=2, alpha=0.7)
-        ax2.text(threshold, pct_above, f'{pct_above:.1f}%', 
-                ha='center', va='bottom', fontsize=9, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    ax2.set_xlabel('Similarity Score', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Cumulative Percentage (%)', fontsize=12, fontweight='bold')
-    ax2.set_title('Cumulative Distribution with Threshold Analysis', fontsize=14, fontweight='bold')
-    ax2.grid(alpha=0.3)
-    ax2.set_ylim([0, 100])
+    ax.set_xlabel('Similarity Score', fontsize=13, fontweight='medium')
+    ax.set_ylabel('Density', fontsize=13, fontweight='medium')
+    ax.set_title('Similarity Score Distribution by Window Size', 
+                fontsize=15, fontweight='bold', pad=20)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     
@@ -823,31 +815,26 @@ def plot_pos_window_alignment_quality(window_datasets: list, output_dir: str) ->
     combined_df['cs_pos_length'] = combined_df['pos_window'].str.split().str.len()
     combined_df['matched_pos_length'] = combined_df['matched_pos'].str.split().str.len()
     
-    # Create figure with subplots
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    # Create figure (single plot)
+    fig, ax = plt.subplots(figsize=(11, 7))
     
-    # Subplot 1: POS length comparison
-    ax1 = axes[0]
-    ax1.scatter(combined_df['cs_pos_length'], combined_df['matched_pos_length'], 
-               alpha=0.5, s=20, color='#3498db')
-    # Add diagonal line
-    max_len = max(combined_df['cs_pos_length'].max(), combined_df['matched_pos_length'].max())
-    ax1.plot([0, max_len], [0, max_len], 'r--', alpha=0.5, label='Perfect Match')
-    ax1.set_xlabel('CS POS Window Length', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Matched POS Window Length', fontsize=12, fontweight='bold')
-    ax1.set_title('POS Window Length Comparison', fontsize=14, fontweight='bold')
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-    
-    # Subplot 2: POS length difference distribution
-    ax2 = axes[1]
+    # POS length difference distribution
     combined_df['pos_length_diff'] = abs(combined_df['cs_pos_length'] - combined_df['matched_pos_length'])
-    ax2.hist(combined_df['pos_length_diff'], bins=range(0, int(combined_df['pos_length_diff'].max())+2), 
-            edgecolor='black', alpha=0.7, color='#2ecc71')
-    ax2.set_xlabel('Absolute POS Length Difference', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Frequency', fontsize=12, fontweight='bold')
-    ax2.set_title('Distribution of POS Length Differences', fontsize=14, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3)
+    
+    # Use histogram with KDE overlay for professional look
+    sns.histplot(data=combined_df, x='pos_length_diff', bins='auto', kde=True,
+                color='#2ecc71', ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+    
+    ax.set_xlabel('Absolute POS Length Difference', fontsize=13, fontweight='medium')
+    ax.set_ylabel('Count', fontsize=13, fontweight='medium')
+    ax.set_title('Distribution of POS Length Differences', 
+                fontsize=15, fontweight='bold', pad=20)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     

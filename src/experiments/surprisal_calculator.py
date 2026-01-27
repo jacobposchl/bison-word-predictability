@@ -175,9 +175,30 @@ class MaskedLMSurprisalCalculator:
             token_prob = probs[original_token_id].item()
             
             # Calculate entropy: H = -sum(p * log2(p)) for all tokens
-            # Add small epsilon to avoid log(0)
-            epsilon = 1e-10
-            token_entropy = -torch.sum(probs * torch.log2(probs + epsilon)).item()
+            # Use a more robust calculation that handles numerical issues
+            # Clamp probabilities to avoid log(0) and numerical issues
+            epsilon = 1e-20
+            probs_clamped = torch.clamp(probs, min=epsilon, max=1.0)
+            
+            # Normalize to ensure sum is 1 (handles quantization errors)
+            probs_normalized = probs_clamped / probs_clamped.sum()
+            
+            # Calculate entropy: -sum(p * log2(p))
+            # Use torch.where to handle any remaining edge cases
+            log_probs = torch.log2(probs_normalized + epsilon)
+            entropy_terms = probs_normalized * log_probs
+            # Filter out any NaN or Inf terms
+            valid_terms = entropy_terms[torch.isfinite(entropy_terms)]
+            
+            if len(valid_terms) > 0:
+                token_entropy = -torch.sum(valid_terms).item()
+            else:
+                token_entropy = float('nan')
+            
+            # Final check for invalid values
+            if not (np.isfinite(token_entropy) and token_entropy >= 0):
+                logger.debug(f"Invalid entropy: {token_entropy}, probs shape: {probs.shape}, probs sum: {probs.sum().item()}")
+                token_entropy = float('nan')
 
             if token_prob > 0:
                 token_surprisal = -np.log2(token_prob)
@@ -449,9 +470,30 @@ class AutoregressiveLMSurprisalCalculator:
                 token_prob = probs[actual_token_id].item()
                 
                 # Calculate entropy: H = -sum(p * log2(p)) for all tokens
-                # Add small epsilon to avoid log(0)
-                epsilon = 1e-10
-                token_entropy = -torch.sum(probs * torch.log2(probs + epsilon)).item()
+                # Use a more robust calculation that handles numerical issues
+                # Clamp probabilities to avoid log(0) and numerical issues
+                epsilon = 1e-20
+                probs_clamped = torch.clamp(probs, min=epsilon, max=1.0)
+                
+                # Normalize to ensure sum is 1 (handles quantization errors)
+                probs_normalized = probs_clamped / probs_clamped.sum()
+                
+                # Calculate entropy: -sum(p * log2(p))
+                # Use torch.where to handle any remaining edge cases
+                log_probs = torch.log2(probs_normalized + epsilon)
+                entropy_terms = probs_normalized * log_probs
+                # Filter out any NaN or Inf terms
+                valid_terms = entropy_terms[torch.isfinite(entropy_terms)]
+                
+                if len(valid_terms) > 0:
+                    token_entropy = -torch.sum(valid_terms).item()
+                else:
+                    token_entropy = float('nan')
+                
+                # Final check for invalid values
+                if not (np.isfinite(token_entropy) and token_entropy >= 0):
+                    logger.debug(f"Invalid entropy: {token_entropy}, probs shape: {probs.shape}, probs sum: {probs.sum().item()}")
+                    token_entropy = float('nan')
 
                 if token_prob > 1e-10:  # Use small threshold to avoid log(0)
                     token_surprisal = -np.log2(token_prob)
@@ -525,11 +567,10 @@ def create_surprisal_calculator(model_type: str, config, device: str = None):
         )
     elif model_type.lower() == "autoregressive":
         model_name = config.get('experiment.autoregressive_model', 'uer/gpt2-chinese-cluecorpussmall')
-        use_4bit = config.get('experiment.use_4bit_quantization', False)
         return AutoregressiveLMSurprisalCalculator(
             model_name=model_name,
             device=device,
-            use_4bit=use_4bit
+            use_4bit=True
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}. Use 'masked' or 'autoregressive'")

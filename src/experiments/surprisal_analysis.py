@@ -14,7 +14,73 @@ from tqdm import tqdm
 import pycantonese
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
-from src.analysis.pos_tagging import parse_pattern_segments
+
+# Cache for word frequency lookup
+_word_frequency_cache = None
+
+
+def get_word_frequency(word: str) -> float:
+    """
+    Get word frequency using pycantonese corpus data.
+    
+    Uses pycantonese's word_frequencies() method which returns a Counter object.
+    According to pycantonese docs, word_frequencies() is called on a Reader object
+    and returns a collections.Counter.
+    
+    Args:
+        word: Cantonese word to look up
+        
+    Returns:
+        Word frequency (log-normalized), or np.nan if corpus unavailable or word not found
+    """
+    global _word_frequency_cache
+    
+    if not word or pd.isna(word):
+        return np.nan
+    
+    word = str(word).strip()
+    if not word:
+        return np.nan
+    
+    # Initialize cache on first use
+    if _word_frequency_cache is None:
+        try:
+            # Use pycantonese's built-in HKCanCor corpus
+            # hkcancor() returns a Reader object that provides access to the corpus
+            import pycantonese
+            hkcancor = pycantonese.hkcancor()
+            
+            # Get word frequencies using the Reader's word_frequencies() method
+            # Returns a collections.Counter with word frequencies
+            word_freq_counter = hkcancor.word_frequencies(keep_case=True)
+            
+            # Calculate log-normalized frequencies
+            total_words = sum(word_freq_counter.values())
+            _word_frequency_cache = {}
+            
+            # Store log frequencies (add 1 to avoid log(0))
+            # Normalize by total words to get log probability
+            for w, count in word_freq_counter.items():
+                _word_frequency_cache[w] = np.log(count + 1) / np.log(total_words + 1)
+            
+            print(f"Initialized word frequency cache with {len(_word_frequency_cache)} words from hkcancor")
+        except (ImportError, AttributeError) as e:
+            print(f"Warning: Could not load hkcancor corpus: {e}. Frequency calculation unavailable.")
+            _word_frequency_cache = None  # Mark as failed
+        except Exception as e:
+            print(f"Warning: Error initializing frequency cache: {e}. Frequency calculation unavailable.")
+            _word_frequency_cache = None  # Mark as failed
+    
+    # If corpus failed to load, return NaN
+    if _word_frequency_cache is None:
+        return np.nan
+    
+    # Look up word in cache
+    if word in _word_frequency_cache:
+        return _word_frequency_cache[word]
+    
+    # If not found in corpus, return NaN
+    return np.nan
 
 
 def calculate_surprisal_for_dataset(
@@ -46,26 +112,20 @@ def calculate_surprisal_for_dataset(
                         Creates separate columns for each length (e.g., cs_surprisal_context_1, cs_surprisal_context_2)
         
     Returns:
-        DataFrame with added columns (only rows with calculation_success == True are returned):
-            - cs_surprisal_total: Total surprisal at switch point in CS translation
-            - cs_surprisal_per_token: Per-token average surprisal for CS
-            - cs_probability: Probability of CS word given context
-            - cs_entropy: Entropy of probability distribution at CS word position
+        DataFrame with added columns (only rows with valid surprisal calculations are returned):
+            - cs_surprisal_context_{N}: Total surprisal at switch point in CS translation (for each context length N)
+            - cs_entropy_context_{N}: Entropy of probability distribution at CS word position
+            - mono_surprisal_context_{N}: Total surprisal at matched position in mono sentence
+            - mono_entropy_context_{N}: Entropy of probability distribution at mono word position
+            - surprisal_difference_context_{N}: cs_surprisal - mono_surprisal
             - cs_word: Word at switch point in CS translation
             - cs_num_tokens: Number of subword tokens for CS word
-            - cs_num_valid_tokens: Number of valid tokens for CS word
-            - mono_surprisal_total: Total surprisal at matched position in mono sentence
-            - mono_surprisal_per_token: Per-token average surprisal for mono
-            - mono_probability: Probability of mono word given context
-            - mono_entropy: Entropy of probability distribution at mono word position
+            - cs_word_frequency: Word frequency from pycantonese corpus
             - mono_word: Word at matched position in mono sentence
             - mono_num_tokens: Number of subword tokens for mono word
-            - mono_num_valid_tokens: Number of valid tokens for mono word
-            - surprisal_difference: cs_surprisal_total - mono_surprisal_total
-            - calculation_success: Boolean indicating successful calculation (always True in returned DataFrame)
-            - used_context: Whether context was actually used for this calculation
+            - mono_word_frequency: Word frequency from pycantonese corpus
             
-        Note: Rows with calculation_success == False are automatically filtered out.
+        Note: Rows with failed calculations (NaN surprisal values) are automatically filtered out.
     """
     results = []
     
@@ -82,62 +142,91 @@ def calculate_surprisal_for_dataset(
         else:
             context_lengths = []
     
+    # Columns to exclude from input dataset (matching-related, not needed for surprisal results)
+    COLUMNS_TO_EXCLUDE = [
+        'cs_pattern', 'cs_start_time', 'pos_window', 'matched_start_time', 'matched_pos',
+        'total_matches_above_threshold', 'matches_same_group', 'matches_same_speaker',
+        'cs_context_valid', 'mono_context_valid'
+    ]
+    
     for idx, row in iterator:
         result = row.to_dict()
+        # Remove columns we don't want in the output
+        for col in COLUMNS_TO_EXCLUDE:
+            result.pop(col, None)  # Remove if exists, ignore if doesn't
         
         # Extract context sentences if available
         cs_context_sentences = []
         mono_context_sentences = []
         
         if use_context:
-            # Check if context columns exist and are valid
-            if 'cs_context' in row and row.get('cs_context_valid', False):
+            # Extract context sentences if available and valid
+            # Check if context is valid (if validity columns exist, use them; otherwise check if context exists)
+            cs_context_valid = True
+            mono_context_valid = True
+            
+            if 'cs_context_valid' in row:
+                cs_context_valid = row.get('cs_context_valid', False)
+            if 'mono_context_valid' in row:
+                mono_context_valid = row.get('mono_context_valid', False)
+            
+            if 'cs_context' in row and cs_context_valid:
                 cs_context_full = row['cs_context']
                 # Split by delimiter to get individual sentences
                 # Handle None, NaN, or empty string
-                if pd.notna(cs_context_full) and cs_context_full:
+                if pd.notna(cs_context_full) and cs_context_full and str(cs_context_full).strip() != '':
                     cs_context_sentences = [s.strip() for s in str(cs_context_full).split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                    result['cs_context'] = cs_context_full  # Keep original context value
                 else:
                     cs_context_sentences = []
-            if 'mono_context' in row and row.get('mono_context_valid', False):
+                    result['cs_context'] = 'N/A'
+            else:
+                cs_context_sentences = []
+                result['cs_context'] = 'N/A'
+                
+            if 'mono_context' in row and mono_context_valid:
                 mono_context_full = row['mono_context']
                 # Split by delimiter to get individual sentences
                 # Handle None, NaN, or empty string
-                if pd.notna(mono_context_full) and mono_context_full:
+                if pd.notna(mono_context_full) and mono_context_full and str(mono_context_full).strip() != '':
                     mono_context_sentences = [s.strip() for s in str(mono_context_full).split(CONTEXT_SENTENCE_DELIMITER) if s.strip()]
+                    result['mono_context'] = mono_context_full  # Keep original context value
                 else:
                     mono_context_sentences = []
+                    result['mono_context'] = 'N/A'
+            else:
+                mono_context_sentences = []
+                result['mono_context'] = 'N/A'
+        else:
+            # No context mode - set to N/A
+            result['cs_context'] = 'N/A'
+            result['mono_context'] = 'N/A'
         
-        try:
-            # Calculate CS translation surprisal
-            # Use space-splitting to match how switch_index was calculated
-            # (translations are already properly segmented and space-joined)
-            cs_words = row['cs_translation'].split()
-            
-            # Get switch word index directly from pattern
-            # Pattern C8-E1 means 8 Cantonese words, then switch word at index 8 (0-based)
-            # This is simpler and more direct than using switch_index + 1
-            pattern = row.get('cs_pattern', row.get('pattern', ''))
-            segments = parse_pattern_segments(pattern)
-            # First segment is always Cantonese for our data, so switch word is at first_count (0-based)
-            switch_token_idx = segments[0][1]
-            
-            if switch_token_idx >= len(cs_words):
-                raise ValueError(f"Switch token index {switch_token_idx} out of bounds for sentence with {len(cs_words)} words (pattern: {pattern})")
-            
-            # Calculate matched monolingual surprisal
-            # Use PyCantonese segmentation because matched_switch_index is based on POS sequence,
-            # which was created by re-segmenting with PyCantonese
-            mono_words = pycantonese.segment(row['matched_mono'])
-            # matched_switch_index is the direct mapping of switch_index from CS sentence to mono sentence
-            # switch_index now points to the first English word (the switch word)
-            # So matched_switch_index also points to the equivalent switch word position
-            matched_switch_idx = int(row['matched_switch_index'])
-            
-            # Check if the switch word position is available in the matched sentence
-            # If not, we can't measure surprisal at the correct position, so skip this row
-            if matched_switch_idx >= len(mono_words):
-                raise ValueError(f"Matched switch index {matched_switch_idx} out of bounds for sentence with {len(mono_words)} words. Cannot measure surprisal at switch word position (matched_switch_index={row['matched_switch_index']}, sentence_length={len(mono_words)}).")
+        # Calculate CS translation surprisal
+        # Use space-splitting to match how switch_index was calculated
+        # (translations are already properly segmented and space-joined)
+        cs_words = row['cs_translation'].split()
+        
+        # Get switch word index from switch_index column
+        # switch_index is already 0-based and points to the switch word
+        switch_token_idx = int(row.get('switch_index', 0))
+        
+        if switch_token_idx >= len(cs_words):
+            raise ValueError(f"Switch token index {switch_token_idx} out of bounds for sentence with {len(cs_words)} words")
+        
+        # Calculate matched monolingual surprisal
+        # Use PyCantonese segmentation because matched_switch_index is based on POS sequence,
+        # which was created by re-segmenting with PyCantonese
+        mono_words = pycantonese.segment(row['matched_mono'])
+        # matched_switch_index is the direct mapping of switch_index from CS sentence to mono sentence
+        # switch_index now points to the first English word (the switch word)
+        # So matched_switch_index also points to the equivalent switch word position
+        matched_switch_idx = int(row['matched_switch_index'])
+        
+        # Check if the switch word position is available in the matched sentence
+        # If not, we can't measure surprisal at the correct position, so raise error
+        if matched_switch_idx >= len(mono_words):
+            raise ValueError(f"Matched switch index {matched_switch_idx} out of bounds for sentence with {len(mono_words)} words. Cannot measure surprisal at switch word position (matched_switch_index={row['matched_switch_index']}, sentence_length={len(mono_words)}).")
             
             # Calculate surprisal for each context length
             first_successful_cs_result = None
@@ -176,36 +265,30 @@ def calculate_surprisal_for_dataset(
                     
                     # Store results with context length suffix
                     result[f'cs_surprisal_context_{context_len}'] = cs_result['surprisal']
-                    result[f'cs_surprisal_per_token_context_{context_len}'] = cs_result['surprisal'] / cs_result['num_tokens'] if cs_result['num_tokens'] > 0 else np.nan
-                    result[f'cs_probability_context_{context_len}'] = cs_result['probability']
                     result[f'cs_entropy_context_{context_len}'] = cs_result['entropy']
                     result[f'mono_surprisal_context_{context_len}'] = mono_result['surprisal']
-                    result[f'mono_surprisal_per_token_context_{context_len}'] = mono_result['surprisal'] / mono_result['num_tokens'] if mono_result['num_tokens'] > 0 else np.nan
-                    result[f'mono_probability_context_{context_len}'] = mono_result['probability']
                     result[f'mono_entropy_context_{context_len}'] = mono_result['entropy']
                     result[f'surprisal_difference_context_{context_len}'] = cs_result['surprisal'] - mono_result['surprisal']
-                    result[f'used_context_{context_len}'] = True
                 else:
                     # Not enough context - set to NaN
                     result[f'cs_surprisal_context_{context_len}'] = np.nan
-                    result[f'cs_surprisal_per_token_context_{context_len}'] = np.nan
-                    result[f'cs_probability_context_{context_len}'] = np.nan
                     result[f'cs_entropy_context_{context_len}'] = np.nan
                     result[f'mono_surprisal_context_{context_len}'] = np.nan
-                    result[f'mono_surprisal_per_token_context_{context_len}'] = np.nan
-                    result[f'mono_probability_context_{context_len}'] = np.nan
                     result[f'mono_entropy_context_{context_len}'] = np.nan
                     result[f'surprisal_difference_context_{context_len}'] = np.nan
-                    result[f'used_context_{context_len}'] = False
             
             # Store word info (same for all context lengths, use first successful calculation)
             if first_successful_cs_result is not None:
-                result['cs_word'] = first_successful_cs_result['word']
+                cs_word = first_successful_cs_result['word']
+                mono_word = first_successful_mono_result['word']
+                
+                result['cs_word'] = cs_word
                 result['cs_num_tokens'] = first_successful_cs_result['num_tokens']
-                result['cs_num_valid_tokens'] = first_successful_cs_result['num_valid_tokens']
-                result['mono_word'] = first_successful_mono_result['word']
+                result['cs_word_frequency'] = get_word_frequency(cs_word) if pd.notna(cs_word) else np.nan
+                
+                result['mono_word'] = mono_word
                 result['mono_num_tokens'] = first_successful_mono_result['num_tokens']
-                result['mono_num_valid_tokens'] = first_successful_mono_result['num_valid_tokens']
+                result['mono_word_frequency'] = get_word_frequency(mono_word) if pd.notna(mono_word) else np.nan
             elif not context_lengths:
                 # No context lengths specified - calculate without context
                 cs_result = surprisal_calc.calculate_surprisal(
@@ -218,62 +301,27 @@ def calculate_surprisal_for_dataset(
                     words=mono_words,
                     context=None
                 )
-                result['cs_word'] = cs_result['word']
+                cs_word = cs_result['word']
+                mono_word = mono_result['word']
+                
+                result['cs_word'] = cs_word
                 result['cs_num_tokens'] = cs_result['num_tokens']
-                result['cs_num_valid_tokens'] = cs_result['num_valid_tokens']
-                result['mono_word'] = mono_result['word']
+                result['cs_word_frequency'] = get_word_frequency(cs_word) if pd.notna(cs_word) else np.nan
+                
+                result['mono_word'] = mono_word
                 result['mono_num_tokens'] = mono_result['num_tokens']
-                result['mono_num_valid_tokens'] = mono_result['num_valid_tokens']
+                result['mono_word_frequency'] = get_word_frequency(mono_word) if pd.notna(mono_word) else np.nan
             else:
-                # No successful calculations
-                result['cs_word'] = None
-                result['cs_num_tokens'] = np.nan
-                result['cs_num_valid_tokens'] = np.nan
-                result['mono_word'] = None
-                result['mono_num_tokens'] = np.nan
-                result['mono_num_valid_tokens'] = np.nan
-            
-            result['calculation_success'] = True
-            
-        except Exception as e:
-            # Handle errors gracefully - set all context length columns to NaN
-            for context_len in context_lengths:
-                result[f'cs_surprisal_context_{context_len}'] = np.nan
-                result[f'cs_surprisal_per_token_context_{context_len}'] = np.nan
-                result[f'cs_probability_context_{context_len}'] = np.nan
-                result[f'cs_entropy_context_{context_len}'] = np.nan
-                result[f'mono_surprisal_context_{context_len}'] = np.nan
-                result[f'mono_surprisal_per_token_context_{context_len}'] = np.nan
-                result[f'mono_probability_context_{context_len}'] = np.nan
-                result[f'mono_entropy_context_{context_len}'] = np.nan
-                result[f'surprisal_difference_context_{context_len}'] = np.nan
-                result[f'used_context_{context_len}'] = False
-            result['cs_word'] = None
-            result['cs_num_tokens'] = np.nan
-            result['cs_num_valid_tokens'] = np.nan
-            result['mono_word'] = None
-            result['mono_num_tokens'] = np.nan
-            result['mono_num_valid_tokens'] = np.nan
-            result['calculation_success'] = False
-            result['error_message'] = str(e)
-            
-            if show_progress:
-                tqdm.write(f"Error processing row {idx}: {e}")
+                # No successful calculations - this should not happen if we have context_lengths
+                raise ValueError(f"No successful calculations for row {idx} - no valid context available")
         
         results.append(result)
     
     # Convert to DataFrame
     results_df = pd.DataFrame(results)
     
-    # Filter out rows where calculation_success == False
-    n_before_filter = len(results_df)
-    results_df = results_df[results_df['calculation_success'] == True].copy()
-    n_after_filter = len(results_df)
-    n_filtered = n_before_filter - n_after_filter
-    
-    if show_progress and n_filtered > 0:
-        tqdm.write(f"\nFiltered out {n_filtered} rows with failed calculations ({n_filtered/n_before_filter:.1%})")
-        tqdm.write(f"Remaining rows: {n_after_filter}")
+    # All rows should have valid calculations (errors would have raised exceptions)
+    # No filtering needed - if we got here, all calculations succeeded
     
     return results_df
 
@@ -283,7 +331,7 @@ def compute_statistics(results_df: pd.DataFrame, context_length: Optional[int] =
     Compute statistical comparisons between CS and monolingual surprisal.
     
     Note: results_df should already be filtered to only include successful calculations
-    (calculation_success == True). This function further filters to complete calculations.
+    This function filters to complete calculations (where all tokens are valid).
     
     Args:
         results_df: DataFrame from calculate_surprisal_for_dataset() (already filtered for success)
@@ -304,19 +352,11 @@ def compute_statistics(results_df: pd.DataFrame, context_length: Optional[int] =
             - paired_ttest: Results of paired t-test
             - cohens_d: Cohen's d effect size
     """
-    # Filter to only include successful calculations
-    if 'calculation_success' not in results_df.columns:
-        raise ValueError("results_df must have 'calculation_success' column")
-    
-    valid_df = results_df[results_df['calculation_success'] == True].copy()
-    n_filtered = len(results_df) - len(valid_df)
-    
     # Determine which columns to use
     if context_length is not None:
         cs_surprisal_col = f'cs_surprisal_context_{context_length}'
         mono_surprisal_col = f'mono_surprisal_context_{context_length}'
         difference_col = f'surprisal_difference_context_{context_length}'
-        used_context_col = f'used_context_{context_length}'
     else:
         # Try to find context length columns, or fall back to old column names
         context_cols = [col for col in results_df.columns if 'cs_surprisal_context_' in col]
@@ -329,7 +369,6 @@ def compute_statistics(results_df: pd.DataFrame, context_length: Optional[int] =
                 cs_surprisal_col = f'cs_surprisal_context_{context_length}'
                 mono_surprisal_col = f'mono_surprisal_context_{context_length}'
                 difference_col = f'surprisal_difference_context_{context_length}'
-                used_context_col = f'used_context_{context_length}'
             else:
                 raise ValueError("Could not determine context length from column names")
         else:
@@ -337,39 +376,55 @@ def compute_statistics(results_df: pd.DataFrame, context_length: Optional[int] =
             cs_surprisal_col = 'cs_surprisal_total'
             mono_surprisal_col = 'mono_surprisal_total'
             difference_col = 'surprisal_difference'
-            used_context_col = 'used_context'
     
     # Check if required columns exist
-    if cs_surprisal_col not in valid_df.columns or mono_surprisal_col not in valid_df.columns:
+    if cs_surprisal_col not in results_df.columns or mono_surprisal_col not in results_df.columns:
         raise ValueError(f"Required columns not found: {cs_surprisal_col}, {mono_surprisal_col}")
     
-    # Further filter to only include complete calculations (all tokens valid)
-    complete_df = valid_df[
-        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
-        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
-    ].copy()
+    # Filter to rows with valid context (not "N/A") and valid surprisal values
+    # Check if context columns exist and are not "N/A"
+    has_context_col = 'cs_context' in results_df.columns and 'mono_context' in results_df.columns
     
-    # Filter to rows with valid surprisal values for this context length
-    complete_df = complete_df[
-        pd.notna(complete_df[cs_surprisal_col]) &
-        pd.notna(complete_df[mono_surprisal_col])
-    ].copy()
+    if has_context_col:
+        # Only include rows where context is not "N/A"
+        valid_context_mask = (
+            (results_df['cs_context'] != 'N/A') & 
+            (results_df['mono_context'] != 'N/A') &
+            results_df['cs_context'].notna() &
+            results_df['mono_context'].notna()
+        )
+        complete_df = results_df[
+            valid_context_mask &
+            pd.notna(results_df[cs_surprisal_col]) &
+            pd.notna(results_df[mono_surprisal_col])
+        ].copy()
+    else:
+        # No context columns - just filter by valid surprisal
+        complete_df = results_df[
+            pd.notna(results_df[cs_surprisal_col]) &
+            pd.notna(results_df[mono_surprisal_col])
+        ].copy()
+    
+    n_filtered = len(results_df) - len(complete_df)
     
     stats_dict = {
-        'n_total': len(results_df) + n_filtered,  # Original total before any filtering
-        'n_valid': len(valid_df),
+        'n_total': len(results_df),
+        'n_valid': len(complete_df),
         'n_complete': len(complete_df),
         'n_filtered': n_filtered,
-        'success_rate': len(valid_df) / (len(results_df) + n_filtered) if (len(results_df) + n_filtered) > 0 else 0,
-        'complete_rate': len(complete_df) / (len(results_df) + n_filtered) if (len(results_df) + n_filtered) > 0 else 0,
+        'success_rate': len(complete_df) / len(results_df) if len(results_df) > 0 else 0,
+        'complete_rate': len(complete_df) / len(results_df) if len(results_df) > 0 else 0,
         'context_length': context_length
     }
     
-    # Track context usage if column exists
-    if used_context_col in complete_df.columns:
-        n_with_context = complete_df[used_context_col].sum()
-        stats_dict['n_with_context'] = int(n_with_context)
-        stats_dict['n_without_context'] = len(complete_df) - int(n_with_context)
+    # Count rows with context (only those with actual context values, not "N/A")
+    if has_context_col:
+        stats_dict['n_with_context'] = len(complete_df)
+        stats_dict['n_without_context'] = len(results_df) - len(complete_df)
+    elif context_length is not None:
+        # Context length specified but no context columns - assume all have context
+        stats_dict['n_with_context'] = len(complete_df)
+        stats_dict['n_without_context'] = 0
     
     if len(complete_df) == 0:
         return stats_dict

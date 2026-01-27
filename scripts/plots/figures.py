@@ -46,11 +46,14 @@ from src.plots.matching.plot_matching import (
 )
 from src.experiments.visualization import (
     plot_surprisal_distributions,
-    plot_scatter_comparison,
-    plot_difference_histogram,
-    plot_summary_statistics
+    plot_difference_histogram
 )
-from src.experiments.surprisal_analysis import compute_statistics
+from src.plots.surprisal.plot_surprisal import (
+    plot_surprisal_distributions as plot_combined_surprisal_distributions,
+    plot_surprisal_distributions_by_context,
+    plot_surprisal_differences_by_context,
+    plot_surprisal_distributions_matrix
+)
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -97,9 +100,16 @@ def generate_preprocessing_figures(config: Config):
     # logger.info("  2. Pattern complexity...")
     # plot_pattern_complexity(code_switched, figures_dir)
     
-    # 3. Switch position
+    # 3. Switch position (use cantonese_translated_WITHOUT_fillers.csv for switch_index column)
     logger.info("  2. Switch position analysis...")
-    plot_switch_position(code_switched, figures_dir)
+    cantonese_translated_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
+    if cantonese_translated_csv.exists():
+        logger.info(f"  Loading switch positions from {cantonese_translated_csv}")
+        cantonese_translated_df = pd.read_csv(cantonese_translated_csv)
+        plot_switch_position(cantonese_translated_df, figures_dir)
+    else:
+        logger.warning(f"  {cantonese_translated_csv} not found, using all_sentences.csv instead")
+        plot_switch_position(code_switched, figures_dir)
     
     # 4. Pattern type distribution (DISABLED)
     # logger.info("  4. Pattern type distribution...")
@@ -152,41 +162,41 @@ def generate_matching_figures(config: Config):
     
     logger.info("Generating matching figures...")
     
-    # 1. Similarity distributions (fixed for n=1)
-    logger.info("  1. Similarity distributions...")
-    plot_similarity_distributions_from_csv(window_datasets, str(figures_dir))
+    # 1. Similarity distributions (DISABLED)
+    # logger.info("  1. Similarity distributions...")
+    # plot_similarity_distributions_from_csv(window_datasets, str(figures_dir))
     
-    # 2. Match success rate
-    logger.info("  2. Match success rate...")
-    plot_match_success_rate(window_datasets, str(figures_dir))
+    # 2. Match success rate (DISABLED)
+    # logger.info("  1. Match success rate...")
+    # plot_match_success_rate(window_datasets, str(figures_dir))
     
     # 3. Matches per sentence distribution
-    logger.info("  3. Matches per sentence distribution...")
+    logger.info("  1. Matches per sentence distribution...")
     plot_matches_per_sentence_distribution(window_datasets, str(figures_dir))
     
-    # 4. Match quality by group/speaker
-    logger.info("  4. Match quality by group/speaker...")
-    plot_match_quality_by_group_speaker(window_datasets, str(figures_dir))
+    # 4. Match quality by group/speaker (DISABLED)
+    # logger.info("  4. Match quality by group/speaker...")
+    # plot_match_quality_by_group_speaker(window_datasets, str(figures_dir))
     
-    # 5. Similarity vs characteristics
-    logger.info("  5. Similarity vs characteristics...")
-    plot_similarity_vs_characteristics(window_datasets, str(figures_dir))
+    # 5. Similarity vs characteristics (DISABLED)
+    # logger.info("  5. Similarity vs characteristics...")
+    # plot_similarity_vs_characteristics(window_datasets, str(figures_dir))
     
-    # 6. Window size comparison
-    logger.info("  6. Window size comparison...")
-    plot_window_size_comparison(window_datasets, str(figures_dir))
+    # 6. Window size comparison (DISABLED)
+    # logger.info("  6. Window size comparison...")
+    # plot_window_size_comparison(window_datasets, str(figures_dir))
     
-    # 7. Match distribution by group
-    logger.info("  7. Match distribution by group...")
-    plot_match_distribution_by_group(window_datasets, str(figures_dir))
+    # 7. Match distribution by group (DISABLED)
+    # logger.info("  7. Match distribution by group...")
+    # plot_match_distribution_by_group(window_datasets, str(figures_dir))
     
     # 8. Similarity threshold analysis
-    logger.info("  8. Similarity threshold analysis...")
+    logger.info("  2. Similarity threshold analysis...")
     plot_similarity_threshold_analysis(window_datasets, str(figures_dir))
     
-    # 9. POS window alignment quality
-    logger.info("  9. POS window alignment quality...")
-    plot_pos_window_alignment_quality(window_datasets, str(figures_dir))
+    # 9. POS window alignment quality (DISABLED)
+    # logger.info("  4. POS window alignment quality...")
+    # plot_pos_window_alignment_quality(window_datasets, str(figures_dir))
     
     logger.info(f"\nAll matching figures saved to: {figures_dir}")
     return True
@@ -200,6 +210,48 @@ def generate_surprisal_figures(config: Config, model_type: str):
     
     results_base = Path(config.get_surprisal_results_dir()) / model_type
     figures_base = Path(config.get_surprisal_figures_dir()) / model_type
+    
+    # Generate combined surprisal distribution plot (all windows and contexts)
+    logger.info("Generating combined surprisal distribution plot...")
+    combined_output_path = figures_base / "surprisal_distributions_combined.png"
+    plot_combined_surprisal_distributions(
+        results_base=results_base,
+        output_path=combined_output_path,
+        model_type=model_type
+    )
+    
+    # Generate 3x3 matrix plot of all context × window combinations
+    logger.info("Generating surprisal distribution matrix plot...")
+    matrix_output_path = figures_base / "surprisal_distributions_matrix.png"
+    plot_surprisal_distributions_matrix(
+        results_base=results_base,
+        output_path=matrix_output_path,
+        model_type=model_type
+    )
+    
+    # Generate plots grouped by context length (averaging across window sizes)
+    logger.info("\nGenerating context-based plots (averaged across window sizes)...")
+    for context_length in [1, 2, 3]:
+        context_figures_dir = figures_base / f"context_{context_length}"
+        context_figures_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"  Context length {context_length}...")
+        
+        # Distribution plot
+        plot_surprisal_distributions_by_context(
+            results_base=results_base,
+            output_path=context_figures_dir / "surprisal_distributions.png",
+            context_length=context_length,
+            model_type=model_type
+        )
+        
+        # Difference plot
+        plot_surprisal_differences_by_context(
+            results_base=results_base,
+            output_path=context_figures_dir / "surprisal_differences.png",
+            context_length=context_length,
+            model_type=model_type
+        )
     
     # Find all window size directories
     window_dirs = sorted([d for d in results_base.iterdir() if d.is_dir() and d.name.startswith('window_')])
@@ -252,27 +304,15 @@ def generate_surprisal_figures(config: Config, model_type: str):
             
             mode_figures_dir.mkdir(parents=True, exist_ok=True)
             
-            # Compute statistics for the plot
-            stats_dict = None
-            if context_length is not None:
-                try:
-                    stats_dict = compute_statistics(results_df, context_length=context_length)
-                except Exception as e:
-                    logger.warning(f"Could not compute statistics: {e}")
-            
             # Generate plots
             logger.info(f"  Generating plots...")
             
             plot_surprisal_distributions(
                 results_df=results_df,
                 output_path=mode_figures_dir / "surprisal_distributions.png",
-                context_length=context_length
-            )
-            
-            plot_scatter_comparison(
-                results_df=results_df,
-                output_path=mode_figures_dir / "surprisal_scatter.png",
-                context_length=context_length
+                context_length=context_length,
+                window_size=int(window_size),
+                model_type=model_type
             )
             
             plot_difference_histogram(
@@ -280,14 +320,6 @@ def generate_surprisal_figures(config: Config, model_type: str):
                 output_path=mode_figures_dir / "surprisal_differences.png",
                 context_length=context_length
             )
-            
-            if stats_dict:
-                plot_summary_statistics(
-                    results_df=results_df,
-                    output_path=mode_figures_dir / "surprisal_summary.png",
-                    context_length=context_length,
-                    stats_dict=stats_dict
-                )
             
             logger.info(f"  Figures saved to: {mode_figures_dir}")
     

@@ -654,10 +654,9 @@ def add_context_to_analysis_dataset(
     else:
         # Fallback if context_lengths is not a valid list
         num_context = 3
-    min_required = config.get('context.min_required_sentences', 2)
     min_quality = config.get('context.min_translation_quality', 0.3)
     
-    logger.info(f"Context settings: {num_context} previous sentences, min {min_required} required, min quality {min_quality}")
+    logger.info(f"Context settings: {num_context} previous sentences, min quality {min_quality}")
     
     # Build participant index for faster lookups
     logger.info("Building participant index for faster context retrieval...")
