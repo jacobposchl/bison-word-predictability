@@ -42,6 +42,7 @@ def build_monolingual_pos_cache(monolingual_sentences: List[Dict]) -> Dict[int, 
     Returns:
         Dictionary mapping sentence index to pre-computed POS sequence (list of strings)
     """
+
     cache = {}
     for idx, mono_sent in enumerate(monolingual_sentences):
         mono_pos_str = mono_sent.get('pos', '')
@@ -54,10 +55,9 @@ def build_monolingual_pos_cache(monolingual_sentences: List[Dict]) -> Dict[int, 
 
 def _sequence_edit_distance(seq1: List[str], seq2: List[str]) -> int:
     """
-    Calculate edit distance between two sequences (not strings).
+    Calculate edit distance between two sequences.
     
-    Uses dynamic programming to compute Levenshtein distance on sequences.
-    
+
     Args:
         seq1: First sequence
         seq2: Second sequence
@@ -65,6 +65,7 @@ def _sequence_edit_distance(seq1: List[str], seq2: List[str]) -> int:
     Returns:
         Edit distance (minimum number of insertions, deletions, substitutions)
     """
+
     m, n = len(seq1), len(seq2)
     
     # Create a matrix to store distances
@@ -109,6 +110,7 @@ def levenshtein_similarity(seq1: List[str], seq2: List[str]) -> float:
     Returns:
         Similarity score between 0 and 1 (1 = identical, 0 = completely different)
     """
+
     if not seq1 and not seq2:
         return 1.0
     if not seq1 or not seq2:
@@ -138,6 +140,7 @@ def find_switch_points(pattern: str) -> List[int]:
         >>> find_switch_points("C5-E3-C2")
         [5, 8]  # Switch at word 5 (C->E) and word 8 (E->C)
     """
+
     segments = parse_pattern_segments(pattern)
     switch_points = []
     word_idx = 0
@@ -172,10 +175,7 @@ def extract_pos_window(
     return pos_sequence[start:end]
 
 
-def rank_matches_by_context(
-    matches: List[Dict],
-    source_sentence: Dict
-) -> List[Dict]:
+def rank_matches_by_context( matches: List[Dict], source_sentence: Dict ) -> List[Dict]:
     """
     Rank matches by contextual relevance: same speaker > same group > time proximity (only for same speaker).
     
@@ -186,6 +186,7 @@ def rank_matches_by_context(
     Returns:
         Sorted list of matches
     """
+
     source_group = source_sentence.get('group', '')
     source_speaker = source_sentence.get('participant_id', '')
     source_time = source_sentence.get('start_time', 0.0)
@@ -198,6 +199,7 @@ def rank_matches_by_context(
         where lower values are better (sorted ascending).
         Time distance is only meaningful for same-speaker matches.
         """
+        
         match_sent = match.get('match_sentence', {})
         match_group = match_sent.get('group', '')
         match_speaker = match_sent.get('participant_id', '')

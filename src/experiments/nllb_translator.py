@@ -1,7 +1,6 @@
 """
 NLLB (No Language Left Behind) translator for code-switching.
 
-Free, open-source for translation.
 """
 
 import logging
@@ -25,7 +24,7 @@ class NLLBTranslator:
     
     # NLLB language codes
     ENGLISH_CODE = "eng_Latn"
-    CANTONESE_CODE = "yue_Hant"  # Traditional Cantonese
+    CANTONESE_CODE = "yue_Hant"
     
     def __init__(
         self,
@@ -44,6 +43,7 @@ class NLLBTranslator:
             device: Device to run on ("auto", "cpu", "cuda")
             show_progress: Whether to show progress bars
         """
+
         self.model_name = model_name
         self.show_progress = show_progress
         
@@ -56,13 +56,12 @@ class NLLBTranslator:
         logger.info(f"Initializing NLLB translator: {model_name}")
         logger.info(f"Device: {self.device}")
         
-        # Suppress transformers logging during model loading
         import transformers
         transformers.logging.set_verbosity_error()
         
         # Load model and tokenizer
         if show_progress:
-            print(f"Loading NLLB model (this may take a moment on first run)...")
+            print(f"Loading NLLB model...")
         
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
@@ -70,8 +69,7 @@ class NLLBTranslator:
             tgt_lang=self.CANTONESE_CODE
         )
         
-        # Load model - explicitly avoid safetensors due to meta tensor issues with torch 2.6.0.dev
-        # Regular loading works fine
+
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
             use_safetensors=False  # Avoid meta tensor issues
@@ -84,13 +82,9 @@ class NLLBTranslator:
         
         logger.info("NLLB translator ready!")
         if show_progress:
-            print(f"✓ NLLB model loaded successfully on {self.device}")
+            print(f" NLLB model loaded successfully on {self.device}")
     
-    def translate_english_to_cantonese(
-        self,
-        english_text: str,
-        max_length: int = 200
-    ) -> str:
+    def translate_english_to_cantonese( self, english_text: str, max_length: int = 512 ) -> str:
         """
         Translate English text to Cantonese.
         
@@ -101,6 +95,7 @@ class NLLBTranslator:
         Returns:
             Cantonese translation
         """
+
         # Validate input
         if not english_text or not english_text.strip():
             logger.warning("Empty or whitespace-only English text provided for translation")
@@ -149,12 +144,7 @@ class NLLBTranslator:
         
         return translation.strip()
     
-    def translate_code_switched_sentence(
-        self,
-        sentence: str,
-        pattern: str,
-        words: List[str]
-    ) -> Dict:
+    def translate_code_switched_sentence( self, sentence: str, pattern: str, words: List[str] ) -> Dict:
         """
         Translate a code-switched sentence to fully Cantonese.
         
@@ -176,7 +166,6 @@ class NLLBTranslator:
                 f"Pattern word count ({total_pattern_words}) doesn't match sentence word count ({len(words)}) "
                 f"for pattern '{pattern}' and sentence '{sentence[:50]}...'"
             )
-            # Continue anyway but log the mismatch
         
         # Extract segments from words
         word_segments = []
@@ -210,7 +199,6 @@ class NLLBTranslator:
                 
                 english_text = ' '.join(segment_words)
                 
-                # Additional safety check for empty or whitespace-only text
                 if not english_text.strip():
                     logger.warning(f"Empty or whitespace-only English text in segment, skipping")
                     continue
@@ -238,12 +226,7 @@ class NLLBTranslator:
             'segments': segment_translations
         }
     
-    def translate_batch(
-        self,
-        sentences: List[str],
-        patterns: List[str],
-        words_list: List[List[str]]
-    ) -> List[Dict]:
+    def translate_batch( self, sentences: List[str], patterns: List[str], words_list: List[List[str]] ) -> List[Dict]:
         """
         Translate multiple code-switched sentences.
         
@@ -255,6 +238,7 @@ class NLLBTranslator:
         Returns:
             List of translation dictionaries
         """
+        
         if not (len(sentences) == len(patterns) == len(words_list)):
             raise ValueError("sentences, patterns, and words_list must have same length")
         

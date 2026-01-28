@@ -1,8 +1,6 @@
 """
 Part-of-speech tagging utilities for Cantonese and English.
 
-This module provides functions for POS tagging using PyCantonese for Cantonese
-and spaCy for English, with support for mixed-language sentences.
 """
 
 import logging
@@ -12,7 +10,7 @@ import pycantonese
 
 logger = logging.getLogger(__name__)
 
-# Global spaCy model (lazy loading)
+# Global spaCy model
 _spacy_model = None
 
 
@@ -37,9 +35,7 @@ def pos_tag_cantonese(sentence: str) -> List[Tuple[str, str]]:
     """
     Tag Cantonese text using PyCantonese.
     
-    Uses PyCantonese's word segmentation to properly segment the text
-    before POS tagging, ensuring correct word boundaries regardless of
-    whether the input is space-separated or not.
+    Uses PyCantonese's word segmentation to properly segment the text before POS tagging
     
     Args:
         sentence: Cantonese text string (may be space-separated or unsegmented)
@@ -50,15 +46,13 @@ def pos_tag_cantonese(sentence: str) -> List[Tuple[str, str]]:
     Example:
         >>> pos_tag_cantonese("我係香港人")
         [('我', 'PRON'), ('係', 'VERB'), ('香港人', 'NOUN')]
-        >>> pos_tag_cantonese("我 係 香港人")
-        [('我', 'PRON'), ('係', 'VERB'), ('香港人', 'NOUN')]
     """
+
     if not sentence or not sentence.strip():
         return []
     
     try:
         # Use PyCantonese's segmentation to properly segment Cantonese text
-        # This ensures correct word boundaries regardless of input format
         words = pycantonese.segment(sentence)
         if not words:
             return []
@@ -89,7 +83,7 @@ def pos_tag_english(sentence: str) -> List[Tuple[str, str]]:
     try:
         nlp = _load_spacy_model()
         doc = nlp(sentence)
-        # Use universal POS tags (simpler, more consistent)
+        
         return [(token.text, token.pos_) for token in doc if not token.is_space and not token.is_punct]
     except Exception as e:
         logger.warning(f"Error tagging English sentence '{sentence[:50]}...': {e}")
@@ -106,6 +100,7 @@ def parse_pattern_segments(pattern: str) -> List[Tuple[str, int]]:
     Returns:
         List of (language, count) tuples
     """
+
     if not pattern:
         return []
     
@@ -124,6 +119,7 @@ def is_monolingual(pattern: str) -> Optional[str]:
         'Cantonese' if pure Cantonese, 'English' if pure English,
         None if code-switched
     """
+
     segments = parse_pattern_segments(pattern)
     languages = {lang for lang, _ in segments}
     
@@ -133,7 +129,7 @@ def is_monolingual(pattern: str) -> Optional[str]:
         lang = languages.pop()
         return 'Cantonese' if lang == 'C' else 'English'
     else:
-        return None  # Code-switched
+        return None
 
 
 def split_sentence_by_pattern(sentence: str, pattern: str) -> List[Tuple[str, str]]:
@@ -147,6 +143,7 @@ def split_sentence_by_pattern(sentence: str, pattern: str) -> List[Tuple[str, st
     Returns:
         List of (text_segment, language) tuples
     """
+
     words = sentence.split()
     segments = parse_pattern_segments(pattern)
     
@@ -169,10 +166,7 @@ def split_sentence_by_pattern(sentence: str, pattern: str) -> List[Tuple[str, st
     return result
 
 
-def pos_tag_mixed_sentence(
-    sentence: str,
-    pattern: str
-) -> List[Tuple[str, str, str]]:
+def pos_tag_mixed_sentence( sentence: str, pattern: str ) -> List[Tuple[str, str, str]]:
     """
     Tag a mixed-language sentence by segmenting and tagging each language portion.
     
@@ -187,6 +181,7 @@ def pos_tag_mixed_sentence(
         >>> pos_tag_mixed_sentence("我 係 local 人", "C2-E1-C1")
         [('我', 'PRON', 'C'), ('係', 'VERB', 'C'), ('local', 'ADJ', 'E'), ('人', 'NOUN', 'C')]
     """
+    
     segments = split_sentence_by_pattern(sentence, pattern)
     result = []
     
