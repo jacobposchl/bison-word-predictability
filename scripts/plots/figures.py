@@ -24,25 +24,14 @@ sys.path.insert(0, str(project_root))
 from src.core.config import Config
 from src.plots.preprocessing.plot_preprocessing import (
     plot_matrix_language_distribution,
-    plot_pattern_complexity,
     plot_switch_position,
-    plot_pattern_type_distribution,
     plot_sentence_length_distribution,
     plot_participant_variation,
-    plot_matrix_language_proportions,
-    plot_pattern_length_vs_switch_position,
     plot_code_switch_density
 )
 from src.plots.matching.plot_matching import (
-    plot_similarity_distributions_from_csv,
-    plot_match_success_rate,
     plot_matches_per_sentence_distribution,
-    plot_match_quality_by_group_speaker,
-    plot_similarity_vs_characteristics,
-    plot_window_size_comparison,
-    plot_match_distribution_by_group,
-    plot_similarity_threshold_analysis,
-    plot_pos_window_alignment_quality
+    plot_similarity_threshold_analysis
 )
 from src.experiments.visualization import (
     plot_surprisal_distributions,
@@ -77,8 +66,6 @@ def generate_preprocessing_figures(config: Config):
     logger.info(f"Loading data from {all_sentences_csv}")
     all_sentences_df = pd.read_csv(all_sentences_csv)
     
-    # Filter to code-switching sentences (those with both 'C' and 'E' in pattern)
-    # This matches the filtering done in filter_code_switching_sentences()
     code_switched = all_sentences_df[
         all_sentences_df['pattern'].str.contains('C', na=False) & 
         all_sentences_df['pattern'].str.contains('E', na=False) &
@@ -96,11 +83,7 @@ def generate_preprocessing_figures(config: Config):
     logger.info("  1. Matrix language distribution...")
     plot_matrix_language_distribution(code_switched, figures_dir)
     
-    # 2. Pattern complexity (DISABLED)
-    # logger.info("  2. Pattern complexity...")
-    # plot_pattern_complexity(code_switched, figures_dir)
-    
-    # 3. Switch position (use cantonese_translated_WITHOUT_fillers.csv for switch_index column)
+    # 2. Switch position (use cantonese_translated_WITHOUT_fillers.csv for switch_index column)
     logger.info("  2. Switch position analysis...")
     cantonese_translated_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
     if cantonese_translated_csv.exists():
@@ -111,27 +94,15 @@ def generate_preprocessing_figures(config: Config):
         logger.warning(f"  {cantonese_translated_csv} not found, using all_sentences.csv instead")
         plot_switch_position(code_switched, figures_dir)
     
-    # 4. Pattern type distribution (DISABLED)
-    # logger.info("  4. Pattern type distribution...")
-    # plot_pattern_type_distribution(code_switched, figures_dir)
-    
-    # 5. Sentence length distribution
+    # 3. Sentence length distribution
     logger.info("  3. Sentence length distribution...")
     plot_sentence_length_distribution(code_switched, figures_dir)
     
-    # 6. Participant variation
+    # 4. Participant variation
     logger.info("  4. Participant variation...")
     plot_participant_variation(code_switched, figures_dir)
     
-    # 7. Matrix language proportions (DISABLED)
-    # logger.info("  7. Matrix language proportions...")
-    # plot_matrix_language_proportions(code_switched, figures_dir)
-    
-    # 8. Pattern length vs switch position (DISABLED)
-    # logger.info("  8. Pattern length vs switch position...")
-    # plot_pattern_length_vs_switch_position(code_switched, figures_dir)
-    
-    # 9. Code-switch density
+    # 5. Code-switch density
     logger.info("  5. Code-switch density...")
     plot_code_switch_density(code_switched, figures_dir)
     
@@ -162,41 +133,13 @@ def generate_matching_figures(config: Config):
     
     logger.info("Generating matching figures...")
     
-    # 1. Similarity distributions (DISABLED)
-    # logger.info("  1. Similarity distributions...")
-    # plot_similarity_distributions_from_csv(window_datasets, str(figures_dir))
-    
-    # 2. Match success rate (DISABLED)
-    # logger.info("  1. Match success rate...")
-    # plot_match_success_rate(window_datasets, str(figures_dir))
-    
-    # 3. Matches per sentence distribution
+    # 1. Matches per sentence distribution
     logger.info("  1. Matches per sentence distribution...")
     plot_matches_per_sentence_distribution(window_datasets, str(figures_dir))
     
-    # 4. Match quality by group/speaker (DISABLED)
-    # logger.info("  4. Match quality by group/speaker...")
-    # plot_match_quality_by_group_speaker(window_datasets, str(figures_dir))
-    
-    # 5. Similarity vs characteristics (DISABLED)
-    # logger.info("  5. Similarity vs characteristics...")
-    # plot_similarity_vs_characteristics(window_datasets, str(figures_dir))
-    
-    # 6. Window size comparison (DISABLED)
-    # logger.info("  6. Window size comparison...")
-    # plot_window_size_comparison(window_datasets, str(figures_dir))
-    
-    # 7. Match distribution by group (DISABLED)
-    # logger.info("  7. Match distribution by group...")
-    # plot_match_distribution_by_group(window_datasets, str(figures_dir))
-    
-    # 8. Similarity threshold analysis
+    # 2. Similarity threshold analysis
     logger.info("  2. Similarity threshold analysis...")
     plot_similarity_threshold_analysis(window_datasets, str(figures_dir))
-    
-    # 9. POS window alignment quality (DISABLED)
-    # logger.info("  4. POS window alignment quality...")
-    # plot_pos_window_alignment_quality(window_datasets, str(figures_dir))
     
     logger.info(f"\nAll matching figures saved to: {figures_dir}")
     return True
