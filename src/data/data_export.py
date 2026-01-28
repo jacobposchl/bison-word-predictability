@@ -25,58 +25,13 @@ def _is_english_word(word: str) -> bool:
     Returns:
         True if word appears to be English, False otherwise
     """
+
     if not word:
         return False
     alpha_chars = [c for c in word if c.isalpha()]
     if not alpha_chars:
         return False
     return all(ord(c) < 128 for c in alpha_chars)
-
-
-def _regenerate_pattern_from_sentence(sentence: str) -> str:
-    """
-    Regenerate pattern from actual sentence by detecting language of each word.
-    
-    This ensures the pattern matches the actual sentence structure (without fillers),
-    rather than using a pattern from a different version of the sentence.
-    
-    Args:
-        sentence: Space-separated sentence
-        
-    Returns:
-        Pattern string like "C5-E2-C3" representing language segments
-    """
-    if not sentence or not sentence.strip():
-        return ""
-    
-    words = sentence.split()
-    if not words:
-        return ""
-    
-    segments = []
-    current_lang = None
-    current_count = 0
-    
-    for word in words:
-        # Determine language of current word
-        is_english = _is_english_word(word)
-        word_lang = 'E' if is_english else 'C'
-        
-        if word_lang == current_lang:
-            # Continue current segment
-            current_count += 1
-        else:
-            # Start new segment
-            if current_lang is not None:
-                segments.append(f"{current_lang}{current_count}")
-            current_lang = word_lang
-            current_count = 1
-    
-    # Add final segment
-    if current_lang is not None:
-        segments.append(f"{current_lang}{current_count}")
-    
-    return '-'.join(segments) if segments else ""
 
 
 def _contains_english_words(text: str) -> Tuple[bool, List[str]]:
@@ -153,43 +108,30 @@ def _count_words_from_text(text: str) -> int:
     Returns:
         Number of words
     """
+    
     if not text or not text.strip():
         return 0
     return len(text.split())
 
 
-def _filter_by_min_words(sentences: List[Dict], min_words: int, use_without_fillers: bool = True) -> List[Dict]:
+def _filter_by_min_words(sentences: List[Dict], min_words: int) -> List[Dict]:
     """
-    Filter sentences to only keep those with at least min_words AFTER filler removal.
+    Filter sentences to only keep those with at least min_words.
+    
+    Counts words from the pattern 
     
     Args:
         sentences: List of sentence dictionaries
         min_words: Minimum number of words required
-        use_without_fillers: If True, count words without fillers; if False, count with fillers
         
     Returns:
         Filtered list of sentences
     """
+
     filtered = []
     for s in sentences:
-        if use_without_fillers:
-            # Count words from pattern_content_only or reconstructed_text_without_fillers
-            pattern = s.get('pattern_content_only', '')
-            if pattern and pattern != 'FILLER_ONLY':
-                word_count = _count_words_from_pattern(pattern)
-            else:
-                # Fallback to counting from text
-                text = s.get('reconstructed_text_without_fillers', '')
-                word_count = _count_words_from_text(text)
-        else:
-            # Count words from pattern_with_fillers or reconstructed_text
-            pattern = s.get('pattern_with_fillers', s.get('pattern', ''))
-            if pattern:
-                word_count = _count_words_from_pattern(pattern)
-            else:
-                # Fallback to counting from text
-                text = s.get('reconstructed_text', '')
-                word_count = _count_words_from_text(text)
+        pattern = s.get('pattern', '')
+        word_count = _count_words_from_pattern(pattern)
         
         if word_count >= min_words:
             filtered.append(s)
@@ -207,142 +149,35 @@ def sort_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Sorted DataFrame
     """
+
     if len(df) == 0:
         return df
     
-    # Check which columns exist
-    sort_columns = []
-    if 'group' in df.columns:
-        sort_columns.append('group')
-    if 'participant_id' in df.columns:
-        sort_columns.append('participant_id')
-    if 'start_time' in df.columns:
-        sort_columns.append('start_time')
-    
-    if sort_columns:
-        df = df.sort_values(by=sort_columns, na_position='last').reset_index(drop=True)
-    
-    return df
+    return df.sort_values(by=['group', 'participant_id', 'start_time'], na_position='last').reset_index(drop=True)
 
 
-def filter_code_switching_sentences(
-    sentences: List[Dict],
-    include_fillers: bool = True
-) -> List[Dict]:
+def filter_code_switching_sentences(sentences: List[Dict]) -> List[Dict]:
     """
     Filter sentences to only keep those with actual code-switching.
     
-    Code-switching is defined as sentences containing both 'C' and 'E'
-    in their pattern.
-    
     Args:
         sentences: List of sentence data dictionaries
-        include_fillers: If True, use pattern_with_fillers; else use pattern_content_only
         
     Returns:
         Filtered list of sentences with code-switching
     """
-    filtered = []
     
-    for sentence in sentences:
-        if include_fillers:
-            pattern = sentence.get('pattern_with_fillers', '')
-        else:
-            pattern = sentence.get('pattern_content_only', '')
-        
-        # Skip sentences that became monolingual or filler-only after removing fillers
-        if 'C' in pattern and 'E' in pattern and pattern != 'FILLER_ONLY':
-            filtered.append(sentence)
-    
-    return filtered
-
-
-def export_to_csv(
-    all_sentences: List[Dict],
-    csv_with_fillers_path: str,
-    csv_without_fillers_path: str,
-    min_sentence_words: int = 2
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Export processed sentences to CSV files.
-    
-    Creates two datasets:
-    1. WITH fillers: Includes filler words in pattern analysis
-    2. WITHOUT fillers: Excludes filler words from pattern analysis
-    
-    Args:
-        all_sentences: List of all processed sentence data dictionaries
-        csv_with_fillers_path: Output path for CSV with fillers
-        csv_without_fillers_path: Output path for CSV without fillers
-        min_sentence_words: Minimum number of words (after filler removal for without_fillers)
-        
-    Returns:
-        Tuple of (dataframe_with_fillers, dataframe_without_fillers)
-    """
-    # type: ignore
-    # Filter both datasets to only keep sentences with actual code-switching
-    with_fillers = filter_code_switching_sentences(all_sentences, include_fillers=True)
-    without_fillers = filter_code_switching_sentences(all_sentences, include_fillers=False)
-    
-    # Apply min_sentence_words filtering AFTER filler removal
-    with_fillers = _filter_by_min_words(with_fillers, min_sentence_words, use_without_fillers=False)
-    without_fillers = _filter_by_min_words(without_fillers, min_sentence_words, use_without_fillers=True)
-    
-    logger.info(f"Dataset WITH fillers: {len(with_fillers)} code-switching sentences")
-    logger.info(f"Dataset WITHOUT fillers: {len(without_fillers)} code-switching sentences")
-    logger.info(
-        f"Difference: {len(with_fillers) - len(without_fillers)} sentences "
-        f"reclassified as non-code-switching"
-    )
-    
-    # Create the first CSV - WITH fillers
-    csv_with_fillers = pd.DataFrame({
-        'start_time': [s['start_time'] for s in with_fillers],
-        'end_time': [s['end_time'] for s in with_fillers],
-        'reconstructed_sentence': [s['reconstructed_text'] for s in with_fillers],
-        'sentence_original': [s['text'] for s in with_fillers],
-        'pattern': [s['pattern_with_fillers'] for s in with_fillers],
-        'matrix_language': [s['matrix_language'] for s in with_fillers],
-        'group': [s['group'] for s in with_fillers],
-        'participant_id': [s['participant_id'] for s in with_fillers]
-    })
-    csv_with_fillers = sort_dataframe(csv_with_fillers)
-    
-    # Create the second CSV - WITHOUT fillers
-    csv_without_fillers = pd.DataFrame({
-        'start_time': [s['start_time'] for s in without_fillers],
-        'end_time': [s['end_time'] for s in without_fillers],
-        'reconstructed_sentence': [s['reconstructed_text_without_fillers'] for s in without_fillers],
-        'sentence_original': [s['text'] for s in without_fillers],
-        'pattern': [s['pattern_content_only'] for s in without_fillers],
-        'matrix_language': [s['matrix_language'] for s in without_fillers],
-        'group': [s['group'] for s in without_fillers],
-        'participant_id': [s['participant_id'] for s in without_fillers]
-    })
-    csv_without_fillers = sort_dataframe(csv_without_fillers)
-    
-    # Create output directory if it doesn't exist
-    csv_dir = os.path.dirname(csv_with_fillers_path)
-    if csv_dir and not os.path.exists(csv_dir):
-        os.makedirs(csv_dir, exist_ok=True)
-        logger.info(f"Created output directory: {csv_dir}")
-    
-    # Save both datasets
-    csv_with_fillers.to_csv(csv_with_fillers_path, index=False, encoding='utf-8-sig')
-    csv_without_fillers.to_csv(csv_without_fillers_path, index=False, encoding='utf-8-sig')
-    
-    logger.info(f"Saved two datasets:")
-    logger.info(f"  '{csv_with_fillers_path}' - {len(csv_with_fillers)} sentences")
-    logger.info(f"  '{csv_without_fillers_path}' - {len(csv_without_fillers)} sentences")
-    
-    return csv_with_fillers, csv_without_fillers
+    return [
+        s for s in sentences
+        if (pattern := s.get('pattern', '')) and 'C' in pattern and 'E' in pattern and pattern != 'FILLER_ONLY'
+    ]
 
 
 def export_all_sentences_to_csv(
     all_sentences: List[Dict],
     csv_all_sentences_path: str,
     min_sentence_words: int = 2
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict]:
     """
     Export ALL sentences (both monolingual and code-switched) to CSV.
     
@@ -355,62 +190,39 @@ def export_all_sentences_to_csv(
         min_sentence_words: Minimum number of words (after filler removal)
         
     Returns:
-        DataFrame with all sentences
+        Tuple of (DataFrame with all sentences, statistics dictionary)
     """
+
     logger.info(f"Exporting ALL sentences (monolingual + code-switched) to CSV...")
     
     # Filter by min_sentence_words AFTER filler removal
-    filtered_sentences = _filter_by_min_words(all_sentences, min_sentence_words, use_without_fillers=True)
+    filtered_sentences = _filter_by_min_words(all_sentences, min_sentence_words)
     logger.info(f"Filtered to {len(filtered_sentences)} sentences with at least {min_sentence_words} words (after filler removal)")
     
     # Create DataFrame with all sentences
-    # Regenerate patterns from actual sentences to ensure they match reconstructed_sentence
     csv_all_data = []
-    patterns_regenerated = 0
-    patterns_unchanged = 0
     
     for s in filtered_sentences:
         reconstructed = s.get('reconstructed_text_without_fillers', s.get('reconstructed_text', ''))
-        original_pattern = s.get('pattern_content_only', s.get('pattern', ''))
-        
-        # Regenerate pattern from actual sentence to ensure it matches
-        regenerated_pattern = _regenerate_pattern_from_sentence(reconstructed)
-        
-        # Use regenerated pattern if available, fallback to original
-        if regenerated_pattern:
-            pattern_to_use = regenerated_pattern
-            if regenerated_pattern != original_pattern:
-                patterns_regenerated += 1
-            else:
-                patterns_unchanged += 1
-        else:
-            # Fallback to original if regeneration failed (empty sentence, etc.)
-            pattern_to_use = original_pattern
-            patterns_unchanged += 1
         
         csv_all_data.append({
             'start_time': s['start_time'],
             'end_time': s['end_time'],
             'reconstructed_sentence': reconstructed,
             'sentence_original': s['text'],
-            'pattern': pattern_to_use,
+            'pattern': s.get('pattern', ''),
             'matrix_language': s.get('matrix_language', 'Unknown'),
             'group': s.get('group', ''),
             'participant_id': s.get('participant_id', '')
         })
     
     csv_all = pd.DataFrame(csv_all_data)
-    
-    if patterns_regenerated > 0:
-        logger.info(f"Regenerated {patterns_regenerated} patterns to match actual sentences")
-    logger.info(f"Using {patterns_unchanged} original patterns (already matched)")
     csv_all = sort_dataframe(csv_all)
     
     # Create output directory if it doesn't exist
     csv_dir = os.path.dirname(csv_all_sentences_path)
     if csv_dir and not os.path.exists(csv_dir):
         os.makedirs(csv_dir, exist_ok=True)
-        logger.info(f"Created output directory: {csv_dir}")
     
     # Save CSV
     csv_all.to_csv(csv_all_sentences_path, index=False, encoding='utf-8-sig')
@@ -418,7 +230,21 @@ def export_all_sentences_to_csv(
     logger.info(f"Saved all sentences dataset:")
     logger.info(f"  '{csv_all_sentences_path}' - {len(csv_all)} sentences")
     
-    return csv_all
+    # Calculate statistics
+    stats = {
+        'total_processed': len(all_sentences),
+        'after_min_words_filter': len(filtered_sentences),
+        'filtered_out': len(all_sentences) - len(filtered_sentences),
+        'code_switched': sum(1 for s in filtered_sentences if 'C' in s.get('pattern', '') and 'E' in s.get('pattern', '') and s.get('pattern', '') != 'FILLER_ONLY'),
+        'monolingual_cantonese': sum(1 for s in filtered_sentences if 'C' in s.get('pattern', '') and 'E' not in s.get('pattern', '') and s.get('pattern', '') != 'FILLER_ONLY'),
+        'monolingual_english': sum(1 for s in filtered_sentences if 'E' in s.get('pattern', '') and 'C' not in s.get('pattern', '') and s.get('pattern', '') != 'FILLER_ONLY'),
+        'filler_only': sum(1 for s in filtered_sentences if s.get('pattern', '') == 'FILLER_ONLY'),
+        'cantonese_matrix': sum(1 for s in filtered_sentences if s.get('matrix_language') == 'Cantonese'),
+        'english_matrix': sum(1 for s in filtered_sentences if s.get('matrix_language') == 'English'),
+        'equal_matrix': sum(1 for s in filtered_sentences if s.get('matrix_language') == 'Equal')
+    }
+    
+    return csv_all, stats
 
 
 def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str, is_cantonese: bool = False) -> pd.DataFrame:
@@ -466,11 +292,10 @@ def export_cantonese_monolingual(
     all_sentences: List[Dict],
     config,
     min_sentence_words: int = 2
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict]:
     """
     Export only Cantonese monolingual sentences WITHOUT fillers.
     
-    This is the only monolingual dataset needed for downstream analysis.
     
     Args:
         all_sentences: List of all processed sentence data dictionaries
@@ -478,8 +303,9 @@ def export_cantonese_monolingual(
         min_sentence_words: Minimum number of words required
         
     Returns:
-        DataFrame with Cantonese monolingual sentences (WITHOUT fillers)
+        Tuple of (DataFrame with Cantonese monolingual sentences, statistics dictionary)
     """
+
     logger.info("Exporting Cantonese monolingual sentences (WITHOUT fillers)...")
     
     # Helper function to determine if sentence is monolingual Cantonese
@@ -491,16 +317,14 @@ def export_cantonese_monolingual(
     cantonese_sentences = []
     
     for s in all_sentences:
-        pattern_with = s.get('pattern_with_fillers', '')
-        pattern_without = s.get('pattern_content_only', '')
+        pattern = s.get('pattern', '')
         
-        # Must be monolingual in BOTH patterns to avoid code-switched sentences
-        # that become "monolingual" after filler removal
-        if is_monolingual_cantonese(pattern_with) and is_monolingual_cantonese(pattern_without):
+        # Must be monolingual Cantonese (pattern is already without fillers)
+        if is_monolingual_cantonese(pattern):
             cantonese_sentences.append(s)
     
     # Apply min_sentence_words filtering AFTER filler removal
-    cantonese_sentences = _filter_by_min_words(cantonese_sentences, min_sentence_words, use_without_fillers=True)
+    cantonese_sentences = _filter_by_min_words(cantonese_sentences, min_sentence_words)
     
     logger.info(f"Found {len(cantonese_sentences)} Cantonese monolingual sentences (after filtering)")
     
@@ -509,7 +333,7 @@ def export_cantonese_monolingual(
         'start_time': [s['start_time'] for s in cantonese_sentences],
         'end_time': [s['end_time'] for s in cantonese_sentences],
         'reconstructed_sentence': [s['reconstructed_text_without_fillers'] for s in cantonese_sentences],
-        'pattern': [s.get('pattern_content_only', '') for s in cantonese_sentences],
+        'pattern': [s.get('pattern', '') for s in cantonese_sentences],
         'group': [s.get('group', '') for s in cantonese_sentences],
         'participant_id': [s.get('participant_id', '') for s in cantonese_sentences]
     })
@@ -528,148 +352,14 @@ def export_cantonese_monolingual(
     df.to_csv(csv_path, index=False, encoding='utf-8-sig')
     logger.info(f"Saved '{csv_path}' - {len(df)} Cantonese monolingual sentences")
     
-    return df
-
-
-def export_monolingual_sentences(
-    all_sentences: List[Dict],
-    config,
-    min_sentence_words: int = 2
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Export monolingual sentences (Cantonese and English) to separate CSVs.
+    # Calculate statistics
+    stats = {
+        'total_cantonese_monolingual_before_filter': len([s for s in all_sentences if 'C' in s.get('pattern', '') and 'E' not in s.get('pattern', '') and s.get('pattern', '') != 'FILLER_ONLY']),
+        'after_min_words_filter': len(cantonese_sentences),
+        'filtered_out': len([s for s in all_sentences if 'C' in s.get('pattern', '') and 'E' not in s.get('pattern', '') and s.get('pattern', '') != 'FILLER_ONLY']) - len(cantonese_sentences)
+    }
     
-    Creates 4 CSV files:
-    - Cantonese monolingual WITH fillers
-    - Cantonese monolingual WITHOUT fillers  
-    - English monolingual WITH fillers
-    - English monolingual WITHOUT fillers
-    
-    Args:
-        all_sentences: List of all processed sentence data dictionaries
-        config: Config object with CSV path methods
-        
-    Returns:
-        Tuple of (cantonese_with, cantonese_without, english_with, english_without) DataFrames
-    """
-    from src.core.text_cleaning import remove_fillers_from_text
-    
-    logger.info("Exporting monolingual sentences to CSVs...")
-    
-    # Helper function to determine if sentence is monolingual
-    def is_monolingual_cantonese(pattern: str) -> bool:
-        """Check if pattern represents pure Cantonese (only C, no E)."""
-        return 'C' in pattern and 'E' not in pattern and pattern != 'FILLER_ONLY'
-    
-    def is_monolingual_english(pattern: str) -> bool:
-        """Check if pattern represents pure English (only E, no C)."""
-        return 'E' in pattern and 'C' not in pattern and pattern != 'FILLER_ONLY'
-    
-    # Filter sentences by language
-    cantonese_with_fillers = []
-    cantonese_without_fillers = []
-    english_with_fillers = []
-    english_without_fillers = []
-    
-    for s in all_sentences:
-        pattern_with = s.get('pattern_with_fillers', '')
-        pattern_without = s.get('pattern_content_only', '')
-        
-        # For WITH fillers: use pattern_with_fillers
-        # For WITHOUT fillers: use pattern_content_only
-        # IMPORTANT: Only include if monolingual in BOTH patterns to avoid code-switched sentences
-        # that become "monolingual" after filler removal
-        
-        is_cant_with = is_monolingual_cantonese(pattern_with)
-        is_cant_without = is_monolingual_cantonese(pattern_without)
-        is_eng_with = is_monolingual_english(pattern_with)
-        is_eng_without = is_monolingual_english(pattern_without)
-        
-        # Cantonese monolingual WITH fillers (must be monolingual in WITH pattern)
-        if is_cant_with:
-            cantonese_with_fillers.append(s)
-        
-        # Cantonese monolingual WITHOUT fillers (must be monolingual in BOTH patterns)
-        if is_cant_with and is_cant_without:
-            cantonese_without_fillers.append(s)
-        
-        # English monolingual WITH fillers (must be monolingual in WITH pattern)
-        if is_eng_with:
-            english_with_fillers.append(s)
-        
-        # English monolingual WITHOUT fillers (must be monolingual in BOTH patterns)
-        if is_eng_with and is_eng_without:
-            english_without_fillers.append(s)
-    
-    # Apply min_sentence_words filtering AFTER filler removal
-    cantonese_with_fillers = _filter_by_min_words(cantonese_with_fillers, min_sentence_words, use_without_fillers=False)
-    cantonese_without_fillers = _filter_by_min_words(cantonese_without_fillers, min_sentence_words, use_without_fillers=True)
-    english_with_fillers = _filter_by_min_words(english_with_fillers, min_sentence_words, use_without_fillers=False)
-    english_without_fillers = _filter_by_min_words(english_without_fillers, min_sentence_words, use_without_fillers=True)
-    
-    logger.info(f"After min_sentence_words filtering (min={min_sentence_words}):")
-    logger.info(f"  Cantonese WITH fillers: {len(cantonese_with_fillers)}")
-    logger.info(f"  Cantonese WITHOUT fillers: {len(cantonese_without_fillers)}")
-    logger.info(f"  English WITH fillers: {len(english_with_fillers)}")
-    logger.info(f"  English WITHOUT fillers: {len(english_without_fillers)}")
-    
-    # Create DataFrames
-    def create_df(sentences: List[Dict], use_pattern_with_fillers: bool, lang: str, is_cantonese_without: bool = False) -> pd.DataFrame:
-        """Create DataFrame from sentence list."""
-        pattern_field = 'pattern_with_fillers' if use_pattern_with_fillers else 'pattern_content_only'
-        
-        # For WITHOUT fillers datasets, use pre-computed text without fillers
-        if use_pattern_with_fillers:
-            reconstructed_sentences = [s['reconstructed_text'] for s in sentences]
-        else:
-            reconstructed_sentences = [s['reconstructed_text_without_fillers'] for s in sentences]
-        
-        # Build base columns
-        data = {
-            'start_time': [s['start_time'] for s in sentences],
-            'end_time': [s['end_time'] for s in sentences],
-            'reconstructed_sentence': reconstructed_sentences,
-            'pattern': [s.get(pattern_field, '') for s in sentences],
-            'group': [s.get('group', '') for s in sentences],
-            'participant_id': [s.get('participant_id', '') for s in sentences]
-        }
-        
-        # Only add sentence_original and matrix_language if NOT cantonese_without
-        if not is_cantonese_without:
-            data['sentence_original'] = [s['text'] for s in sentences]
-            data['matrix_language'] = [s.get('matrix_language', 'Unknown') for s in sentences]
-        
-        df = pd.DataFrame(data)
-        return sort_dataframe(df)
-    
-    cant_with_df = create_df(cantonese_with_fillers, use_pattern_with_fillers=True, lang='C', is_cantonese_without=False)
-    cant_without_df = create_df(cantonese_without_fillers, use_pattern_with_fillers=False, lang='C', is_cantonese_without=True)
-    eng_with_df = create_df(english_with_fillers, use_pattern_with_fillers=True, lang='E', is_cantonese_without=False)
-    eng_without_df = create_df(english_without_fillers, use_pattern_with_fillers=False, lang='E', is_cantonese_without=False)
-    
-    # Add POS tagging to Cantonese monolingual WITHOUT fillers
-    cant_without_df = _add_pos_to_dataframe(cant_without_df, 'reconstructed_sentence', 'pos', is_cantonese=True)
-    
-    # Save CSVs
-    csv_paths = [
-        (cant_with_df, config.get_csv_cantonese_mono_with_fillers_path(), 'Cantonese WITH fillers'),
-        (cant_without_df, config.get_csv_cantonese_mono_without_fillers_path(), 'Cantonese WITHOUT fillers'),
-        (eng_with_df, config.get_csv_english_mono_with_fillers_path(), 'English WITH fillers'),
-        (eng_without_df, config.get_csv_english_mono_without_fillers_path(), 'English WITHOUT fillers')
-    ]
-    
-    for df, path, desc in csv_paths:
-        # Create output directory if it doesn't exist
-        csv_dir = os.path.dirname(path)
-        if csv_dir and not os.path.exists(csv_dir):
-            os.makedirs(csv_dir, exist_ok=True)
-        
-        df.to_csv(path, index=False, encoding='utf-8-sig')
-        logger.info(f"  '{path}' - {len(df)} {desc} sentences")
-    
-    logger.info("Monolingual sentence export complete!")
-    
-    return cant_with_df, cant_without_df, eng_with_df, eng_without_df
+    return df, stats
 
 
 def export_translated_sentences(
@@ -677,7 +367,7 @@ def export_translated_sentences(
     config,
     do_translation: bool = True,
     min_sentence_words: int = 2
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict]:
     """
     Export code-switched sentences with full Cantonese translations.
     
@@ -692,24 +382,33 @@ def export_translated_sentences(
         min_sentence_words: Minimum number of words required
         
     Returns:
-        DataFrame with translated sentences structure
+        Tuple of (DataFrame with translated sentences structure, statistics dictionary)
     """
+
     # Import parse_pattern_segments early since it's needed for filtering
     from src.analysis.pos_tagging import parse_pattern_segments
     
     logger.info("Exporting translated code-switched sentences...")
     
     # Filter code-switching sentences (without fillers)
-    code_switched_sentences = filter_code_switching_sentences(all_sentences, include_fillers=False)
+    code_switched_sentences = filter_code_switching_sentences(all_sentences)
     logger.info(f"Found {len(code_switched_sentences)} code-switching sentences (without fillers)")
     
     # Convert to DataFrame for easier filtering
-    # Note: min_sentence_words filtering is applied later, after pattern filtering (matching original logic)
     df_source = pd.DataFrame(code_switched_sentences)
     
     if len(df_source) == 0:
         logger.warning("No code-switching sentences found!")
-        return pd.DataFrame()
+        return pd.DataFrame(), {
+            'initial_total': 0,
+            'after_cantonese_filter': 0,
+            'after_pattern_filter': 0,
+            'translation_valid': 0,
+            'translation_invalid': 0,
+            'final_with_translation': 0,
+            'final_with_pos': 0,
+            'min_cantonese_words': 0
+        }
     
     # Track filtering stats for summary
     stats = {
@@ -734,8 +433,7 @@ def export_translated_sentences(
     logger.info(f"Applying pattern filter: must start with at least {min_cantonese} Cantonese words followed by English")
     
     # Filter by pattern criteria - check if pattern starts with enough Cantonese words followed by English
-    # Use pattern_content_only from sentence dicts (without fillers)
-    pattern_col = 'pattern_content_only' if 'pattern_content_only' in df_cantonese.columns else 'pattern'
+    pattern_col = 'pattern'
     valid_patterns = []
     for pattern in df_cantonese[pattern_col].values:
         try:
@@ -762,7 +460,7 @@ def export_translated_sentences(
     
     if len(df_cantonese) == 0:
         logger.warning("No Cantonese matrix language sentences found!")
-        return pd.DataFrame()
+        return pd.DataFrame(), stats
     
     # Create new DataFrame with desired structure
     # Column order: code_switch_original, cantonese_translation, translated_pos, pattern, then other columns
@@ -773,6 +471,7 @@ def export_translated_sentences(
         
         For pattern C18-E1, returns 18 (the first English word, 0-based indexing).
         This is the actual switch word position.
+        
         """
         try:
             segments = parse_pattern_segments(pattern)
@@ -780,8 +479,8 @@ def export_translated_sentences(
                 return -1
             first_lang, first_count = segments[0]
             if first_lang == 'C' and first_count > 0:
-                return first_count  # First English word (0-based, so count is the index)
-            return -1  # English starts at beginning, no Cantonese word before switch
+                return first_count
+            return -1
         except Exception:
             return -1
     
@@ -792,12 +491,8 @@ def export_translated_sentences(
         reconstructed_sentences = df_cantonese['reconstructed_text_without_fillers'].values
     elif 'reconstructed_sentence' in df_cantonese.columns:
         reconstructed_sentences = df_cantonese['reconstructed_sentence'].values
-    else:
-        # Fallback - shouldn't happen but handle gracefully
-        logger.warning("Could not find reconstructed sentence column, using empty strings")
-        reconstructed_sentences = [''] * len(df_cantonese)
     
-    # Get pattern column (should be pattern_content_only from sentence dicts)
+    # Get pattern column (pattern is always without fillers now)
     pattern_values = df_cantonese[pattern_col].values if pattern_col in df_cantonese.columns else df_cantonese.get('pattern', [''] * len(df_cantonese)).values
     
     df = pd.DataFrame({
@@ -841,7 +536,6 @@ def export_translated_sentences(
     if do_translation:
         logger.info("Performing translation with verification and POS tagging...")
         from src.experiments.nllb_translator import NLLBTranslator
-        from src.core.tokenization import segment_cantonese_sentence
         from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence, parse_pattern_segments
         from tqdm import tqdm
         
@@ -858,7 +552,7 @@ def export_translated_sentences(
         # Create progress bar with detailed description
         pbar = tqdm(df.iterrows(), total=len(df), desc="Translating & verifying")
         
-        # Save every N sentences to balance performance and safety
+        # Save every N sentences
         save_interval = 10
         
         for row_idx, (idx, row) in enumerate(pbar):
@@ -897,7 +591,6 @@ def export_translated_sentences(
                         cantonese_end = switch_index  # Exclusive end of Cantonese portion
                         
                         for i, word in enumerate(translation_words[:cantonese_end]):
-                            # Simple check: if word contains only ASCII letters, it's likely English
                             if word and any(c.isascii() and c.isalpha() for c in word):
                                 english_in_cantonese_portion = True
                                 break
@@ -1001,7 +694,6 @@ def export_translated_sentences(
         stats['final_with_translation'] = len(df_valid)
         stats['final_with_pos'] = len(df_valid[df_valid['translated_pos'] != ''])
         
-        # Sanity check: these should be equal
         if stats['final_with_translation'] != stats['final_with_pos']:
             logger.warning(f"MISMATCH: {stats['final_with_translation']} translations but {stats['final_with_pos']} POS tags!")
         
@@ -1057,92 +749,246 @@ def export_translated_sentences(
         logger.info(f"Translation complete: {valid_count} valid, {invalid_count} invalid out of {len(df)} total")
         logger.info(f"Saved translated sentences with POS tags: '{csv_path}' - {len(df)} sentences")
         logger.info(f"Generated summary report: '{summary_path}'")
+        
+        # Add final stats
+        stats['final_with_translation'] = len(df_valid)
+        stats['final_with_pos'] = stats['final_with_pos']
+        stats['min_cantonese_words'] = min_cantonese
     else:
         logger.info("Skipping translation (do_translation=False). Columns will remain empty.")
         logger.info("Note: cantonese_translation and translated_pos columns are empty (already saved in initial structure)")
+        # Return empty stats if translation was skipped
+        stats = {
+            'initial_total': 0,
+            'after_cantonese_filter': 0,
+            'after_pattern_filter': 0,
+            'translation_valid': 0,
+            'translation_invalid': 0,
+            'final_with_translation': 0,
+            'final_with_pos': 0,
+            'min_cantonese_words': config.get_analysis_min_cantonese_words() if hasattr(config, 'get_analysis_min_cantonese_words') else 0
+        }
     
-    return df
+    return df, stats
 
 
-def save_exploratory_outputs(
-    output_dir: Path,
-    monolingual: dict,
-    pos_results: dict,
-    matching_results: dict,
-    distributions: dict,
-    report: str,
-    figures_dir: Optional[Path] = None
+def generate_preprocessing_report(
+    preprocessing_stats: Dict,
+    monolingual_stats: Dict,
+    translation_stats: Dict,
+    output_path: str
 ) -> None:
     """
-    Save all exploratory analysis output files.
+    Generate a CSV report summarizing preprocessing and translation statistics.
     
     Args:
-        output_dir: Directory for CSV and report files
-        monolingual: Monolingual sentence data
-        pos_results: POS tagging results
-        matching_results: Matching algorithm results
-        distributions: Distribution analysis results
-        report: Feasibility report text
-        figures_dir: Directory for figures (if None, uses output_dir/figures)
+        preprocessing_stats: Statistics from export_all_sentences_to_csv
+        monolingual_stats: Statistics from export_cantonese_monolingual
+        translation_stats: Statistics from export_translated_sentences
+        output_path: Path to save the CSV report
     """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    report_data = []
     
-    if figures_dir is None:
-        figures_dir = output_dir / "figures"
-    figures_dir = Path(figures_dir)
-    figures_dir.mkdir(parents=True, exist_ok=True)
+    # Section 1: Preprocessing Statistics
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Total sentences processed',
+        'value': preprocessing_stats.get('total_processed', 0),
+        'details': ''
+    })
     
-    logger.info(f"Saving outputs to {output_dir}...")
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'After min_words filter',
+        'value': preprocessing_stats.get('after_min_words_filter', 0),
+        'details': f"Filtered out: {preprocessing_stats.get('filtered_out', 0)}"
+    })
     
-    # Save monolingual sentences
-    if 'cantonese' in monolingual:
-        monolingual_path = output_dir / "monolingual_sentences.csv"
-        # Combine all monolingual sentences
-        all_mono = pd.concat([
-            monolingual['cantonese'],
-            monolingual['english']
-        ], ignore_index=True)
-        all_mono = sort_dataframe(all_mono)
-        all_mono.to_csv(monolingual_path, index=False, encoding='utf-8-sig')
-        logger.info(f"Saved monolingual sentences to {monolingual_path}")
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Code-switched sentences',
+        'value': preprocessing_stats.get('code_switched', 0),
+        'details': ''
+    })
     
-    # Save POS tagging sample
-    if 'sample_results' in pos_results:
-        pos_path = output_dir / "pos_tagged_sample.csv"
-        pos_results['sample_results'].to_csv(pos_path, index=False, encoding='utf-8-sig')
-        logger.info(f"Saved POS tagging sample to {pos_path}")
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Monolingual Cantonese',
+        'value': preprocessing_stats.get('monolingual_cantonese', 0),
+        'details': ''
+    })
     
-    # Save matching results sample
-    if 'results' in matching_results:
-        match_path = output_dir / "matching_results_sample.csv"
-        # Flatten the results for CSV export
-        export_results = []
-        for _, row in matching_results['results'].iterrows():
-            export_row = {
-                'sentence': row['sentence'],
-                'pattern': row['pattern'],
-                'num_matches': row['num_matches'],
-                'has_match': row['has_match'],
-                'best_similarity': row['best_similarity'],
-                'has_c_to_e': row['has_c_to_e'],
-                'has_e_to_c': row['has_e_to_c']
-            }
-            # Add details of top matches if available
-            if row['matches_detail']:
-                for i, match in enumerate(row['matches_detail'][:3]):
-                    export_row[f'match_{i+1}_similarity'] = match.get('similarity', 0)
-                    export_row[f'match_{i+1}_language'] = match.get('language', '')
-            export_results.append(export_row)
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Monolingual English',
+        'value': preprocessing_stats.get('monolingual_english', 0),
+        'details': ''
+    })
+    
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Filler-only sentences',
+        'value': preprocessing_stats.get('filler_only', 0),
+        'details': ''
+    })
+    
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Cantonese matrix language',
+        'value': preprocessing_stats.get('cantonese_matrix', 0),
+        'details': ''
+    })
+    
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'English matrix language',
+        'value': preprocessing_stats.get('english_matrix', 0),
+        'details': ''
+    })
+    
+    report_data.append({
+        'section': 'Preprocessing',
+        'metric': 'Equal matrix language',
+        'value': preprocessing_stats.get('equal_matrix', 0),
+        'details': ''
+    })
+    
+    # Section 2: Monolingual Export Statistics
+    report_data.append({
+        'section': 'Monolingual Export',
+        'metric': 'Total Cantonese monolingual (before filter)',
+        'value': monolingual_stats.get('total_cantonese_monolingual_before_filter', 0),
+        'details': ''
+    })
+    
+    report_data.append({
+        'section': 'Monolingual Export',
+        'metric': 'After min_words filter',
+        'value': monolingual_stats.get('after_min_words_filter', 0),
+        'details': f"Filtered out: {monolingual_stats.get('filtered_out', 0)}"
+    })
+    
+    # Section 3: Translation Statistics
+    if translation_stats.get('initial_total', 0) > 0:
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Initial code-switched sentences',
+            'value': translation_stats.get('initial_total', 0),
+            'details': ''
+        })
         
-        match_df = pd.DataFrame(export_results)
-        match_df.to_csv(match_path, index=False, encoding='utf-8-sig')
-        logger.info(f"Saved matching results to {match_path}")
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'After Cantonese matrix filter',
+            'value': translation_stats.get('after_cantonese_filter', 0),
+            'details': f"Removed: {translation_stats.get('initial_total', 0) - translation_stats.get('after_cantonese_filter', 0)}"
+        })
+        
+        min_cantonese = translation_stats.get('min_cantonese_words', 0)
+        report_data.append({
+            'section': 'Translation',
+            'metric': f'After pattern filter (≥{min_cantonese} C words → E)',
+            'value': translation_stats.get('after_pattern_filter', 0),
+            'details': f"Removed: {translation_stats.get('after_cantonese_filter', 0) - translation_stats.get('after_pattern_filter', 0)}"
+        })
+        
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Translation attempts',
+            'value': translation_stats.get('after_pattern_filter', 0),
+            'details': ''
+        })
+        
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Valid translations',
+            'value': translation_stats.get('translation_valid', 0),
+            'details': ''
+        })
+        
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Invalid translations',
+            'value': translation_stats.get('translation_invalid', 0),
+            'details': ''
+        })
+        
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Final with translation',
+            'value': translation_stats.get('final_with_translation', 0),
+            'details': ''
+        })
+        
+        # Calculate rates
+        initial = translation_stats.get('initial_total', 0)
+        after_cant = translation_stats.get('after_cantonese_filter', 0)
+        after_pattern = translation_stats.get('after_pattern_filter', 0)
+        final = translation_stats.get('final_with_translation', 0)
+        
+        if initial > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Cantonese matrix retention rate (%)',
+                'value': round(after_cant / initial * 100, 2) if initial > 0 else 0,
+                'details': ''
+            })
+        
+        if after_cant > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Pattern filter retention rate (%)',
+                'value': round(after_pattern / after_cant * 100, 2) if after_cant > 0 else 0,
+                'details': ''
+            })
+        
+        if after_pattern > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Translation success rate (%)',
+                'value': round(final / after_pattern * 100, 2) if after_pattern > 0 else 0,
+                'details': ''
+            })
+        
+        if initial > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Overall retention rate (%)',
+                'value': round(final / initial * 100, 2) if initial > 0 else 0,
+                'details': ''
+            })
+        
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Sentences with POS tags',
+            'value': translation_stats.get('final_with_pos', 0),
+            'details': ''
+        })
+        
+        pos_coverage = translation_stats.get('final_with_pos', 0)
+        final_trans = translation_stats.get('final_with_translation', 0)
+        if final_trans > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'POS tagging coverage (%)',
+                'value': round(pos_coverage / final_trans * 100, 2) if final_trans > 0 else 0,
+                'details': ''
+            })
+    else:
+        report_data.append({
+            'section': 'Translation',
+            'metric': 'Translation skipped',
+            'value': 0,
+            'details': 'Translation was not performed (--no-translation flag)'
+        })
     
-    # Save feasibility report
-    report_path = output_dir / "feasibility_report.txt"
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(report)
-    logger.info(f"Saved feasibility report to {report_path}")
+    # Create DataFrame and save
+    df_report = pd.DataFrame(report_data)
     
-    logger.info("All outputs saved successfully!")
+    # Create output directory if it doesn't exist
+    csv_dir = os.path.dirname(output_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+    
+    df_report.to_csv(output_path, index=False, encoding='utf-8-sig')
+    logger.info(f"Generated preprocessing report: '{output_path}'")

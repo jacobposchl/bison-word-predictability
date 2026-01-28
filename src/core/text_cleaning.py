@@ -21,7 +21,7 @@ UNICODE_DASHES = {
 }
 
 # Regex pattern for matching dashes
-DASH_CLASS = '[' + ''.join(UNICODE_DASHES) + r'\-]'  # ASCII hyphen + unicode dashes
+DASH_CLASS = '[' + ''.join(UNICODE_DASHES) + r'\-]'
 DASH_RE = re.compile(DASH_CLASS)
 
 # Common filler words in English
@@ -108,9 +108,6 @@ def is_chinese_punctuation_only(text: str) -> bool:
     
     Chinese punctuation includes: 。，、？！：；「」『』（）【】《》〈〉…—·
     
-    This is important because Chinese punctuation gets time-stamped in the
-    Cantonese tier but should not count as Cantonese words.
-    
     Args:
         text: Text to check
         
@@ -139,16 +136,13 @@ def has_content(text: str) -> bool:
     
     Returns True only if there's actual linguistic content.
     
-    This fixes two major issues:
-    - XX being counted as English words (it's an annotation marker)
-    - Chinese punctuation being counted as Cantonese words
-    
     Args:
         text: Text to check
         
     Returns:
         True if text has real linguistic content
     """
+
     # First check if it's an annotation marker
     if is_annotation_marker(text):
         return False
@@ -171,15 +165,13 @@ def clean_word(word: str) -> Optional[str]:
     """
     Clean individual words by removing attached punctuation and annotation markup.
     
-    This handles both edge punctuation (e.g., "word.") and internal annotation
-    markers (e.g., "lo::cal" which represents elongated pronunciation).
-    
     Args:
         word: Word string to clean
         
     Returns:
         Cleaned word without punctuation, or None if the word should be filtered out
     """
+
     # First check if this is an annotation marker like X, XX, XXX
     if is_annotation_marker(word):
         return None
@@ -202,9 +194,6 @@ def clean_word(word: str) -> Optional[str]:
     cleaned = cleaned.replace(':', '')
     
     # Remove ellipses (three dots or Unicode ellipsis) from anywhere
-    # This handles cases like "Um...uh" where ellipsis is in the middle
-    # Replace with space so it can be split later, but for now just remove it
-    # to get the word part for filler detection
     cleaned = cleaned.replace('...', '')
     cleaned = cleaned.replace('…', '')  # Unicode ellipsis
     
@@ -218,10 +207,7 @@ def clean_word(word: str) -> Optional[str]:
 
 def is_filler(word: str, lang: str) -> bool:
     """
-    Determine if a word is a filler/hesitation marker rather than meaningful content.
-    
-    The logic here is conservative: we only mark something as a filler if we're
-    confident it's a hesitation marker. When in doubt, we treat it as real content.
+    Determine if a word is a filler rather than meaningful content.
     
     Args:
         word: The cleaned word string
@@ -230,18 +216,18 @@ def is_filler(word: str, lang: str) -> bool:
     Returns:
         True if the word is a filler, False otherwise
     """
+
     if not word:
         return False
     
-    # Normalize to lowercase for comparison (English is case-insensitive for this)
+    # Normalize to lowercase for comparison
     word_lower = word.lower()
     
     if lang == 'E':
-        # For English, check against our filler list
+        # check against filler list
         return word_lower in ENGLISH_FILLERS
     elif lang == 'C':
-        # For Cantonese, check against Cantonese filler list
-        # Note: some Cantonese particles can be fillers
+        # check against filler list
         return word in CANTONESE_FILLERS
     
     return False
@@ -259,6 +245,7 @@ def remove_fillers_from_text(text: str, lang: str = None) -> str:
     Returns:
         Text with filler words removed
     """
+    
     if not text:
         return text
     

@@ -9,8 +9,8 @@ from typing import List, Dict, Tuple, Optional
 import os
 import logging
 import pycantonese
+from tqdm import tqdm
 from ..data.eaf_processor import load_eaf_file, get_main_tier, parse_participant_info, get_all_eaf_files
-from ..core.tokenization import per_word_times
 from ..core.text_cleaning import is_filler, clean_word, has_content, split_on_internal_dashes
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def _is_cjk_character(char: str) -> bool:
     """
-    Check if a character is a CJK (Chinese/Japanese/Korean) character.
+    Check if a character is a CJK character.
     
     Args:
         char: Single character
@@ -63,7 +63,7 @@ def segment_by_script(text: str) -> List[Tuple[str, str]]:
         
     Returns:
         List of (segment_text, language_code) tuples
-        language_code is 'C' for Cantonese (CJK) or 'E' for English (ASCII)
+        language_code is 'C' for Cantonese or 'E' for English
     """
     if not text:
         return []
@@ -107,20 +107,18 @@ def segment_by_script(text: str) -> List[Tuple[str, str]]:
     return segments
 
 
-def tokenize_main_tier_sentence(start: int, end: int, text: str) -> List[Tuple[float, str, str]]:
+def tokenize_main_tier_sentence(text: str) -> List[Tuple[str, str]]:
     """
-    Tokenize a main tier sentence and assign language labels based on script.
+    Tokenize a sentence and assign language labels based on script.
     
-    This handles mixed text with inconsistent spacing by using script-based segmentation.
     
     Args:
-        start: Start time (ms)
-        end: End time (ms)
-        text: Sentence text from main tier (may have mixed scripts, inconsistent spacing)
+        text: Sentence text from main tier
         
     Returns:
-        List of (timestamp, word, language) tuples
+        List of (word, language) tuples
     """
+
     # First, segment by script boundaries
     script_segments = segment_by_script(text)
     
@@ -141,7 +139,7 @@ def tokenize_main_tier_sentence(start: int, end: int, text: str) -> List[Tuple[f
             # English: split by whitespace
             raw_tokens = segment_text.split()
         
-        # Clean and process tokens (similar to tokenize_annotation)
+        # Clean and process tokens
         for w in raw_tokens:
             if not w.strip():
                 continue
@@ -179,14 +177,12 @@ def tokenize_main_tier_sentence(start: int, end: int, text: str) -> List[Tuple[f
     if not all_tokens:
         return []
     
-    # Assign timestamps
-    times = per_word_times(start, end, len(all_tokens))
-    return [(t, tok, lang) for t, (tok, lang) in zip(times, all_tokens)]
+    return all_tokens
 
 
 
 
-def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
+def identify_matrix_language(items: List[Tuple[str, str]]) -> str:
     """
     Identify the matrix language based on the MLF (Matrix Language Framework) model.
     
@@ -195,33 +191,27 @@ def identify_matrix_language(items: List[Tuple[float, str, str]]) -> str:
     2. If equal, return "Equal"
     
     Args:
-        items: List of (timestamp, word, language_code) tuples
+        items: List of (word, language_code) tuples
         
     Returns:
         'Cantonese', 'English', or 'Equal'
     """
+
     # Count words in each language
-    cant_count = sum(1 for _, _, lang in items if lang == 'C')
-    eng_count = sum(1 for _, _, lang in items if lang == 'E')
+    cant_count = sum(1 for _, lang in items if lang == 'C')
+    eng_count = sum(1 for _, lang in items if lang == 'E')
     
-    # Rule 1: Language with more words
     if cant_count > eng_count:
         return 'Cantonese'
     elif eng_count > cant_count:
         return 'English'
     
-    # Rule 2: If equal, return "Equal"
     return "Equal"
 
 
-def process_sentence_from_main_tier(
-    main_annotation: Tuple[int, int, str]
-) -> Optional[Dict]:
+def process_sentence_from_main_tier(main_annotation: Tuple[int, int, str]) -> Optional[Dict]:
     """
     Process a main tier sentence annotation and create sentence data.
-    
-    This function processes sentences from main tier annotations using script-based
-    segmentation to identify Cantonese and English words without relying on subtiers.
     
     Args:
         main_annotation: (start_time, end_time, text) tuple from main tier
@@ -229,69 +219,58 @@ def process_sentence_from_main_tier(
     Returns:
         Dictionary with sentence data, or None if no words found
     """
+
     start, end, original_text = main_annotation
     
     # Tokenize the sentence using script-based segmentation
-    sentence_words = tokenize_main_tier_sentence(start, end, original_text)
+    sentence_words = tokenize_main_tier_sentence(original_text)
     
     if not sentence_words:
         return None
     
-    # Reconstructed text from the same tokens used for the pattern
-    reconstructed_text = ' '.join(tok for _, tok, _ in sentence_words)
+    # Reconstructed text from the same tokens
+    reconstructed_text = ' '.join(tok for tok, _ in sentence_words)
     
-    # Build pattern from runs of language labels
-    pattern_parts = []
-    current_lang = sentence_words[0][2]
-    current_count = 0
-    for _, _, lang in sentence_words:
-        if lang == current_lang:
-            current_count += 1
-        else:
-            pattern_parts.append(f"{current_lang}{current_count}")
-            current_lang = lang
-            current_count = 1
-    pattern_parts.append(f"{current_lang}{current_count}")
-    pattern = '-'.join(pattern_parts)
-    
-    # Matrix language
-    matrix_language = identify_matrix_language(sentence_words)
-    
-    # Counts
-    cant_count = sum(1 for _, _, lang in sentence_words if lang == 'C')
-    eng_count = sum(1 for _, _, lang in sentence_words if lang == 'E')
+    # Counts (before filler removal)
+    cant_count = sum(1 for _, lang in sentence_words if lang == 'C')
+    eng_count = sum(1 for _, lang in sentence_words if lang == 'E')
     
     return {
         'start_time': start,
         'end_time': end,
-        'text': original_text,  # original ACH text for reference
+        'text': original_text,
         'reconstructed_text': reconstructed_text,
-        'pattern': pattern,
-        'matrix_language': matrix_language,
         'items': sentence_words,
         'total_words': len(sentence_words),
         'cant_words': cant_count,
         'eng_words': eng_count
+        # Pattern and matrix_language will be set in build_patterns_with_fillers after filler removal
     }
 
 
 def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
     """
-    Build code-switching patterns both with and without fillers.
+    Build code-switching pattern after removing fillers.
+    
+    This function:
+    1. Identifies and removes fillers from the sentence
+    2. Creates the pattern from content words only (excluding fillers)
+    3. Determines matrix language from content words only
     
     Args:
         sentence_data: Dictionary containing sentence data with 'items' key
         
     Returns:
-        Updated sentence_data dictionary with pattern fields added
+        Updated sentence_data dictionary with pattern and matrix_language fields
     """
+    
     items = sentence_data['items']
     
-    # First, identify which items are fillers and which are content
+    # Identify which items are fillers and which are content
     filler_positions = []
     content_items = []
     
-    for idx, (timestamp, word, lang) in enumerate(items):
+    for idx, (word, lang) in enumerate(items):
         # Check if word is a filler in EITHER language
         # This handles cases where English fillers appear in Cantonese segments
         # or vice versa (e.g., "eh" in a Cantonese annotation)
@@ -307,34 +286,15 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
             })
         else:
             # This is real linguistic content, keep it
-            content_items.append((timestamp, word, lang))
+            content_items.append((word, lang))
     
-    # Build the ORIGINAL pattern (includes fillers as if they were real words)
-    seq_with_fillers = []
-    if items:
-        current_lang = items[0][2]
-        count = 0
-        
-        for timestamp, word, lang in items:
-            if lang == current_lang:
-                count += 1
-            else:
-                seq_with_fillers.append(f"{current_lang}{count}")
-                current_lang = lang
-                count = 1
-        seq_with_fillers.append(f"{current_lang}{count}")
-        
-        sentence_data['pattern_with_fillers'] = '-'.join(seq_with_fillers)
-    else:
-        sentence_data['pattern_with_fillers'] = ''
-    
-    # Build the CONTENT-ONLY pattern (excludes fillers)
-    if content_items:  # Make sure we have content after removing fillers
+    # Build pattern from content words only (excluding fillers)
+    if content_items:
         seq_content = []
-        current_lang = content_items[0][2]
+        current_lang = content_items[0][1]
         count = 0
         
-        for timestamp, word, lang in content_items:
+        for _, lang in content_items:
             if lang == current_lang:
                 count += 1
             else:
@@ -343,16 +303,16 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
                 count = 1
         seq_content.append(f"{current_lang}{count}")
         
-        sentence_data['pattern_content_only'] = '-'.join(seq_content)
+        sentence_data['pattern'] = '-'.join(seq_content)
         
         # Determine matrix language based on CONTENT words only (excluding fillers)
         sentence_data['matrix_language'] = identify_matrix_language(content_items)
         
         # Build reconstructed text WITHOUT fillers
-        sentence_data['reconstructed_text_without_fillers'] = ' '.join(word for _, word, _ in content_items)
+        sentence_data['reconstructed_text_without_fillers'] = ' '.join(word for word, _ in content_items)
     else:
         # Edge case: the entire sentence was just fillers with no real content
-        sentence_data['pattern_content_only'] = 'FILLER_ONLY'
+        sentence_data['pattern'] = 'FILLER_ONLY'
         sentence_data['matrix_language'] = 'UNKNOWN'
         sentence_data['reconstructed_text_without_fillers'] = ''
     
@@ -361,23 +321,12 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
     sentence_data['filler_info'] = filler_positions
     sentence_data['has_fillers'] = len(filler_positions) > 0
     
-    # For main analysis, use the content-only pattern
-    sentence_data['pattern'] = sentence_data['pattern_content_only']
-    
     return sentence_data
 
 
-def process_all_files(
-    data_path: str
-) -> List[Dict]:
+def process_all_files( data_path: str ) -> List[Dict]:
     """
-    Process all EAF files in the data directory using main tier sentence boundaries.
-    
-    This function uses main tier annotations directly as sentence boundaries,
-    then extracts the relevant Cantonese and English subtier annotations for each sentence.
-    
-    Note: min_sentence_words filtering is applied later in export functions,
-    after filler removal, to ensure accurate word counts.
+    Process all EAF files in the data directory.
     
     Args:
         data_path: Path to directory containing EAF files
@@ -385,13 +334,13 @@ def process_all_files(
     Returns:
         List of sentence data dictionaries
     """
+
     eaf_files = get_all_eaf_files(data_path)
     all_sentence_patterns = []
     
     logger.info(f"Found {len(eaf_files)} EAF files to process")
-    logger.info("Using main tier annotations for sentence boundaries")
     
-    for file_idx, eaf_file in enumerate(eaf_files, 1):
+    for eaf_file in tqdm(eaf_files, desc="Processing EAF files"):
         file_path = os.path.join(data_path, eaf_file)
         
         try:
@@ -417,12 +366,11 @@ def process_all_files(
                 continue
             
             # Process each main tier annotation as a sentence
-            file_sentence_count = 0
             for main_annotation in main_annotations:
                 sentence_data = process_sentence_from_main_tier(main_annotation)
                 
                 # Only keep sentences with at least some words (basic check)
-                # Full min_sentence_words filtering happens AFTER filler removal in export functions
+                # Full min_sentence_words filtering happens after filler removal in export functions
                 if sentence_data and len(sentence_data['items']) > 0:
                     # Add participant info to the sentence data
                     sentence_data['participant_id'] = participant_id
@@ -434,12 +382,6 @@ def process_all_files(
                     sentence_data = build_patterns_with_fillers(sentence_data)
                     
                     all_sentence_patterns.append(sentence_data)
-                    file_sentence_count += 1
-            
-            logger.info(
-                f"Processed {file_idx}/{len(eaf_files)}: {eaf_file} - "
-                f"{file_sentence_count} sentences"
-            )
             
         except Exception as e:
             logger.error(f"Error processing {eaf_file}: {e}")

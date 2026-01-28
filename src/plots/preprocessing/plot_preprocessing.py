@@ -1,8 +1,7 @@
 """
 Visualization functions for code-switching preprocessing data.
 
-This module provides functions for creating plots and printing analysis summaries
-for code-switching data (WITHOUT fillers only).
+This module provides functions for creating plots and printing analysis summaries for code-switching data
 """
 
 import matplotlib.pyplot as plt
@@ -16,80 +15,6 @@ import os
 import re
 
 logger = logging.getLogger(__name__)
-
-
-def print_analysis_summary_simple(without_fillers: List[Dict]) -> None:
-    """
-    Print detailed text-based analysis summary for WITHOUT fillers data only.
-    
-    Args:
-        without_fillers: List of sentences with fillers excluded
-    """
-    groups = ['Homeland', 'Heritage', 'Immersed']
-    
-    # Basic dataset statistics
-    print(f"\nDataset size:")
-    print(f"  WITHOUT fillers: {len(without_fillers)} code-switching sentences")
-    
-    # Group distributions
-    print(f"\n" + "-"*80)
-    print("Sentences by Speaker Group:")
-    print("-"*80)
-    
-    group_counts = Counter([s['group'] for s in without_fillers])
-    for group, count in sorted(group_counts.items()):
-        print(f"  {group}: {count} ({count/len(without_fillers)*100:.1f}%)")
-    
-    # Matrix language distributions
-    print(f"\n" + "-"*80)
-    print("Matrix Language Distribution:")
-    print("-"*80)
-    
-    matrix_counts = Counter([s['matrix_language'] for s in without_fillers])
-    print(f"  Cantonese: {matrix_counts['Cantonese']} ({matrix_counts['Cantonese']/len(without_fillers)*100:.1f}%)")
-    print(f"  English: {matrix_counts['English']} ({matrix_counts['English']/len(without_fillers)*100:.1f}%)")
-    if 'Equal' in matrix_counts:
-        print(f"  Equal: {matrix_counts['Equal']} ({matrix_counts['Equal']/len(without_fillers)*100:.1f}%)")
-    
-    # Detailed breakdown by group AND matrix language
-    print(f"\n" + "-"*80)
-    print("Matrix Language by Participant Group:")
-    print("-"*80)
-    
-    for group in sorted(groups):
-        group_sentences = [s for s in without_fillers if s['group'] == group]
-        if group_sentences:
-            cant_matrix = sum(1 for s in group_sentences if s['matrix_language'] == 'Cantonese')
-            eng_matrix = sum(1 for s in group_sentences if s['matrix_language'] == 'English')
-            equal_matrix = sum(1 for s in group_sentences if s['matrix_language'] == 'Equal')
-            print(
-                f"  {group:18} (n={len(group_sentences):4}): "
-                f"Cantonese {cant_matrix:4} ({cant_matrix/len(group_sentences)*100:5.1f}%)  |  "
-                f"English {eng_matrix:4} ({eng_matrix/len(group_sentences)*100:5.1f}%)  |  "
-                f"Equal {equal_matrix:4} ({equal_matrix/len(group_sentences)*100:5.1f}%)"
-            )
-    
-    # Print detailed comparison table
-    print("\n" + "="*80)
-    print("MATRIX LANGUAGE DISTRIBUTION TABLE")
-    print("="*80)
-    print(f"{'Group':<12} {'Total':<8} {'Cantonese':<20} {'English':<20} {'Equal':<15}")
-    print("-"*80)
-    
-    for group in groups:
-        group_sentences = [s for s in without_fillers if s['group'] == group]
-        if group_sentences:
-            total = len(group_sentences)
-            cant_count = sum(1 for s in group_sentences if s['matrix_language'] == 'Cantonese')
-            eng_count = sum(1 for s in group_sentences if s['matrix_language'] == 'English')
-            equal_count = sum(1 for s in group_sentences if s['matrix_language'] == 'Equal')
-            
-            print(
-                f"{group:<12} {total:<8} "
-                f"{cant_count:4} ({cant_count/total*100:5.1f}%){'':<8} "
-                f"{eng_count:4} ({eng_count/total*100:5.1f}%){'':<8} "
-                f"{equal_count:4} ({equal_count/total*100:5.1f}%)"
-            )
 
 
 def _parse_pattern_segments(pattern: str) -> List[tuple]:

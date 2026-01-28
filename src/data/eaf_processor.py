@@ -1,8 +1,7 @@
 """
 EAF file processing utilities.
 
-This module handles loading and processing ELAN Annotation Format (EAF) files,
-including tier extraction and participant information parsing.
+This module handles loading and processing ELAN Annotation Format (EAF) files
 """
 
 import os
@@ -63,10 +62,8 @@ def load_eaf_file(file_path: str) -> pympi.Eaf:
     Returns:
         EAF object from pympi
         
-    Raises:
-        FileNotFoundError: If the file doesn't exist
-        ValueError: If the file cannot be loaded
     """
+
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"EAF file not found: {file_path}")
     
@@ -75,39 +72,6 @@ def load_eaf_file(file_path: str) -> pympi.Eaf:
         return eaf
     except Exception as e:
         raise ValueError(f"Error loading EAF file {file_path}: {e}")
-
-
-def extract_tiers(eaf: pympi.Eaf, main_tier: str) -> Tuple[List[Tuple[int, int, str]], List[Tuple[int, int, str]]]:
-    """
-    Extract and clean Cantonese and English tier annotations.
-    
-    Args:
-        eaf: EAF object
-        main_tier: Name of the main participant tier
-        
-    Returns:
-        Tuple of (cantonese_annotations, english_annotations)
-        Each is a list of (start_time, end_time, text) tuples
-    """
-    # Get annotations from the language-specific tiers
-    cant_tier_name = f"{main_tier}-Cantonese-Spaced" #using the spaced tier to avoid issues with punctuation and annotation markers
-    eng_tier_name = f"{main_tier}-English"
-    
-    try:
-        cant_c = eaf.get_annotation_data_for_tier(cant_tier_name)
-        eng_c = eaf.get_annotation_data_for_tier(eng_tier_name)
-    except KeyError as e:
-        raise ValueError(f"Required tier not found: {e}")
-    
-    # Remove duplicates
-    cant_c = list(set(cant_c))
-    eng_c = list(set(eng_c))
-    
-    # Filter out punctuation-only and annotation marker annotations
-    cant_c = [item for item in cant_c if has_content(item[2])]
-    eng_c = [item for item in eng_c if has_content(item[2])]
-    
-    return cant_c, eng_c
 
 
 def get_main_tier(eaf: pympi.Eaf) -> Optional[str]:
@@ -122,6 +86,7 @@ def get_main_tier(eaf: pympi.Eaf) -> Optional[str]:
     Returns:
         Main tier name, or None if not found
     """
+
     tier_names = eaf.get_tier_names()
     participant_tiers = [
         t for t in tier_names
@@ -148,6 +113,7 @@ def get_all_eaf_files(data_path: str) -> List[str]:
     Raises:
         FileNotFoundError: If the data path doesn't exist
     """
+    
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Data path does not exist: {data_path}")
     

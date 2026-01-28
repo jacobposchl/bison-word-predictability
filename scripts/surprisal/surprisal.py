@@ -192,9 +192,7 @@ def main():
     args = parse_arguments()
     
     # Load configuration
-    config_path = "config/config.yaml"
-    print(f"Loading configuration from {config_path}")
-    config = Config(config_path)
+    config = Config()
     
     # Setup base output directories
     base_results_dir, base_figures_dir = setup_output_directories(config, args.model)
