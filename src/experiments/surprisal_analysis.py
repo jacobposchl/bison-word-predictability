@@ -12,8 +12,11 @@ from typing import Dict, List, Tuple, Union, Optional
 from scipy import stats
 from tqdm import tqdm
 import pycantonese
+import logging
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
+
+logger = logging.getLogger(__name__)
 
 # Cache for word frequency lookup
 _word_frequency_cache = None
