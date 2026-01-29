@@ -65,6 +65,8 @@ experiment:
   # Device to use for surprisal calculation (GPU recommended)
   device: "cuda"
   
+  random_seed: 42
+  
 # Output settings
 output:
   # Base directory for all results

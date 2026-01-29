@@ -43,6 +43,7 @@ from src.plots.surprisal.plot_surprisal import (
     plot_surprisal_differences_by_context,
     plot_surprisal_distributions_matrix
 )
+from src.plots.regression.plot_regression import plot_all_regression_results
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -272,6 +273,8 @@ def generate_surprisal_figures(config: Config, model_type: str):
 
 def generate_regression_figures(config: Config, model_type: str):
     """Generate figures for regression stage."""
+    import pickle
+    
     logger.info("="*80)
     logger.info(f"GENERATING REGRESSION FIGURES (model: {model_type})")
     logger.info("="*80)
@@ -290,20 +293,33 @@ def generate_regression_figures(config: Config, model_type: str):
         logger.error(f"No window directories found in {regression_base}")
         return False
     
-    logger.warning("Regression figures require the full results dictionary with model predictions.")
-    logger.warning("These are generated during regression analysis and not saved to CSV.")
-    logger.warning("To generate regression figures, please re-run:")
-    logger.warning(f"  python scripts/regression/regression.py --model {model_type}")
-    logger.warning("")
-    logger.warning("Alternatively, you can view the saved CSV files:")
+    figures_generated = 0
     for window_dir in window_dirs:
         context_dirs = sorted([d for d in window_dir.iterdir() if d.is_dir() and d.name.startswith('context_')])
         for context_dir in context_dirs:
-            comparison_csv = context_dir / "model_comparison.csv"
-            if comparison_csv.exists():
-                logger.info(f"  - {comparison_csv}")
+            results_pkl = context_dir / "model_results.pkl"
+            
+            if not results_pkl.exists():
+                logger.warning(f"Model results not found: {results_pkl}")
+                continue
+            
+            logger.info(f"Generating plots for {context_dir.name} in {window_dir.name}...")
+            
+            # Load saved results
+            with open(results_pkl, 'rb') as f:
+                plot_data = pickle.load(f)
+            
+            results = plot_data['results']
+            y_test = plot_data['y_test']
+            
+            # Generate plots
+            plot_all_regression_results(results, y_test, context_dir)
+            figures_generated += 1
     
-    return False
+    logger.info(f"\nGenerated figures for {figures_generated} configurations")
+    logger.info(f"Figures saved to: {regression_base}/window_*/context_*/")
+    
+    return figures_generated > 0
 
 
 def main():

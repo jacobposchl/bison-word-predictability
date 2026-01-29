@@ -52,14 +52,12 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
-import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime
 import logging
 from typing import Dict, List, Tuple
 
 from src.core.config import Config
-from src.analysis.pos_tagging import pos_tag_cantonese
+from src.plots.regression.report_generator import create_results_row
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -78,28 +76,10 @@ def parse_arguments():
         help='Type of model used for surprisal calculation'
     )
     parser.add_argument(
-        "--results-dir",
-        type=str,
-        default=None,
-        help="Directory containing surprisal_results.csv (default: results/surprisal/{model})"
-    )
-    parser.add_argument(
         "--test-size",
         type=float,
         default=0.2,
         help="Proportion of data to use for testing (default: 0.2)"
-    )
-    parser.add_argument(
-        "--random-state",
-        type=int,
-        default=42,
-        help="Random state for train/test split (default: 42)"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default=None,
-        help="Directory to save regression results (default: results/regression_{model})"
     )
     
     return parser.parse_args()
@@ -120,25 +100,6 @@ def load_surprisal_results(results_path: Path) -> pd.DataFrame:
     return df
 
 
-def extract_pos_at_position(sentence: str, word_index: int) -> str:
-    """
-    Extract POS tag at a specific word position in a sentence.
-    
-    Args:
-        sentence: Cantonese sentence (space-separated or unsegmented)
-        word_index: 0-based index of the word position
-        
-    Returns:
-        POS tag string, or 'UNKNOWN' if not found
-    """
-    try:
-        tagged = pos_tag_cantonese(sentence)
-        if word_index < len(tagged):
-            return tagged[word_index][1]  # Return POS tag
-        return 'UNKNOWN'
-    except Exception as e:
-        logger.debug(f"Error extracting POS for sentence at index {word_index}: {e}")
-        return 'UNKNOWN'
 
 
 def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) -> pd.DataFrame:
@@ -167,20 +128,16 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         cs_switch_idx = int(row.get('switch_index', 0))
         cs_group = row.get('cs_group', 'Unknown')
         
-        # Calculate sentence length
         cs_words_list = cs_sentence.split() if pd.notna(cs_sentence) else []
         cs_sentence_length = len(cs_words_list)
         
         # Calculate normalized position
         cs_position_norm = cs_switch_idx / cs_sentence_length if cs_sentence_length > 0 else 0.0
         
-        # Extract POS tag
-        cs_pos = extract_pos_at_position(cs_sentence, cs_switch_idx)
+        cs_pos = row.get('cs_switch_pos', 'UNKNOWN')
         
-        # Get word frequency from surprisal results (already calculated)
         cs_word_frequency = row.get('cs_word_frequency', np.nan)
         
-        # Get surprisal and entropy columns (with context length suffix if specified)
         if context_length is not None:
             cs_surprisal_col = f'cs_surprisal_context_{context_length}'
             cs_entropy_col = f'cs_entropy_context_{context_length}'
@@ -209,20 +166,16 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         mono_switch_idx = int(row.get('matched_switch_index', 0))
         mono_group = row.get('matched_group', 'Unknown')
         
-        # Calculate sentence length
+
         mono_words_list = mono_sentence.split() if pd.notna(mono_sentence) else []
         mono_sentence_length = len(mono_words_list)
         
-        # Calculate normalized position
         mono_position_norm = mono_switch_idx / mono_sentence_length if mono_sentence_length > 0 else 0.0
         
-        # Extract POS tag
-        mono_pos = extract_pos_at_position(mono_sentence, mono_switch_idx)
+        mono_pos = row.get('mono_switch_pos', 'UNKNOWN')
         
-        # Get word frequency from surprisal results (already calculated)
         mono_word_frequency = row.get('mono_word_frequency', np.nan)
         
-        # Get surprisal and entropy columns (with context length suffix if specified)
         if context_length is not None:
             mono_surprisal_col = f'mono_surprisal_context_{context_length}'
             mono_entropy_col = f'mono_entropy_context_{context_length}'
@@ -248,19 +201,13 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
     result_df = pd.DataFrame(rows)
     
     # Remove rows with missing critical values
-    # Note: entropy is optional (may be NaN if not calculated)
     n_before = len(result_df)
     result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
     n_after = len(result_df)
     
     if n_before > n_after:
         logger.info(f"Removed {n_before - n_after} rows with missing values")
-    
-    # Check if entropy is available
-    entropy_available = result_df['entropy'].notna().any()
-    if not entropy_available:
-        logger.warning("Entropy values are not available in the data. Entropy-based models will be skipped.")
-    
+
     logger.info(f"Created {len(result_df)} observations ({len(result_df[result_df['is_code_switched']==1])} CS, {len(result_df[result_df['is_code_switched']==0])} mono)")
     
     return result_df
@@ -276,6 +223,7 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     Returns:
         Tuple of (feature_df, feature_names)
     """
+
     logger.info("Preparing features...")
     
     # Create copy
@@ -289,7 +237,6 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     group_dummies = pd.get_dummies(feature_df['group'], prefix='group')
     feature_df = pd.concat([feature_df, group_dummies], axis=1)
     
-    # Get feature names
     numeric_features = [
         'word_length',
         'sentence_length', 
@@ -302,7 +249,6 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     
     feature_names = numeric_features + pos_feature_names + group_feature_names
     
-    # Select only feature columns
     feature_df = feature_df[numeric_features + pos_feature_names + group_feature_names]
     
     logger.info(f"Prepared {len(feature_names)} features")
@@ -333,9 +279,10 @@ def fit_models(
     Returns:
         Dictionary with model results
     """
+
     logger.info("Fitting models...")
     
-    # Define feature sets
+
     control_features = [
         'word_length', 'sentence_length', 'position_normalized', 'word_frequency'
     ] + [f for f in feature_names if f.startswith('pos_')] + [f for f in feature_names if f.startswith('group_')]
@@ -354,27 +301,25 @@ def fit_models(
     results = {}
     
     for model_name, features in feature_sets.items():
-        # Check which features are available
         available_features = [f for f in features if f in X_train.columns]
         missing_features = [f for f in features if f not in X_train.columns]
         
         if missing_features:
-            logger.warning(f"Model '{model_name}': Missing features {missing_features}, using available features only")
+            raise ValueError(
+                f"Model '{model_name}': Missing required features {missing_features}. "
+                f"Available columns: {list(X_train.columns)}"
+            )
         
-        if not available_features:
-            logger.error(f"Model '{model_name}': No features available, skipping")
-            continue
-        
-        # Select features
+
         X_train_subset = X_train[available_features]
         X_test_subset = X_test[available_features]
         
-        # Scale features
+        # Scale
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train_subset)
         X_test_scaled = scaler.transform(X_test_subset)
         
-        # Fit model
+        # Fit
         model = LogisticRegression(
             random_state=random_state,
             max_iter=1000,
@@ -434,6 +379,7 @@ def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
     Returns:
         DataFrame with comparison metrics
     """
+
     logger.info("Comparing models...")
     
     comparison_data = []
@@ -457,114 +403,6 @@ def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
     
     return comparison_df
 
-
-def create_results_row(
-    results: Dict[str, Dict],
-    comparison_df: pd.DataFrame,
-    model_type: str,
-    window_size: int,
-    context_length: int,
-    n_train: int,
-    n_test: int
-) -> Dict:
-    """
-    Create a single row of results for the consolidated results CSV.
-    
-    Args:
-        results: Dictionary of model results
-        comparison_df: DataFrame with model comparison
-        model_type: Type of model (masked/autoregressive)
-        window_size: Window size used
-        context_length: Context length used
-        n_train: Number of training samples
-        n_test: Number of test samples
-        
-    Returns:
-        Dictionary with all relevant results for one configuration
-    """
-    row = {
-        'model_type': model_type,
-        'window_size': window_size,
-        'context_length': context_length,
-        'n_train': n_train,
-        'n_test': n_test,
-    }
-    
-    # Add metrics for each model
-    for model_name in ['control', 'surprisal', 'entropy', 'surprisal_entropy']:
-        if model_name in results:
-            result = results[model_name]
-            row[f'{model_name}_auc'] = result['auc']
-            row[f'{model_name}_accuracy'] = result['accuracy']
-            row[f'{model_name}_precision'] = result['precision']
-            row[f'{model_name}_recall'] = result['recall']
-            row[f'{model_name}_f1'] = result['f1']
-            row[f'{model_name}_n_features'] = len(result['features'])
-            row[f'{model_name}_intercept'] = result['intercept']
-        else:
-            # Model not available (e.g., entropy model when entropy not available)
-            row[f'{model_name}_auc'] = np.nan
-            row[f'{model_name}_accuracy'] = np.nan
-            row[f'{model_name}_precision'] = np.nan
-            row[f'{model_name}_recall'] = np.nan
-            row[f'{model_name}_f1'] = np.nan
-            row[f'{model_name}_n_features'] = np.nan
-            row[f'{model_name}_intercept'] = np.nan
-    
-    return row
-
-
-def plot_results(results: Dict[str, Dict], y_test: pd.Series, output_dir: Path):
-    """Create visualization plots."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # ROC curves
-    plt.figure(figsize=(10, 8))
-    for model_name, result in results.items():
-        fpr, tpr, _ = roc_curve(y_test, result['y_pred_proba'])
-        plt.plot(fpr, tpr, label=f"{model_name} (AUC={result['auc']:.3f})", linewidth=2)
-    
-    plt.plot([0, 1], [0, 1], 'k--', label='Random')
-    plt.xlabel('False Positive Rate', fontsize=12)
-    plt.ylabel('True Positive Rate', fontsize=12)
-    plt.title('ROC Curves: Code-Switch Detection Models', fontsize=14, fontweight='bold')
-    plt.legend(loc='lower right', fontsize=10)
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    
-    roc_path = output_dir / "roc_curves.png"
-    plt.savefig(roc_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    logger.info(f"Saved ROC curves to {roc_path}")
-    
-    # Model comparison bar chart
-    comparison_data = []
-    for model_name, result in results.items():
-        comparison_data.append({
-            'model': model_name,
-            'AUC': result['auc'],
-            'Accuracy': result['accuracy'],
-            'F1': result['f1']
-        })
-    
-    comp_df = pd.DataFrame(comparison_data)
-    comp_df = comp_df.set_index('model')
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    comp_df.plot(kind='bar', ax=ax, width=0.8)
-    ax.set_ylabel('Score', fontsize=12)
-    ax.set_title('Model Performance Comparison', fontsize=14, fontweight='bold')
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-    ax.legend(loc='upper left')
-    ax.grid(alpha=0.3, axis='y')
-    plt.tight_layout()
-    
-    comp_path = output_dir / "model_comparison.png"
-    plt.savefig(comp_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    logger.info(f"Saved model comparison plot to {comp_path}")
-
-
 def main():
     """Main execution."""
     args = parse_arguments()
@@ -587,18 +425,10 @@ def main():
     logger.info(f"Window sizes to process: {window_sizes}")
     logger.info(f"Context lengths to process: {context_lengths}")
     
-    # Determine base results directory
-    if args.results_dir:
-        results_base = Path(args.results_dir)
-    else:
-        results_base = Path(config.get_surprisal_results_dir()) / args.model
-    
-    # Determine base output directory
-    if args.output_dir:
-        output_base = Path(args.output_dir)
-    else:
-        results_base_dir = Path(config.get_results_dir())
-        output_base = results_base_dir / f"regression_{args.model}"
+    # Set up directories from config
+    results_base = Path(config.get_surprisal_results_dir()) / args.model
+    results_base_dir = Path(config.get_results_dir())
+    output_base = results_base_dir / f"regression_{args.model}"
     
     output_base.mkdir(parents=True, exist_ok=True)
     
@@ -661,11 +491,12 @@ def main():
             y = regression_df['is_code_switched']
             
             # Split data
+            random_seed = config.get('experiment.random_seed', 42)
             logger.info(f"Splitting data (test_size={args.test_size})...")
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, 
                 test_size=args.test_size,
-                random_state=args.random_state,
+                random_state=random_seed,
                 stratify=y
             )
             
@@ -675,7 +506,7 @@ def main():
             # Fit models
             results = fit_models(
                 X_train, X_test, y_train, y_test,
-                feature_names, random_state=args.random_state
+                feature_names, random_state=random_seed
             )
             
             # Compare models
@@ -684,7 +515,6 @@ def main():
             # Create results row for consolidated output
             results_row = create_results_row(
                 results=results,
-                comparison_df=comparison_df,
                 model_type=args.model,
                 window_size=window_size,
                 context_length=context_length,
@@ -692,6 +522,20 @@ def main():
                 n_test=len(X_test)
             )
             all_results.append(results_row)
+            
+            # Save results and predictions for later plotting
+            context_output_dir = output_base / f"window_{window_size}" / f"context_{context_length}"
+            context_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save model results (including predictions) as pickle for plotting
+            import pickle
+            results_pkl_path = context_output_dir / "model_results.pkl"
+            plot_data = {
+                'results': results,
+                'y_test': y_test.tolist() if hasattr(y_test, 'tolist') else list(y_test)
+            }
+            with open(results_pkl_path, 'wb') as f:
+                pickle.dump(plot_data, f)
             
             logger.info(f"Completed analysis for window {window_size}, context {context_length}")
     

@@ -349,6 +349,10 @@ def find_window_matches(
             # Ensure index is within bounds of monolingual sentence
             matched_switch_index = min(matched_switch_index, len(mono_pos_seq) - 1)
             
+            # Extract POS tags at switch positions
+            cs_switch_pos = pos_sequence[switch_index] if switch_index < len(pos_sequence) else 'UNKNOWN'
+            mono_switch_pos = mono_pos_seq[matched_switch_index] if matched_switch_index < len(mono_pos_seq) else 'UNKNOWN'
+            
             matches.append({
                 'match_sentence': mono_sent,
                 'similarity': best_similarity,
@@ -356,7 +360,9 @@ def find_window_matches(
                 'pos_window': ' '.join(pos_window),
                 'matched_pos': ' '.join(best_window),
                 'matched_window_start': best_start_idx,
-                'matched_switch_index': matched_switch_index
+                'matched_switch_index': matched_switch_index,
+                'cs_switch_pos': cs_switch_pos,
+                'mono_switch_pos': mono_switch_pos
             })
     
     return matches
@@ -435,6 +441,8 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
                 'matched_pos': match['matched_pos'],
                 'matched_window_start': match['matched_window_start'],
                 'matched_switch_index': match['matched_switch_index'],
+                'cs_switch_pos': match['cs_switch_pos'],
+                'mono_switch_pos': match['mono_switch_pos'],
                 'matched_group': match['match_sentence'].get('group', ''),
                 'matched_participant': match['match_sentence'].get('participant_id', ''),
                 'matched_start_time': match['match_sentence'].get('start_time', 0.0),
