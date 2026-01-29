@@ -54,7 +54,7 @@ def generate_window_matching_report(
         results = window_results[window_key]
         window_size = results['window_size']
         total_sentences = results['total_sentences']
-        matched_sentences = results['matched_sentences']
+        matched_sentences = results['sentences_with_matches']
         total_matches = results['total_matches']
         similarity_scores = results['similarity_scores']
         
@@ -79,7 +79,7 @@ def generate_window_matching_report(
         results = window_results[window_key]
         window_size = results['window_size']
         total_sentences = results['total_sentences']
-        matched_sentences = results['matched_sentences']
+        matched_sentences = results['sentences_with_matches']
         total_matches = results['total_matches']
         similarity_scores = results['similarity_scores']
         
@@ -122,7 +122,7 @@ def generate_window_matching_report(
         results = window_results[window_key]
         window_size = results['window_size']
         total_sentences = results['total_sentences']
-        matched_sentences = results['matched_sentences']
+        matched_sentences = results['sentences_with_matches']
         match_rate = (matched_sentences / total_sentences * 100) if total_sentences > 0 else 0
         
         if match_rate > best_match_rate:

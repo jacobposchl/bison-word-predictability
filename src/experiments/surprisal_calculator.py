@@ -47,6 +47,12 @@ class MaskedLMSurprisalCalculator:
         self.model = AutoModelForMaskedLM.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval() 
+        
+        # Get model's maximum sequence length
+        self.max_length = self.tokenizer.model_max_length
+        if self.max_length > 1000000:  # Some models return very large values
+            self.max_length = 512  # Use BERT's default
+        logger.info(f"Model max sequence length: {self.max_length}")
 
         logger.info("Model Loaded!")
 
@@ -109,22 +115,70 @@ class MaskedLMSurprisalCalculator:
         if word_index < 0 or word_index >= len(words):
             raise ValueError("Your word index is out of bounds")
         
-        # Build full input with context if provided
-        # Use consistent spacing: no spaces between Cantonese characters
+        
+        
+        # Build the required prefix: context + words up to and including target
         if context and context.strip():
-            # For masked LM, prepend context to sentence
-            # Remove delimiter used to separate context sentences
             context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
             context_words = context_clean.strip().split()
-            # Join context and words without spaces
-            full_sentence = "".join(context_words) + "".join(words)
-            # Adjust word index to account for context words at the beginning
-            adjusted_word_index = len(context_words) + word_index
-            full_words = context_words + words
         else:
-            full_sentence = "".join(words)
-            adjusted_word_index = word_index
-            full_words = words
+            context_words = []
+        
+        # Words that MUST be included: context + all words up to and including target
+        required_words = context_words + words[:word_index + 1]
+        required_text = "".join(required_words)
+        
+        # Encode required text to check token count
+        required_encoding = self.tokenizer(required_text, add_special_tokens=True)
+        required_token_count = len(required_encoding['input_ids'])
+        
+        # Calculate how many tokens we can use for post-switch words
+        available_for_postswitch = self.max_length - required_token_count
+        
+        if required_token_count > self.max_length:
+            logger.error(f"Required content (context + pre-switch + target) exceeds max_length!")
+            logger.error(f"  Required tokens: {required_token_count}, Max: {self.max_length}")
+            logger.error(f"  Context words: {len(context_words)}, Pre-switch words: {word_index}, Target: 1")
+            logger.error(f"  This will cause truncation of pre-switch context, which may affect results")
+
+            full_sentence = required_text
+            adjusted_word_index = len(context_words) + word_index
+            full_words = required_words
+        elif available_for_postswitch <= 0:
+            # No room for post-switch words
+            logger.debug(f"No room for post-switch words (required content uses {required_token_count}/{self.max_length} tokens)")
+            full_sentence = required_text
+            adjusted_word_index = len(context_words) + word_index
+            full_words = required_words
+        else:
+            # We have room for some/all post-switch words
+            postswitch_words = words[word_index + 1:]
+            
+            if not postswitch_words:
+                # No post-switch words anyway
+                full_sentence = required_text
+                adjusted_word_index = len(context_words) + word_index
+                full_words = required_words
+            else:
+                # Add as many post-switch words as fit
+                postswitch_to_use = []
+                current_tokens = 0
+                
+                for word in postswitch_words:
+                    word_tokens = len(self.tokenizer(word, add_special_tokens=False)['input_ids'])
+                    if current_tokens + word_tokens <= available_for_postswitch:
+                        postswitch_to_use.append(word)
+                        current_tokens += word_tokens
+                    else:
+                        break
+                
+                if len(postswitch_to_use) < len(postswitch_words):
+                    trimmed_count = len(postswitch_words) - len(postswitch_to_use)
+                    logger.debug(f"Trimmed {trimmed_count}/{len(postswitch_words)} post-switch words to fit within {self.max_length} token limit")
+                
+                full_words = required_words + postswitch_to_use
+                full_sentence = "".join(full_words)
+                adjusted_word_index = len(context_words) + word_index
         
         target_word = words[word_index]
 
@@ -282,6 +336,12 @@ class AutoregressiveLMSurprisalCalculator:
         # Set pad token if not exists
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        # Get model's maximum sequence length
+        self.max_length = self.tokenizer.model_max_length
+        if self.max_length > 1000000:  # Some models return very large values
+            self.max_length = 2048  # Use a reasonable default for autoregressive models
+        logger.info(f"Model max sequence length: {self.max_length}")
 
         logger.info("Autoregressive model loaded!")
 
@@ -352,18 +412,66 @@ class AutoregressiveLMSurprisalCalculator:
         words_context = words[:word_index]
         target_word = words[word_index]
         
-
+        
+        # Build the required prefix
         if context and context.strip():
-            
             context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
             context_words = context_clean.strip().split()
-            full_sentence_for_alignment = "".join(context_words) + "".join(words)
-            adjusted_word_index = len(context_words) + word_index
-            full_words_for_alignment = context_words + words
         else:
-            full_sentence_for_alignment = "".join(words)
-            adjusted_word_index = word_index
-            full_words_for_alignment = words
+            context_words = []
+        
+        # Words that MUST be included: context + all words up to and including target
+        required_words = context_words + words[:word_index + 1]
+        required_text = "".join(required_words)
+        
+        # Encode required text to check token count
+        required_encoding = self.tokenizer(required_text, add_special_tokens=True)
+        required_token_count = len(required_encoding['input_ids'])
+        
+        # Calculate how many tokens we can use for post-switch words
+        available_for_postswitch = self.max_length - required_token_count
+        
+        if required_token_count > self.max_length:
+            # Required content exceeds max_length
+            logger.error(f"Required content (context + pre-switch + target) exceeds max_length!")
+            logger.error(f"  Required tokens: {required_token_count}, Max: {self.max_length}")
+            logger.error(f"  This will cause truncation of pre-switch context")
+            full_sentence_for_alignment = required_text
+            adjusted_word_index = len(context_words) + word_index
+            full_words_for_alignment = required_words
+        elif available_for_postswitch <= 0:
+            # No room for post-switch words
+            logger.debug(f"No room for post-switch words (required: {required_token_count}/{self.max_length} tokens)")
+            full_sentence_for_alignment = required_text
+            adjusted_word_index = len(context_words) + word_index
+            full_words_for_alignment = required_words
+        else:
+            # Add as many post-switch words as fit
+            postswitch_words = words[word_index + 1:]
+            
+            if not postswitch_words:
+                full_sentence_for_alignment = required_text
+                adjusted_word_index = len(context_words) + word_index
+                full_words_for_alignment = required_words
+            else:
+                postswitch_to_use = []
+                current_tokens = 0
+                
+                for word in postswitch_words:
+                    word_tokens = len(self.tokenizer(word, add_special_tokens=False)['input_ids'])
+                    if current_tokens + word_tokens <= available_for_postswitch:
+                        postswitch_to_use.append(word)
+                        current_tokens += word_tokens
+                    else:
+                        break
+                
+                if len(postswitch_to_use) < len(postswitch_words):
+                    trimmed_count = len(postswitch_words) - len(postswitch_to_use)
+                    logger.debug(f"Trimmed {trimmed_count}/{len(postswitch_words)} post-switch words to fit within {self.max_length} token limit")
+                
+                full_sentence_for_alignment = "".join(required_words + postswitch_to_use)
+                adjusted_word_index = len(context_words) + word_index
+                full_words_for_alignment = required_words + postswitch_to_use
         
         # Align target word to tokens (using full sentence to get correct tokenization)
         token_indices, token_strings = self._align_word_to_tokens(
@@ -371,13 +479,8 @@ class AutoregressiveLMSurprisalCalculator:
             full_words_for_alignment, 
             adjusted_word_index
         )
-        
-        if context and context.strip():
-            context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
-            context_words = context_clean.strip().split()
-            input_sentence = "".join(context_words) + "".join(words_context)
-        else:
-            input_sentence = "".join(words_context)
+        \
+        input_sentence = "".join(required_words[:-1])
 
         if not token_indices:
             logger.warning(f"Could not align word '{target_word}' to tokens")
@@ -394,38 +497,18 @@ class AutoregressiveLMSurprisalCalculator:
 
         token_surprisals = []
         token_probs = []
-
-
-        max_length = min(2048, getattr(self.tokenizer, 'model_max_length', 2048))
-
         
-        encoding = self.tokenizer(input_sentence, return_tensors="pt", add_special_tokens=True, 
-                                  truncation=True, max_length=max_length)
+        encoding = self.tokenizer(input_sentence, return_tensors="pt", add_special_tokens=True)
         input_ids = encoding['input_ids'].to(self.device)
-        
 
         # Tokenize the full sentence (with target) to get actual token IDs
         full_encoding = self.tokenizer(full_sentence_for_alignment, return_tensors="pt", 
-                                       add_special_tokens=True, truncation=True, max_length=max_length)
+                                       add_special_tokens=True)
         full_input_ids = full_encoding['input_ids'][0].tolist()
         
         # Get the position where predictions start (end of context in input)
         context_token_length = input_ids.shape[1]
         
-        # Check if target tokens are within bounds
-        if token_indices and max(token_indices) >= len(full_input_ids):
-            logger.warning(f"Target word tokens beyond tokenization limit")
-            return {
-                'surprisal': float('nan'),
-                'probability': 0.0,
-                'entropy': float('nan'),
-                'word': target_word,
-                'tokens': token_strings,
-                'token_surprisals': [],
-                'num_tokens': len(token_indices),
-                'num_valid_tokens': 0
-            }
-
         current_input_ids = input_ids.clone()
         token_entropies = []
         
@@ -489,7 +572,7 @@ class AutoregressiveLMSurprisalCalculator:
                     current_input_ids = torch.cat([current_input_ids, new_token], dim=1)
                     
                     # Check for truncation
-                    if current_input_ids.shape[1] >= max_length:
+                    if current_input_ids.shape[1] >= self.max_length:
                         logger.warning(f"Sequence length exceeded during iterative prediction")
                         break
 
