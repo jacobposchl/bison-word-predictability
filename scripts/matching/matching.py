@@ -25,7 +25,6 @@ from src.data.analysis_dataset import create_analysis_dataset
 from src.experiments.nllb_translator import NLLBTranslator
 from src.plots.matching.report_generator import generate_window_matching_report
 from src.analysis.matching_algorithm import analyze_window_matching
-from src.analysis.pos_tagging import parse_pattern_segments
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +41,6 @@ def main():
     """Main entry point for matching analysis."""
     parser = argparse.ArgumentParser(
         description='POS window matching analysis for code-switching'
-    )
-    parser.add_argument(
-        '--sample-size',
-        type=int,
-        default=None,
-        help='Number of sentences to process (default: process all sentences)'
     )
     parser.add_argument(
         '--num-workers-free',
@@ -69,71 +62,48 @@ def main():
     preprocessing_dir = Path(config.get_preprocessing_results_dir())
     
     logger.info("Starting POS window matching analysis...")
-    if args.sample_size is not None:
-        logger.info(f"Sample size: {args.sample_size} sentences")
     
     try:
-        #Load datasets
-        translated_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
+        # Load datasets (using filenames from config)
+        translated_csv = preprocessing_dir / config.get('output.csv_cantonese_translated')
         
         if not translated_csv.exists():
             raise FileNotFoundError(f"Translated sentences CSV not found: {translated_csv}")
         
         translated_df = pd.read_csv(translated_csv)
 
-        monolingual_csv = preprocessing_dir / "cantonese_monolingual_WITHOUT_fillers.csv"
+        monolingual_csv = preprocessing_dir / config.get('output.csv_cantonese_mono_without_fillers')
         
         if not monolingual_csv.exists():
             raise FileNotFoundError(f"Monolingual CSV not found: {monolingual_csv}")
         
         monolingual_df = pd.read_csv(monolingual_csv)
 
-        all_sentences_csv = preprocessing_dir / config.get('output.csv_all_sentences', 'all_sentences.csv')
+        all_sentences_csv = preprocessing_dir / config.get('output.csv_all_sentences')
         
         if not all_sentences_csv.exists():
             raise FileNotFoundError(f"All sentences CSV not found: {all_sentences_csv}")
         
         all_sentences_df = pd.read_csv(all_sentences_csv)
         
-        #Initialize translator
+
         translator = NLLBTranslator(
             model_name=config.get_translation_model(),
             device=config.get_translation_device(),
             show_progress=False
         )
         
-        # Get parameters from config
+
         window_sizes = config.get_analysis_window_sizes()
         similarity_threshold = config.get_analysis_similarity_threshold()
-        min_cantonese = config.get_analysis_min_cantonese_words()
-        
-        # Get optimization parameters (CLI args override config)
-        # num_workers means "cores to leave free" - None means use all cores
+
         num_workers = args.num_workers_free if args.num_workers_free is not None else config.get_analysis_num_workers()
         
         # Filter to sentences with valid switch indices
-        translated_sentences = [s for s in translated_df.to_dict('records') if s.get('switch_index', -1) >= 0]
-        
-        # Apply additional filtering for sentences matching pattern criteria:
-        # Pattern must start with C >= min_cantonese, followed by E
-        filtered_translated_sentences = []
-        for sent in translated_sentences:
-            pattern = sent.get('pattern', '')
-            segments = parse_pattern_segments(pattern)
-            
-            # Check criteria: starts with C >= min_cantonese, followed by E
-            if len(segments) >= 2:
-                first_lang, first_count = segments[0]
-                second_lang, _ = segments[1]
-                
-                if first_lang == 'C' and first_count >= min_cantonese and second_lang == 'E':
-                    filtered_translated_sentences.append(sent)
+        # Note: Pattern filtering (C >= min_cantonese followed by E) is already done in preprocessing
+        filtered_translated_sentences = [s for s in translated_df.to_dict('records') if s.get('switch_index', -1) >= 0]
         
         monolingual_sentences = monolingual_df.to_dict('records')
-        
-        # Apply sample size if specified
-        if args.sample_size is not None:
-            filtered_translated_sentences = filtered_translated_sentences[:args.sample_size]
         
         logger.info(f"Analyzing {len(filtered_translated_sentences)} sentences...")
         logger.info(f"Window sizes to process: {window_sizes}")
@@ -174,9 +144,6 @@ def main():
             analysis_csv_path = output_dir / f"analysis_dataset_window_{window_size}.csv"
             analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
             logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
-        
-        # Note: Similarity distribution plots can be generated separately using:
-        # python scripts/plots/figures.py --matching
         
         # Generate window matching report (for all window sizes)
         window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)

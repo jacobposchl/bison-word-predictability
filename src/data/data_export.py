@@ -603,6 +603,38 @@ def export_translated_sentences(
                 
                 if is_valid:
                     valid_count += 1
+                    
+                    # Truncate translation at first error after switch_index
+                    translation_words = translation.split()
+                    
+                    # Find first problematic word after switch_index
+                    truncate_at = None
+                    for i in range(switch_index, len(translation_words)):
+                        word = translation_words[i]
+                        is_unknown = word in ['UNKNOWN', 'UNK', '']
+                        is_english = word and any(c.isascii() and c.isalpha() for c in word)
+                        
+                        if is_unknown or is_english:
+                            truncate_at = i
+                            break
+                    
+                    # Truncate if error found
+                    if truncate_at is not None:
+                        translation_words = translation_words[:truncate_at]
+                        translation = ' '.join(translation_words)
+                    
+                    # Validate switch word itself is valid Cantonese
+                    if switch_index >= len(translation_words):
+                        is_valid = False
+                        error_msg = f"Switch index {switch_index} out of bounds after truncation"
+                    else:
+                        switch_word = translation_words[switch_index]
+                        is_switch_broken = switch_word in ['UNKNOWN', 'UNK', ''] or (switch_word and any(c.isascii() and c.isalpha() for c in switch_word))
+                        if is_switch_broken:
+                            is_valid = False
+                            error_msg = f"Switch word '{switch_word}' is not valid Cantonese"
+                
+                if is_valid:
                     # Add POS tagging for valid translation
                     # Handle mixed Cantonese/English by tagging word by word
                     try:

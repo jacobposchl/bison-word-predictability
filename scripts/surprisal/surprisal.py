@@ -21,7 +21,6 @@ Usage:
         --model: Type of model - "masked" for BERT-style or "autoregressive" for GPT-style
         
     Optional arguments:
-        --sample-size: Number of sentences to process (default: all)
         --no-context: Disable discourse context
         --compare-context: Run both with and without context for comparison
 """
@@ -29,24 +28,20 @@ Usage:
 import sys
 from pathlib import Path
 
-# Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 import argparse
 import pandas as pd
 import torch
-from datetime import datetime
 
 from src.core.config import Config
 from src.experiments.surprisal_calculator import create_surprisal_calculator
 from src.experiments.surprisal_analysis import (
     calculate_surprisal_for_dataset,
-    compute_statistics,
-    print_statistics_summary
+    compute_statistics
 )
-# Note: Visualization functions are now called from scripts/plots/figures.py
-
+from src.plots.surprisal.report_generator import generate_surprisal_statistics_report
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -59,12 +54,6 @@ def parse_arguments():
         required=True,
         choices=['masked', 'autoregressive'],
         help='Type of model - "masked" for BERT-style or "autoregressive" for GPT-style'
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=None,
-        help="Number of sentences to process (default: all)"
     )
     parser.add_argument(
         "--no-context",
@@ -121,10 +110,7 @@ def load_analysis_dataset(dataset_path: str) -> pd.DataFrame:
     return df
 
 
-def initialize_surprisal_calculator(
-    model_type: str,
-    config: Config
-):
+def initialize_surprisal_calculator( model_type: str, config: Config ):
     """
     Initialize the surprisal calculator with specified model type.
     
@@ -135,23 +121,17 @@ def initialize_surprisal_calculator(
     Returns:
         Initialized surprisal calculator
     """
-    # Get device from config
+
     device = config.get('experiment.device', 'auto')
-    
-    print(f"\nInitializing {model_type} surprisal calculator:")
-    print(f"  Device: {device}")
-    
-    # Auto-detect CUDA availability
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"  Auto-detected device: {device}")
+    
+    print(f"Loading {model_type} model on {device}...")
     
     calculator = create_surprisal_calculator(
         model_type=model_type,
         config=config,
         device=device
     )
-    
-    print(f"  Model loaded successfully")
     
     return calculator
 
@@ -168,6 +148,7 @@ def setup_output_directories(config: Config, model_type: str) -> tuple:
         Tuple of (results_dir, figures_dir) as Path objects
         (figures_dir is kept for compatibility but not used)
     """
+
     results_base = Path(config.get_surprisal_results_dir())
     base_dir = results_base / model_type
     
@@ -176,17 +157,15 @@ def setup_output_directories(config: Config, model_type: str) -> tuple:
     
     # Create directories
     results_dir.mkdir(parents=True, exist_ok=True)
-    # Note: figures_dir will be created when generating figures
     
     return results_dir, figures_dir
 
 
 def main():
-    """Main experiment execution."""
-    print("="*80)
-    print("SURPRISAL COMPARISON EXPERIMENT")
-    print("Code-Switched Translation vs. Monolingual Baseline")
-    print("="*80)
+
+    """Surprisal analysis experiment execution."""
+
+    print("Starting surprisal analysis...")
     
     # Parse arguments
     args = parse_arguments()
@@ -207,9 +186,7 @@ def main():
             f"Please run scripts/matching/matching.py first!"
         )
     
-    print(f"\nFound {len(window_datasets)} window size dataset(s):")
-    for ds in window_datasets:
-        print(f"  - {ds.name}")
+    print(f"Found {len(window_datasets)} window size dataset(s)")
     
     # Initialize surprisal calculator (reused for all window sizes)
     surprisal_calc = initialize_surprisal_calculator(
@@ -241,21 +218,10 @@ def main():
             continue
         window_size = int(match.group(1))
         
-        print(f"\n{'='*80}")
-        print(f"Processing window size {window_size}")
-        print(f"{'='*80}")
+        print(f"\nProcessing window size {window_size}...")
         
         # Load analysis dataset for this window size
         analysis_df = load_analysis_dataset(str(dataset_path))
-        
-        # Apply sample size limit if specified
-        if args.sample_size:
-            print(f"\nLimiting to {args.sample_size} sentences (from {len(analysis_df)} total)")
-            # Sample unique CS sentences
-            unique_cs = analysis_df['cs_translation'].unique()
-            sampled_cs = pd.Series(unique_cs).sample(n=min(args.sample_size, len(unique_cs)), random_state=42)
-            analysis_df = analysis_df[analysis_df['cs_translation'].isin(sampled_cs)]
-            print(f"Selected {len(analysis_df)} comparisons")
         
         # Create window-specific output directories
         window_results_dir = base_results_dir / f"window_{window_size}"
@@ -263,9 +229,8 @@ def main():
         
         # Run analysis for each context mode
         for use_context, mode_name in zip(context_modes, mode_names):
-            print("\n" + "="*80)
-            print(f"ANALYSIS MODE: {mode_name.upper().replace('_', ' ')}")
-            print("="*80)
+            mode_label = mode_name.replace('_', ' ')
+            print(f"  Running {mode_label} analysis...")
             
             # Setup mode-specific output directories
             if len(context_modes) > 1:
@@ -273,11 +238,6 @@ def main():
                 mode_results_dir.mkdir(parents=True, exist_ok=True)
             else:
                 mode_results_dir = window_results_dir
-        
-            # Calculate surprisal values
-            print("\n" + "-"*80)
-            print("CALCULATING SURPRISAL VALUES")
-            print("-"*80)
             
             # Get context lengths from config
             if use_context:
@@ -302,103 +262,32 @@ def main():
             results_df.to_csv(results_csv_path, index=False)
             
             # Compute statistics for each context length
-            print("\n" + "-"*80)
-            print("COMPUTING STATISTICS")
-            print("-"*80)
-            
-            # Compute statistics for each context length
             all_stats = {}
             for ctx_len in context_lengths:
-                print(f"\nComputing statistics for context length {ctx_len}...")
                 stats_dict = compute_statistics(results_df, context_length=ctx_len)
                 all_stats[ctx_len] = stats_dict
-                print_statistics_summary(stats_dict)
             
-            # Use first context length for main statistics summary file
+            # Generate and save statistics report
             primary_context_length = context_lengths[0] if context_lengths else None
             if primary_context_length:
                 stats_dict = all_stats[primary_context_length]
             
-            # Save statistics to file
+            report_text = generate_surprisal_statistics_report(
+                stats_dict=stats_dict,
+                all_stats=all_stats,
+                context_lengths=context_lengths,
+                model_type=args.model,
+                mode_name=mode_name,
+                primary_context_length=primary_context_length
+            )
+            
             stats_txt_path = mode_results_dir / "statistics_summary.txt"
             with open(stats_txt_path, 'w', encoding='utf-8') as f:
-                f.write("="*80 + "\n")
-                f.write("SURPRISAL COMPARISON STATISTICS\n")
-                if primary_context_length:
-                    f.write(f"Context Length: {primary_context_length} sentences\n")
-                f.write(f"Mode: {mode_name.replace('_', ' ').upper()}\n")
-                f.write("="*80 + "\n\n")
-                f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Model type: {args.model}\n\n")
-                
-                f.write(f"Sample Size:\n")
-                f.write(f"  Total comparisons: {stats_dict['n_total']}\n")
-                if stats_dict.get('n_filtered', 0) > 0:
-                    f.write(f"  Filtered out (failed calculations): {stats_dict['n_filtered']} ({stats_dict['n_filtered']/stats_dict['n_total']:.1%})\n")
-                f.write(f"  Valid calculations: {stats_dict['n_valid']}\n")
-                f.write(f"  Complete calculations: {stats_dict['n_complete']}\n")
-                f.write(f"  Success rate: {stats_dict['success_rate']:.1%}\n")
-                f.write(f"  Complete rate: {stats_dict['complete_rate']:.1%}\n")
-                
-                if 'n_with_context' in stats_dict:
-                    f.write(f"\nContext Usage:\n")
-                    f.write(f"  With context: {stats_dict['n_with_context']}\n")
-                    f.write(f"  Without context: {stats_dict['n_without_context']}\n")
-                
-                f.write(f"\nCode-Switched Translation Surprisal:\n")
-                f.write(f"  Mean:   {stats_dict['cs_surprisal_mean']:.4f}\n")
-                f.write(f"  Median: {stats_dict['cs_surprisal_median']:.4f}\n")
-                f.write(f"  Std:    {stats_dict['cs_surprisal_std']:.4f}\n\n")
-                
-                f.write(f"Monolingual Baseline Surprisal:\n")
-                f.write(f"  Mean:   {stats_dict['mono_surprisal_mean']:.4f}\n")
-                f.write(f"  Median: {stats_dict['mono_surprisal_median']:.4f}\n")
-                f.write(f"  Std:    {stats_dict['mono_surprisal_std']:.4f}\n\n")
-                
-                f.write(f"  Difference (CS - Monolingual):\n")
-                f.write(f"  Mean:   {stats_dict['difference_mean']:.4f}\n")
-                f.write(f"  Median: {stats_dict['difference_median']:.4f}\n")
-                f.write(f"  Std:    {stats_dict['difference_std']:.4f}\n\n")
-                
-                f.write(f"Paired t-test:\n")
-                f.write(f"  t-statistic: {stats_dict['ttest_statistic']:.4f}\n")
-                f.write(f"  p-value:     {stats_dict['ttest_pvalue']:.6f}\n\n")
-                
-                f.write(f"Effect Size:\n")
-                f.write(f"  Cohen's d: {stats_dict['cohens_d']:.4f}\n\n")
-                
-                # Write statistics for all context lengths
-                if len(context_lengths) > 1:
-                    f.write("\n" + "="*80 + "\n")
-                    f.write("STATISTICS FOR ALL CONTEXT LENGTHS\n")
-                    f.write("="*80 + "\n\n")
-                    for ctx_len in context_lengths:
-                        if ctx_len in all_stats:
-                            ctx_stats = all_stats[ctx_len]
-                            f.write(f"Context Length {ctx_len}:\n")
-                            f.write(f"  Complete calculations: {ctx_stats['n_complete']}\n")
-                            f.write(f"  CS Mean: {ctx_stats['cs_surprisal_mean']:.4f}\n")
-                            f.write(f"  Mono Mean: {ctx_stats['mono_surprisal_mean']:.4f}\n")
-                            f.write(f"  Difference Mean: {ctx_stats['difference_mean']:.4f}\n")
-                            f.write(f"  p-value: {ctx_stats['ttest_pvalue']:.6f}\n\n")
+                f.write(report_text)
             
-            print(f"\nSaved statistics summary to {stats_txt_path}")
-            
-            # Note: Visualizations can be generated separately using:
-            # python scripts/plots/figures.py --surprisal --model {args.model}
-            
-            print(f"\nResults saved to: {mode_results_dir}")
-            print(f"To generate figures, run: python scripts/plots/figures.py --surprisal --model {args.model}")
-        
-        print(f"\n{'='*80}")
-        print(f"Completed processing window size {window_size}")
-        print(f"{'='*80}")
+            print(f"    Report: {stats_txt_path}")
     
-    print(f"\n{'='*80}")
-    print("ALL WINDOW SIZES PROCESSED")
-    print(f"{'='*80}")
-    print(f"\nResults saved to: {base_results_dir}")
-    print(f"To generate figures, run: python scripts/plots/figures.py --surprisal --model {args.model}")
+    print(f"\nCompleted! Results saved to: {base_results_dir}")
 
 
 if __name__ == "__main__":

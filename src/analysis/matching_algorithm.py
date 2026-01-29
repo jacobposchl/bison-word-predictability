@@ -276,12 +276,16 @@ def find_window_matches(
         return []
     
     # Validate switch_index is within bounds
+    # This should never happen if translation preserves Cantonese segments correctly.
+    # If it does, it indicates a data quality issue (translation or POS tagging problem).
     if switch_index >= len(pos_sequence):
-        logger.warning(
+        logger.error(
             f"switch_index ({switch_index}) is out of bounds for POS sequence length ({len(pos_sequence)}) "
-            f"for pattern '{pattern}'. Adjusting to last valid index."
+            f"for pattern '{pattern}'. This indicates a data quality issue - the translation or POS tagging "
+            f"may have failed. The first {switch_index} Cantonese words should be preserved exactly. "
+            f"Skipping this sentence."
         )
-        switch_index = len(pos_sequence) - 1
+        return []
     
     # Extract POS window around switch point
     window_start = max(0, switch_index - window_size)
@@ -326,11 +330,7 @@ def find_window_matches(
                 best_similarity = similarity
                 best_window = mono_window
                 best_start_idx = i
-                
-                # Early termination for perfect match
-                if similarity >= 1.0:
-                    break
-        
+
         # Also try comparing to full sequence if monolingual is shorter than window
         if len(mono_pos_seq) < window_len:
             similarity = levenshtein_similarity(pos_window, mono_pos_seq)
@@ -339,8 +339,9 @@ def find_window_matches(
                 best_window = mono_pos_seq
                 best_start_idx = 0
         
-        # Keep if above threshold
-        if best_similarity >= similarity_threshold:
+        # Keep if above threshold AND we found a valid window position
+        # best_start_idx will be -1 if no window was ever found (all similarities were 0.0)
+        if best_similarity >= similarity_threshold and best_start_idx >= 0:
             # Direct mapping: switch_index is at position switch_index_in_window within the CS window
             # When we find a match starting at best_start_idx, the equivalent switch_index
             # in the matched sentence is at best_start_idx + switch_index_in_window
@@ -355,16 +356,13 @@ def find_window_matches(
                 'pos_window': ' '.join(pos_window),
                 'matched_pos': ' '.join(best_window),
                 'matched_window_start': best_start_idx,
-                'matched_window_center': matched_switch_index,  # Direct mapping of switch_index position
-                'matched_switch_index': matched_switch_index  # Also provide as matched_switch_index for clarity
+                'matched_switch_index': matched_switch_index
             })
     
     return matches
 
 
-def _process_single_cs_sentence(
-    args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int]
-) -> Tuple[Dict, List[Dict], int, List[float]]:
+def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float]]:
     """
     Worker function to process a single code-switched sentence.
     
@@ -436,7 +434,7 @@ def _process_single_cs_sentence(
                 'matched_sentence': match['match_sentence'].get('reconstructed_sentence', ''),
                 'matched_pos': match['matched_pos'],
                 'matched_window_start': match['matched_window_start'],
-                'matched_switch_index': match['matched_window_center'],
+                'matched_switch_index': match['matched_switch_index'],
                 'matched_group': match['match_sentence'].get('group', ''),
                 'matched_participant': match['match_sentence'].get('participant_id', ''),
                 'matched_start_time': match['match_sentence'].get('start_time', 0.0),

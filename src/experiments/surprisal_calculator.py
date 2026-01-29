@@ -17,17 +17,17 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+# Delimiter used to separate context sentences (must match analysis_dataset.py)
+CONTEXT_SENTENCE_DELIMITER = ' ||| '
+
 class MaskedLMSurprisalCalculator:
     '''
     Class for word-level surprisal calculation using Masked Language Models (BERT-style).
     Uses bidirectional context by masking the target word.
     '''
 
-    def __init__(self,
-                model_name: str,
-                device: str = None):
+    def __init__(self, model_name: str, device: str = None):
         '''
-        Docstring for __init__
         
         :param model_name: HuggingFace model identifier
         :type model_name: str
@@ -50,11 +50,7 @@ class MaskedLMSurprisalCalculator:
 
         logger.info("Model Loaded!")
 
-    def _align_word_to_tokens(self,
-                              sentence: str,
-                              words: List[str],
-                              word_index: int,
-                              ) -> Tuple[List[int], List[str]]:
+    def _align_word_to_tokens(self, sentence: str, words: List[str], word_index: int, ) -> Tuple[List[int], List[str]]:
         '''
 
         Align a word to its corresponding BERT subword tokens.
@@ -94,11 +90,7 @@ class MaskedLMSurprisalCalculator:
 
         return token_indices, token_strings
 
-    def calculate_surprisal(self,
-                            word_index: int,
-                            words: List[str] = None,
-                            context: str = None,
-                            ) -> Dict:
+    def calculate_surprisal(self, word_index: int, words: List[str] = None, context: str = None, ) -> Dict:
         '''
         Calculate the surprisal for a word at a given position in the sentence.
         
@@ -121,8 +113,10 @@ class MaskedLMSurprisalCalculator:
         # Use consistent spacing: no spaces between Cantonese characters
         if context and context.strip():
             # For masked LM, prepend context to sentence
-            # Join context and words without spaces (Cantonese doesn't need them)
-            context_words = context.strip().split()
+            # Remove delimiter used to separate context sentences
+            context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
+            context_words = context_clean.strip().split()
+            # Join context and words without spaces
             full_sentence = "".join(context_words) + "".join(words)
             # Adjust word index to account for context words at the beginning
             adjusted_word_index = len(context_words) + word_index
@@ -153,9 +147,8 @@ class MaskedLMSurprisalCalculator:
         token_probs = []
         token_entropies = []
 
-        # Tokenize once before the loop for efficiency
-        tokens = self.tokenizer.tokenize(full_sentence, add_special_tokens = True)
-        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        encoding = self.tokenizer(full_sentence, return_tensors="pt", add_special_tokens=True)
+        input_ids = encoding['input_ids'][0].tolist()
 
         for token_idx in token_indices:
             # Create a copy of input_ids for this iteration
@@ -174,18 +167,13 @@ class MaskedLMSurprisalCalculator:
 
             token_prob = probs[original_token_id].item()
             
-            # Calculate entropy: H = -sum(p * log2(p)) for all tokens
-            # Use a more robust calculation that handles numerical issues
-            # Clamp probabilities to avoid log(0) and numerical issues
             epsilon = 1e-20
             probs_clamped = torch.clamp(probs, min=epsilon, max=1.0)
             
-            # Normalize to ensure sum is 1 (handles quantization errors)
+            # Normalize to ensure sum is 1
             probs_normalized = probs_clamped / probs_clamped.sum()
             
-            # Calculate entropy: -sum(p * log2(p))
-            # Use torch.where to handle any remaining edge cases
-            log_probs = torch.log2(probs_normalized + epsilon)
+            log_probs = torch.log2(probs_normalized)
             entropy_terms = probs_normalized * log_probs
             # Filter out any NaN or Inf terms
             valid_terms = entropy_terms[torch.isfinite(entropy_terms)]
@@ -195,7 +183,6 @@ class MaskedLMSurprisalCalculator:
             else:
                 token_entropy = float('nan')
             
-            # Final check for invalid values
             if not (np.isfinite(token_entropy) and token_entropy >= 0):
                 logger.debug(f"Invalid entropy: {token_entropy}, probs shape: {probs.shape}, probs sum: {probs.sum().item()}")
                 token_entropy = float('nan')
@@ -210,13 +197,25 @@ class MaskedLMSurprisalCalculator:
             token_probs.append(token_prob)
             token_entropies.append(token_entropy)
 
-        # Filter out invalid values for validation
+        # Filter out invalid values for aggregation
         valid_surprisals = [s for s in token_surprisals if not np.isnan(s) and not np.isinf(s)]
+        valid_probs = [p for p in token_probs if p > 0]
+        valid_entropies = [e for e in token_entropies if not np.isnan(e)]
         
-        total_surprisal = sum(token_surprisals)
-        total_prob = np.prod(token_probs)
-        # Average entropy across tokens (entropy is already per-token measure)
-        avg_entropy = np.mean(token_entropies) if token_entropies else np.nan
+        # Sum only valid surprisals
+        if valid_surprisals:
+            total_surprisal = sum(valid_surprisals)
+        else:
+            total_surprisal = float('nan')
+        
+        # Multiply only valid probabilities
+        if valid_probs:
+            total_prob = np.prod(valid_probs)
+        else:
+            total_prob = 0.0
+        
+        # Average only valid entropies
+        avg_entropy = np.mean(valid_entropies) if valid_entropies else float('nan')
 
         return {
             'surprisal': total_surprisal,
@@ -235,10 +234,7 @@ class AutoregressiveLMSurprisalCalculator:
     Class for word-level surprisal calculation using Autoregressive Language Models.
     '''
 
-    def __init__(self,
-                model_name: str,
-                device: str = None,
-                use_4bit: bool = False):
+    def __init__(self, model_name: str, device: str = None, use_4bit: bool = False):
         '''
         Initialize autoregressive LM for surprisal calculation.
         
@@ -289,11 +285,7 @@ class AutoregressiveLMSurprisalCalculator:
 
         logger.info("Autoregressive model loaded!")
 
-    def _align_word_to_tokens(self,
-                              sentence: str,
-                              words: List[str],
-                              word_index: int,
-                              ) -> Tuple[List[int], List[str]]:
+    def _align_word_to_tokens(self, sentence: str, words: List[str], word_index: int, ) -> Tuple[List[int], List[str]]:
         '''
         Align a word to its corresponding subword tokens.
         
@@ -314,12 +306,17 @@ class AutoregressiveLMSurprisalCalculator:
         encoding = self.tokenizer(sentence, return_tensors="pt", add_special_tokens=True)
         token_ids = encoding['input_ids'][0].tolist()
 
-        # For autoregressive models, we don't skip special tokens at the start
+        # Skip BOS token at start (consistent with masked model skipping [CLS])
+        # Most autoregressive tokenizers add BOS at position 0
+        start_idx = 1 if (len(token_ids) > 0 and 
+                         self.tokenizer.bos_token_id is not None and 
+                         token_ids[0] == self.tokenizer.bos_token_id) else 0
+        
         token_indices = []
         current_char_pos = 0
 
-        for i, token_id in enumerate(token_ids):
-            token_str = self.tokenizer.decode([token_id], skip_special_tokens=True)
+        for i, token_id in enumerate(token_ids[start_idx:], start=start_idx):
+            token_str = self.tokenizer.decode([token_id])
             token_len = len(token_str)
             token_start = current_char_pos
             token_end = current_char_pos + token_len
@@ -329,15 +326,11 @@ class AutoregressiveLMSurprisalCalculator:
             
             current_char_pos += token_len
 
-        token_strings = [self.tokenizer.decode([token_ids[i]], skip_special_tokens=True) for i in token_indices]
+        token_strings = [self.tokenizer.decode([token_ids[i]]) for i in token_indices]
 
         return token_indices, token_strings
 
-    def calculate_surprisal(self,
-                            word_index: int,
-                            words: List[str] = None,
-                            context: str = None,
-                            ) -> Dict:
+    def calculate_surprisal(self, word_index: int, words: List[str] = None, context: str = None) -> Dict:
         '''
         Calculate the surprisal for a word at a given position using autoregressive LM.
         
@@ -355,18 +348,15 @@ class AutoregressiveLMSurprisalCalculator:
         if word_index < 0 or word_index >= len(words):
             raise ValueError("Your word index is out of bounds")
         
-        # Build full input with context if provided
-        # Use consistent spacing: no spaces between Cantonese characters
-        # For autoregressive models, only include words UP TO (but NOT including) the target word
-        # We'll predict the target word given the preceding context
-        words_context = words[:word_index]  # Only context, not including target word
-        
+
+        words_context = words[:word_index]
         target_word = words[word_index]
         
-        # Build full sentence with target for token alignment purposes
-        # (We need to know which tokens the target word corresponds to)
+
         if context and context.strip():
-            context_words = context.strip().split()
+            
+            context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
+            context_words = context_clean.strip().split()
             full_sentence_for_alignment = "".join(context_words) + "".join(words)
             adjusted_word_index = len(context_words) + word_index
             full_words_for_alignment = context_words + words
@@ -382,9 +372,9 @@ class AutoregressiveLMSurprisalCalculator:
             adjusted_word_index
         )
         
-        # Build input sentence WITHOUT target word (only context for prediction)
         if context and context.strip():
-            context_words = context.strip().split()
+            context_clean = context.replace(CONTEXT_SENTENCE_DELIMITER, ' ')
+            context_words = context_clean.strip().split()
             input_sentence = "".join(context_words) + "".join(words_context)
         else:
             input_sentence = "".join(words_context)
@@ -405,19 +395,15 @@ class AutoregressiveLMSurprisalCalculator:
         token_surprisals = []
         token_probs = []
 
-        # Tokenize the input sentence (context only, without target word)
-        # Use the model's maximum length from its config
-        max_length = getattr(self.tokenizer, 'model_max_length', 2048)
-        # If the tokenizer has an unreasonably large default, cap it
-        if max_length > 1000000:
-            max_length = 2048
+
+        max_length = min(2048, getattr(self.tokenizer, 'model_max_length', 2048))
+
         
         encoding = self.tokenizer(input_sentence, return_tensors="pt", add_special_tokens=True, 
                                   truncation=True, max_length=max_length)
         input_ids = encoding['input_ids'].to(self.device)
         
-        # Get the actual token IDs for the target word (for comparison)
-        # We need to tokenize the target word to know what tokens we're predicting
+
         # Tokenize the full sentence (with target) to get actual token IDs
         full_encoding = self.tokenizer(full_sentence_for_alignment, return_tensors="pt", 
                                        add_special_tokens=True, truncation=True, max_length=max_length)
@@ -440,10 +426,6 @@ class AutoregressiveLMSurprisalCalculator:
                 'num_valid_tokens': 0
             }
 
-        # For autoregressive models, we need to predict tokens iteratively:
-        # 1. Input context -> predict first target token
-        # 2. Input context + first token -> predict second target token
-        # 3. etc.
         current_input_ids = input_ids.clone()
         token_entropies = []
         
@@ -469,19 +451,17 @@ class AutoregressiveLMSurprisalCalculator:
                 # Get probability of the actual token
                 token_prob = probs[actual_token_id].item()
                 
-                # Calculate entropy: H = -sum(p * log2(p)) for all tokens
-                # Use a more robust calculation that handles numerical issues
-                # Clamp probabilities to avoid log(0) and numerical issues
+
                 epsilon = 1e-20
                 probs_clamped = torch.clamp(probs, min=epsilon, max=1.0)
                 
                 # Normalize to ensure sum is 1 (handles quantization errors)
                 probs_normalized = probs_clamped / probs_clamped.sum()
                 
-                # Calculate entropy: -sum(p * log2(p))
-                # Use torch.where to handle any remaining edge cases
-                log_probs = torch.log2(probs_normalized + epsilon)
+                # Calculate entropy: H = -sum(p * log2(p))
+                log_probs = torch.log2(probs_normalized)
                 entropy_terms = probs_normalized * log_probs
+
                 # Filter out any NaN or Inf terms
                 valid_terms = entropy_terms[torch.isfinite(entropy_terms)]
                 
@@ -532,7 +512,7 @@ class AutoregressiveLMSurprisalCalculator:
         else:
             total_prob = 0.0
         
-        # Average entropy across tokens (entropy is already per-token measure)
+        # Average entropy across tokens
         avg_entropy = np.mean(valid_entropies) if valid_entropies else float('nan')
 
         return {
@@ -559,14 +539,16 @@ def create_surprisal_calculator(model_type: str, config, device: str = None):
     :type device: str
     :return: Surprisal calculator instance
     '''
+
     if model_type.lower() == "masked":
-        model_name = config.get('experiment.masked_model', 'hon9kon9ize/bert-large-cantonese')
+        model_name = config.get('experiment.masked_model')
         return MaskedLMSurprisalCalculator(
             model_name=model_name,
             device=device
         )
+        
     elif model_type.lower() == "autoregressive":
-        model_name = config.get('experiment.autoregressive_model', 'uer/gpt2-chinese-cluecorpussmall')
+        model_name = config.get('experiment.autoregressive_model')
         return AutoregressiveLMSurprisalCalculator(
             model_name=model_name,
             device=device,
