@@ -54,6 +54,8 @@ class MaskedLMSurprisalCalculator:
             self.max_length = 512  # Use BERT's default
         logger.info(f"Model max sequence length: {self.max_length}")
 
+        self.context_clipped_count = 0
+
         logger.info("Model Loaded!")
 
     def _align_word_to_tokens(self, sentence: str, words: List[str], word_index: int, ) -> Tuple[List[int], List[str]]:
@@ -136,14 +138,33 @@ class MaskedLMSurprisalCalculator:
         available_for_postswitch = self.max_length - required_token_count
         
         if required_token_count > self.max_length:
-            logger.error(f"Required content (context + pre-switch + target) exceeds max_length!")
-            logger.error(f"  Required tokens: {required_token_count}, Max: {self.max_length}")
-            logger.error(f"  Context words: {len(context_words)}, Pre-switch words: {word_index}, Target: 1")
-            logger.error(f"  This will cause truncation of pre-switch context, which may affect results")
-
+            # Clip context from the left to fit
+            self.context_clipped_count += 1
+            
+            preswitch_words = words[:word_index + 1]
+            preswitch_text = "".join(preswitch_words)
+            preswitch_encoding = self.tokenizer(preswitch_text, add_special_tokens=True)
+            preswitch_token_count = len(preswitch_encoding['input_ids'])
+            
+            tokens_for_context = self.max_length - preswitch_token_count
+            
+            # Clip context words from the left
+            clipped_context_words = []
+            current_tokens = 0
+            for word in reversed(context_words):
+                word_tokens = len(self.tokenizer(word, add_special_tokens=False)['input_ids'])
+                if current_tokens + word_tokens <= tokens_for_context:
+                    clipped_context_words.insert(0, word)
+                    current_tokens += word_tokens
+                else:
+                    break
+            
+            required_words = clipped_context_words + preswitch_words
+            required_text = "".join(required_words)
             full_sentence = required_text
-            adjusted_word_index = len(context_words) + word_index
+            adjusted_word_index = len(clipped_context_words) + word_index
             full_words = required_words
+            available_for_postswitch = 0
         elif available_for_postswitch <= 0:
             # No room for post-switch words
             logger.debug(f"No room for post-switch words (required content uses {required_token_count}/{self.max_length} tokens)")
@@ -343,6 +364,8 @@ class AutoregressiveLMSurprisalCalculator:
             self.max_length = 2048  # Use a reasonable default for autoregressive models
         logger.info(f"Model max sequence length: {self.max_length}")
 
+        self.context_clipped_count = 0
+
         logger.info("Autoregressive model loaded!")
 
     def _align_word_to_tokens(self, sentence: str, words: List[str], word_index: int, ) -> Tuple[List[int], List[str]]:
@@ -432,13 +455,33 @@ class AutoregressiveLMSurprisalCalculator:
         available_for_postswitch = self.max_length - required_token_count
         
         if required_token_count > self.max_length:
-            # Required content exceeds max_length
-            logger.error(f"Required content (context + pre-switch + target) exceeds max_length!")
-            logger.error(f"  Required tokens: {required_token_count}, Max: {self.max_length}")
-            logger.error(f"  This will cause truncation of pre-switch context")
+            # Clip context from the left to fit
+            self.context_clipped_count += 1
+            
+            preswitch_words = words[:word_index + 1]
+            preswitch_text = "".join(preswitch_words)
+            preswitch_encoding = self.tokenizer(preswitch_text, add_special_tokens=True)
+            preswitch_token_count = len(preswitch_encoding['input_ids'])
+            
+            tokens_for_context = self.max_length - preswitch_token_count
+            
+            # Clip context words from the left
+            clipped_context_words = []
+            current_tokens = 0
+            for word in reversed(context_words):
+                word_tokens = len(self.tokenizer(word, add_special_tokens=False)['input_ids'])
+                if current_tokens + word_tokens <= tokens_for_context:
+                    clipped_context_words.insert(0, word)
+                    current_tokens += word_tokens
+                else:
+                    break
+            
+            required_words = clipped_context_words + preswitch_words
+            required_text = "".join(required_words)
             full_sentence_for_alignment = required_text
-            adjusted_word_index = len(context_words) + word_index
+            adjusted_word_index = len(clipped_context_words) + word_index
             full_words_for_alignment = required_words
+            available_for_postswitch = 0
         elif available_for_postswitch <= 0:
             # No room for post-switch words
             logger.debug(f"No room for post-switch words (required: {required_token_count}/{self.max_length} tokens)")

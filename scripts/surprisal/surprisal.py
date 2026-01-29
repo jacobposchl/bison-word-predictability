@@ -272,13 +272,16 @@ def main():
             if primary_context_length:
                 stats_dict = all_stats[primary_context_length]
             
+            context_clipped_count = getattr(surprisal_calc, 'context_clipped_count', None)
+            
             report_text = generate_surprisal_statistics_report(
                 stats_dict=stats_dict,
                 all_stats=all_stats,
                 context_lengths=context_lengths,
                 model_type=args.model,
                 mode_name=mode_name,
-                primary_context_length=primary_context_length
+                primary_context_length=primary_context_length,
+                context_clipped_count=context_clipped_count
             )
             
             stats_txt_path = mode_results_dir / "statistics_summary.txt"

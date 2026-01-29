@@ -270,6 +270,10 @@ def calculate_surprisal_for_dataset(
     
     results_df = pd.DataFrame(results)
     
+    # Log context clipping statistics if any occurred
+    if hasattr(surprisal_calc, 'context_clipped_count') and surprisal_calc.context_clipped_count > 0:
+        logger.info(f"Context clipped for {surprisal_calc.context_clipped_count} sentences due to max_length constraint")
+    
     return results_df
 
 

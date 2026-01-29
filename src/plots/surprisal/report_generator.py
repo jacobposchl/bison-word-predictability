@@ -15,7 +15,8 @@ def generate_surprisal_statistics_report(
     context_lengths: List[int],
     model_type: str,
     mode_name: str,
-    primary_context_length: Optional[int] = None
+    primary_context_length: Optional[int] = None,
+    context_clipped_count: Optional[int] = None
 ) -> str:
     """
     Generate comprehensive statistics report for surprisal analysis.
@@ -27,6 +28,7 @@ def generate_surprisal_statistics_report(
         model_type: Type of model used ("masked" or "autoregressive")
         mode_name: Analysis mode ("with_context" or "without_context")
         primary_context_length: Primary context length to report (usually first)
+        context_clipped_count: Number of sentences where context was clipped due to max_length
         
     Returns:
         Formatted text report
@@ -55,6 +57,12 @@ def generate_surprisal_statistics_report(
     lines.append(f"  Complete calculations: {stats_dict['n_complete']}")
     lines.append(f"  Success rate: {stats_dict['success_rate']:.1%}")
     lines.append(f"  Complete rate: {stats_dict['complete_rate']:.1%}")
+    
+    if context_clipped_count and context_clipped_count > 0:
+        lines.append("")
+        lines.append("Context Clipping:")
+        lines.append(f"  Sentences with clipped context: {context_clipped_count}")
+        lines.append(f"  (Context truncated from left to fit model max_length)")
     
     # Context Usage
     if 'n_with_context' in stats_dict:
