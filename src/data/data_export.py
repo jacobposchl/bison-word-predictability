@@ -602,8 +602,6 @@ def export_translated_sentences(
                             error_msg = ''
                 
                 if is_valid:
-                    valid_count += 1
-                    
                     # Truncate translation at first error after switch_index
                     translation_words = translation.split()
                     
@@ -635,6 +633,8 @@ def export_translated_sentences(
                             error_msg = f"Switch word '{switch_word}' is not valid Cantonese"
                 
                 if is_valid:
+                    valid_count += 1
+                    
                     # Add POS tagging for valid translation
                     # Handle mixed Cantonese/English by tagging word by word
                     try:
@@ -671,13 +671,6 @@ def export_translated_sentences(
                         pos_seq = ' '.join(['UNK'] * len(translation_words)) if translation_words else ''
                 else:
                     invalid_count += 1
-                    # Log first few failures with actual translation text for debugging
-                    if invalid_count <= 3:
-                        logger.warning(f"Row {idx}: Translation verification failed - {error_msg}")
-                        logger.debug(f"  Original: {sentence[:100]}")
-                        logger.debug(f"  Translation (first 200 chars): {translation[:200]}")
-                    else:
-                        logger.warning(f"Row {idx}: Translation verification failed - {error_msg}")
                     # Set translation and POS to empty for invalid rows
                     translation = ''
                     pos_seq = ''
@@ -763,7 +756,9 @@ def export_translated_sentences(
                 f.write(f"  ⚠ WARNING: {stats['final_with_translation'] - stats['final_with_pos']} translations missing POS tags!\n")
             else:
                 f.write(f"  ✓ All translations have POS tags\n")
-            f.write(f"  POS tagging success rate: 100.0% (all translations tagged)\n\n")
+            
+            pos_success_rate = (stats['final_with_pos'] / stats['final_with_translation'] * 100) if stats['final_with_translation'] > 0 else 0
+            f.write(f"  POS tagging success rate: {pos_success_rate:.1f}%\n\n")
             
             f.write("="*80 + "\n")
             f.write("FINAL RESULTS\n")
