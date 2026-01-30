@@ -86,39 +86,19 @@ def parse_arguments():
 
 
 def load_surprisal_results(results_path: Path) -> pd.DataFrame:
-    """Load surprisal_results.csv."""
     if not results_path.exists():
         raise FileNotFoundError(
             f"Surprisal results not found at: {results_path}\n"
             f"Please run surprisal calculation first: python scripts/surprisal/surprisal.py --model {results_path.parent.name.split('_')[-1]}"
         )
     
-    logger.info(f"Loading surprisal results from {results_path}")
     df = pd.read_csv(results_path)
-    logger.info(f"Loaded {len(df)} rows")
-    
     return df
 
 
 
 
 def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) -> pd.DataFrame:
-    """
-    Create dataset where each row is a sentence observation.
-    
-    Creates two rows per original row:
-    - One for CS sentence (label=1)
-    - One for mono sentence (label=0)
-    
-    Args:
-        df: DataFrame from surprisal_results.csv
-        context_length: Context length to use (if None, uses old column names without context suffix)
-        
-    Returns:
-        DataFrame with one row per sentence observation
-    """
-    logger.info("Preparing data for regression...")
-    
     rows = []
     
     for idx, row in df.iterrows():
@@ -132,7 +112,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         cs_sentence_length = len(cs_words_list)
         
         # Calculate normalized position
-        cs_position_norm = cs_switch_idx / cs_sentence_length if cs_sentence_length > 0 else 0.0
+        cs_position_norm = cs_switch_idx / cs_sentence_length if cs_sentence_length > 0 else np.nan
         
         cs_pos = row.get('cs_switch_pos', 'UNKNOWN')
         
@@ -170,7 +150,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
         mono_words_list = mono_sentence.split() if pd.notna(mono_sentence) else []
         mono_sentence_length = len(mono_words_list)
         
-        mono_position_norm = mono_switch_idx / mono_sentence_length if mono_sentence_length > 0 else 0.0
+        mono_position_norm = mono_switch_idx / mono_sentence_length if mono_sentence_length > 0 else np.nan
         
         mono_pos = row.get('mono_switch_pos', 'UNKNOWN')
         
@@ -200,40 +180,22 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
     
     result_df = pd.DataFrame(rows)
     
-    # Remove rows with missing critical values
     n_before = len(result_df)
     result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
     n_after = len(result_df)
     
     if n_before > n_after:
-        logger.info(f"Removed {n_before - n_after} rows with missing values")
+        logger.warning(f"Dropped {n_before - n_after} rows with missing data")
 
-    logger.info(f"Created {len(result_df)} observations ({len(result_df[result_df['is_code_switched']==1])} CS, {len(result_df[result_df['is_code_switched']==0])} mono)")
-    
     return result_df
 
 
 def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Prepare feature matrix with one-hot encoding for POS tags and group.
-    
-    Args:
-        df: DataFrame from prepare_data_for_regression()
-        
-    Returns:
-        Tuple of (feature_df, feature_names)
-    """
-
-    logger.info("Preparing features...")
-    
-    # Create copy
     feature_df = df.copy()
     
-    # One-hot encode POS tags
     pos_dummies = pd.get_dummies(feature_df['pos_tag'], prefix='pos')
     feature_df = pd.concat([feature_df, pos_dummies], axis=1)
     
-    # One-hot encode group
     group_dummies = pd.get_dummies(feature_df['group'], prefix='group')
     feature_df = pd.concat([feature_df, group_dummies], axis=1)
     
@@ -251,11 +213,6 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     
     feature_df = feature_df[numeric_features + pos_feature_names + group_feature_names]
     
-    logger.info(f"Prepared {len(feature_names)} features")
-    logger.info(f"  Numeric features: {len(numeric_features)}")
-    logger.info(f"  POS features: {len(pos_feature_names)}")
-    logger.info(f"  Group features: {len(group_feature_names)}")
-    
     return feature_df, feature_names
 
 
@@ -267,22 +224,7 @@ def fit_models(
     feature_names: List[str],
     random_state: int = 42
 ) -> Dict[str, Dict]:
-    """
-    Fit multiple logistic regression models with different feature sets.
     
-    Args:
-        X_train, X_test: Feature matrices
-        y_train, y_test: Target labels
-        feature_names: List of feature names
-        random_state: Random state for reproducibility
-        
-    Returns:
-        Dictionary with model results
-    """
-
-    logger.info("Fitting models...")
-    
-
     control_features = [
         'word_length', 'sentence_length', 'position_normalized', 'word_frequency'
     ] + [f for f in feature_names if f.startswith('pos_')] + [f for f in feature_names if f.startswith('group_')]
@@ -362,26 +304,11 @@ def fit_models(
             'y_pred': y_pred,
             'y_pred_proba': y_pred_proba
         }
-        
-        logger.info(f"  {model_name}: AUC={auc:.4f}, Accuracy={accuracy:.4f}, F1={f1:.4f}")
     
     return results
 
 
 def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
-    """
-    Compare model performance and test for improvement.
-    
-    Args:
-        results: Dictionary of model results
-        y_test: True labels
-        
-    Returns:
-        DataFrame with comparison metrics
-    """
-
-    logger.info("Comparing models...")
-    
     comparison_data = []
     
     for model_name, result in results.items():
@@ -398,101 +325,80 @@ def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
     comparison_df = pd.DataFrame(comparison_data)
     comparison_df = comparison_df.sort_values('auc', ascending=False)
     
-    logger.info("\nModel Comparison:")
-    logger.info(comparison_df.to_string(index=False))
+    print("\n" + "="*80)
+    print("MODEL PERFORMANCE")
+    print("="*80)
+    print(f"\n{'Model':<20} {'AUC':>8} {'Accuracy':>10} {'Precision':>10} {'Recall':>8} {'F1':>8} {'Features':>10}")
+    print("-"*80)
+    for _, row in comparison_df.iterrows():
+        print(f"{row['model']:<20} {row['auc']:>8.4f} {row['accuracy']:>10.4f} {row['precision']:>10.4f} {row['recall']:>8.4f} {row['f1']:>8.4f} {row['n_features']:>10}")
+    print("="*80)
     
     return comparison_df
 
 def main():
-    """Main execution."""
     args = parse_arguments()
     
-    logger.info("="*80)
-    logger.info("LOGISTIC REGRESSION ANALYSIS")
-    logger.info("Code-Switch Detection")
-    logger.info("="*80)
+    print("\n" + "="*80)
+    print("LOGISTIC REGRESSION ANALYSIS - Code-Switch Detection")
+    print("="*80)
     
-    # Load configuration
     config = Config()
     
-    # Get window sizes and context lengths from config
     window_sizes = config.get_analysis_window_sizes()
     context_lengths = config.get('context.context_lengths', [3])
     
     if not isinstance(context_lengths, list):
         context_lengths = [context_lengths]
     
-    logger.info(f"Window sizes to process: {window_sizes}")
-    logger.info(f"Context lengths to process: {context_lengths}")
-    
-    # Set up directories from config
     results_base = Path(config.get_surprisal_results_dir()) / args.model
     results_base_dir = Path(config.get_results_dir())
     output_base = results_base_dir / f"regression_{args.model}"
     
     output_base.mkdir(parents=True, exist_ok=True)
     
-    # Collect all results for consolidated output
     all_results = []
     
-    # Process each window size and context length combination
     for window_size in window_sizes:
         window_results_dir = results_base / f"window_{window_size}"
         window_results_path = window_results_dir / "surprisal_results.csv"
         
         if not window_results_path.exists():
-            logger.warning(f"Results not found for window size {window_size}: {window_results_path}")
-            logger.warning("Skipping this window size...")
+            logger.warning(f"Skipping window {window_size}: file not found")
             continue
         
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Processing window size {window_size}")
-        logger.info(f"{'='*80}")
-        
-        # Load data for this window size
         df = load_surprisal_results(window_results_path)
         
-        # Process each context length
         for context_length in context_lengths:
-            logger.info(f"\n{'-'*80}")
-            logger.info(f"Processing context length {context_length}")
-            logger.info(f"{'-'*80}")
+            print(f"\n{'─'*80}")
+            print(f"Window: {window_size} | Context: {context_length}")
+            print(f"{'─'*80}")
             
-            # Check if this context length exists in the data
             cs_surprisal_col = f'cs_surprisal_context_{context_length}'
             if cs_surprisal_col not in df.columns:
-                logger.warning(f"Context length {context_length} not found in data. Available columns: {[c for c in df.columns if 'context_' in c]}")
-                logger.warning("Skipping this context length...")
+                logger.warning(f"Context {context_length} not found, skipping...")
                 continue
             
-            # Prepare data for regression with this context length
             regression_df = prepare_data_for_regression(df, context_length=context_length)
             
             if len(regression_df) == 0:
-                logger.warning(f"No valid data for window {window_size}, context {context_length}. Skipping...")
+                logger.warning(f"No valid data, skipping...")
                 continue
             
-            # Prepare features (include surprisal and entropy in base features)
             X_base, feature_names = prepare_features(regression_df)
             
-            # Add surprisal to feature matrix
             X = X_base.copy()
             X['surprisal'] = regression_df['surprisal'].values
             feature_names = feature_names + ['surprisal']
             
-            # Only add entropy if it's available (not all NaN)
             entropy_available = regression_df['entropy'].notna().any()
             if entropy_available:
                 X['entropy'] = regression_df['entropy'].values
                 feature_names = feature_names + ['entropy']
-            else:
-                logger.warning("Entropy is not available - entropy-based models will be skipped")
             
             y = regression_df['is_code_switched']
             
-            # Split data
             random_seed = config.get('experiment.random_seed', 42)
-            logger.info(f"Splitting data (test_size={args.test_size})...")
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, 
                 test_size=args.test_size,
@@ -500,19 +406,15 @@ def main():
                 stratify=y
             )
             
-            logger.info(f"  Training set: {len(X_train)} observations")
-            logger.info(f"  Test set: {len(X_test)} observations")
+            print(f"Dataset: {len(X_train)} train, {len(X_test)} test | Features: {len(feature_names)}")
             
-            # Fit models
             results = fit_models(
                 X_train, X_test, y_train, y_test,
                 feature_names, random_state=random_seed
             )
             
-            # Compare models
             comparison_df = compare_models(results, y_test)
             
-            # Create results row for consolidated output
             results_row = create_results_row(
                 results=results,
                 model_type=args.model,
@@ -523,11 +425,9 @@ def main():
             )
             all_results.append(results_row)
             
-            # Save results and predictions for later plotting
             context_output_dir = output_base / f"window_{window_size}" / f"context_{context_length}"
             context_output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save model results (including predictions) as pickle for plotting
             import pickle
             results_pkl_path = context_output_dir / "model_results.pkl"
             plot_data = {
@@ -536,25 +436,17 @@ def main():
             }
             with open(results_pkl_path, 'wb') as f:
                 pickle.dump(plot_data, f)
-            
-            logger.info(f"Completed analysis for window {window_size}, context {context_length}")
     
-    # Save consolidated results to single CSV
     if all_results:
         results_df = pd.DataFrame(all_results)
         results_csv_path = output_base / "regression_results.csv"
         results_df.to_csv(results_csv_path, index=False)
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Saved consolidated results to: {results_csv_path}")
-        logger.info(f"Total configurations: {len(all_results)}")
+        print(f"\n{'='*80}")
+        print(f"✓ Results saved: {results_csv_path}")
+        print(f"✓ Total configurations: {len(all_results)}")
+        print(f"{'='*80}\n")
     else:
         logger.warning("No results to save!")
-    
-    logger.info("\n" + "="*80)
-    logger.info("ANALYSIS COMPLETE")
-    logger.info("="*80)
-    logger.info(f"\nResults saved to: {output_base}")
-    logger.info(f"To generate figures, run: python scripts/plots/figures.py --regression --model {args.model}")
 
 
 if __name__ == "__main__":

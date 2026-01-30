@@ -13,70 +13,49 @@ from scipy import stats
 from tqdm import tqdm
 import pycantonese
 import logging
+import torch
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
 
 logger = logging.getLogger(__name__)
 
-# Cache for word frequency lookup
-_word_frequency_cache = None
+NEUTRAL_CONTEXTS = ['係', '的', '我', '你', '在', '有', '是', '了']
 
 
-def get_word_frequency(word: str) -> float:
-    """
-    Get word frequency using pycantonese corpus data.
-    
-    
-    Args:
-        word: Cantonese word to look up
-        
-    Returns:
-        Word frequency (log-normalized), or np.nan if corpus unavailable or word not found
-    """
-
-    global _word_frequency_cache
-
-    
+def get_word_frequency(word: str, model, tokenizer, device) -> float:
     word = str(word).strip()
-
     if not word or pd.isna(word):
         return np.nan
     
-    # Initialize cache on first use
-    if _word_frequency_cache is None:
-        try:
-            # Use pycantonese's HKCanCor corpus
-            import pycantonese
-            hkcancor = pycantonese.hkcancor()
-            
-            word_freq_counter = hkcancor.word_frequencies(keep_case=True)
-            
-            # Calculate log-normalized frequencies
-            total_words = sum(word_freq_counter.values())
-            _word_frequency_cache = {}
-            
-            # Normalize by total words to get log probability
-            for w, count in word_freq_counter.items():
-                _word_frequency_cache[w] = np.log(count + 1) / np.log(total_words + 1)
-
-            print(f"Initialized word frequency cache with {len(_word_frequency_cache)} words from hkcancor")
+    try:
+        log_probs = []
         
-        except (ImportError, AttributeError) as e:
-            print(f"Warning: Could not load hkcancor corpus: {e}. Frequency calculation unavailable.")
-            _word_frequency_cache = None
+        for context in NEUTRAL_CONTEXTS:
+            text = f"{context} {word}"
+            inputs = tokenizer(text, return_tensors="pt").to(device)
+            
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits
+            
+            input_ids = inputs.input_ids[0]
+            word_token_start = len(tokenizer(context, add_special_tokens=False).input_ids) + 1
+            
+            token_log_probs = []
+            for i in range(word_token_start, len(input_ids)):
+                token_logits = logits[0, i-1, :]
+                log_prob_dist = torch.log_softmax(token_logits, dim=-1)
+                token_log_prob = log_prob_dist[input_ids[i]].item()
+                token_log_probs.append(token_log_prob)
+            
+            if token_log_probs:
+                log_probs.append(np.mean(token_log_probs))
         
-        except Exception as e:
-            print(f"Warning: Error initializing frequency cache: {e}. Frequency calculation unavailable.")
-            _word_frequency_cache = None
-    
-
-    if _word_frequency_cache is None:
+        return np.mean(log_probs) if log_probs else np.nan
+        
+    except Exception as e:
+        logger.warning(f"Failed to calculate model-based frequency for '{word}': {e}")
         return np.nan
-    
-    if word in _word_frequency_cache:
-        return _word_frequency_cache[word]
-    
-    return np.nan
 
 
 def calculate_surprisal_for_dataset(
@@ -226,11 +205,21 @@ def calculate_surprisal_for_dataset(
         # Store word-level metadata (same for all context lengths)
         result['cs_word'] = cs_word_info['word']
         result['cs_num_tokens'] = cs_word_info['num_tokens']
-        result['cs_word_frequency'] = get_word_frequency(cs_word_info['word']) if pd.notna(cs_word_info['word']) else np.nan
+        result['cs_word_frequency'] = get_word_frequency(
+            cs_word_info['word'], 
+            surprisal_calc.model, 
+            surprisal_calc.tokenizer,
+            surprisal_calc.device
+        ) if pd.notna(cs_word_info['word']) else np.nan
         
         result['mono_word'] = mono_word_info['word']
         result['mono_num_tokens'] = mono_word_info['num_tokens']
-        result['mono_word_frequency'] = get_word_frequency(mono_word_info['word']) if pd.notna(mono_word_info['word']) else np.nan
+        result['mono_word_frequency'] = get_word_frequency(
+            mono_word_info['word'],
+            surprisal_calc.model,
+            surprisal_calc.tokenizer,
+            surprisal_calc.device
+        ) if pd.notna(mono_word_info['word']) else np.nan
         
         # Calculate surprisal for each context length
         if context_lengths:
