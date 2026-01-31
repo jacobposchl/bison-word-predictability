@@ -299,7 +299,7 @@ class MaskedLMSurprisalCalculator:
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
-            'num_tokens': len(token_indices),
+            'num_chars': len(target_word) if target_word else 0,
             'num_valid_tokens': len(valid_surprisals)
         }
 
@@ -534,7 +534,7 @@ class AutoregressiveLMSurprisalCalculator:
                 'word': target_word,
                 'tokens': [],
                 'token_surprisals': [],
-                'num_tokens': 0,
+                'num_chars': len(target_word) if target_word else 0,
                 'num_valid_tokens': 0
             }
 
@@ -648,7 +648,7 @@ class AutoregressiveLMSurprisalCalculator:
             'word': target_word,
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
-            'num_tokens': len(token_indices),
+            'num_chars': len(target_word) if target_word else 0,
             'num_valid_tokens': len(valid_surprisals)
         }
 

@@ -99,6 +99,51 @@ def load_surprisal_results(results_path: Path) -> pd.DataFrame:
 
 
 def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) -> pd.DataFrame:
+    if 'is_switch' in df.columns:
+        if context_length is not None:
+            surprisal_col = f'surprisal_context_{context_length}'
+            entropy_col = f'entropy_context_{context_length}'
+        else:
+            surprisal_col = 'surprisal'
+            entropy_col = 'entropy'
+
+        rows = []
+
+        for idx, row in df.iterrows():
+            word = row.get('word', '')
+            word_length = row.get('num_chars', len(str(word)) if pd.notna(word) else 0)
+            sentence_length = row.get('sent_length', np.nan)
+            position_normalized = row.get('normalized_switch_point', np.nan)
+            pos_tag = row.get('switch_pos', row.get('pos_tag', 'UNKNOWN'))
+            word_frequency = row.get('word_frequency', np.nan)
+            group = row.get('group', 'Unknown')
+
+            rows.append({
+                'is_code_switched': int(row.get('is_switch', 0)),
+                'word': word if pd.notna(word) else '',
+                'word_length': word_length,
+                'sentence_length': sentence_length,
+                'position_normalized': position_normalized,
+                'pos_tag': pos_tag,
+                'word_frequency': word_frequency,
+                'group': group if pd.notna(group) else 'Unknown',
+                'surprisal': row.get(surprisal_col, np.nan),
+                'entropy': row.get(entropy_col, np.nan),
+                'sentence_id': row.get('sent_id', idx),
+                'original_row_id': row.get('sent_id', idx)
+            })
+
+        result_df = pd.DataFrame(rows)
+
+        n_before = len(result_df)
+        result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
+        n_after = len(result_df)
+
+        if n_before > n_after:
+            logger.warning(f"Dropped {n_before - n_after} rows with missing data")
+
+        return result_df
+
     rows = []
     
     for idx, row in df.iterrows():

@@ -39,7 +39,8 @@ from src.core.config import Config
 from src.experiments.surprisal_calculator import create_surprisal_calculator
 from src.experiments.surprisal_analysis import (
     calculate_surprisal_for_dataset,
-    compute_statistics
+    compute_statistics,
+    convert_surprisal_results_to_long
 )
 from src.plots.surprisal.report_generator import generate_surprisal_statistics_report
 
@@ -257,9 +258,10 @@ def main():
                 context_lengths=context_lengths
             )
             
-            # Save results
+            # Save results (long format)
             results_csv_path = mode_results_dir / "surprisal_results.csv"
-            results_df.to_csv(results_csv_path, index=False)
+            long_results_df = convert_surprisal_results_to_long(results_df)
+            long_results_df.to_csv(results_csv_path, index=False)
             
             # Compute statistics for each context length
             all_stats = {}

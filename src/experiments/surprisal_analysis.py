@@ -94,10 +94,10 @@ def calculate_surprisal_for_dataset(
             - mono_entropy_context_{N}: Entropy of probability distribution at mono word position
             - surprisal_difference_context_{N}: cs_surprisal - mono_surprisal
             - cs_word: Word at switch point in CS translation
-            - cs_num_tokens: Number of subword tokens for CS word
+            - cs_num_chars: Number of characters in CS word
             - cs_word_frequency: Word frequency from pycantonese corpus
             - mono_word: Word at matched position in mono sentence
-            - mono_num_tokens: Number of subword tokens for mono word
+            - mono_num_chars: Number of characters in mono word
             - mono_word_frequency: Word frequency from pycantonese corpus
             
         Note: Rows with failed calculations (NaN surprisal values) are automatically filtered out.
@@ -126,6 +126,7 @@ def calculate_surprisal_for_dataset(
     
     for idx, row in iterator:
         result = row.to_dict()
+        result['sent_id'] = idx
         
         for col in COLUMNS_TO_EXCLUDE:
             result.pop(col, None)
@@ -175,9 +176,8 @@ def calculate_surprisal_for_dataset(
         
         
         cs_words = row['cs_translation'].split()
+        cs_sent_length = len(cs_words)
         
-        
-        # switch_index is already 0-based and points to the switch word
         switch_token_idx = int(row.get('switch_index', 0))
         
         if switch_token_idx >= len(cs_words):
@@ -185,11 +185,16 @@ def calculate_surprisal_for_dataset(
         
 
         mono_words = pycantonese.segment(row['matched_mono'])
+        mono_sent_length = len(mono_words)
         matched_switch_idx = int(row['matched_switch_index'])
         
         if matched_switch_idx >= len(mono_words):
             raise ValueError(f"Matched switch index {matched_switch_idx} out of bounds for sentence with {len(mono_words)} words. Cannot measure surprisal at switch word position (matched_switch_index={row['matched_switch_index']}, sentence_length={len(mono_words)}).")
         
+        result['cs_sent_length'] = cs_sent_length
+        result['mono_sent_length'] = mono_sent_length
+        result['cs_normalized_switch_point'] = switch_token_idx / cs_sent_length
+        result['mono_normalized_switch_point'] = matched_switch_idx / mono_sent_length
 
         cs_word_info = surprisal_calc.calculate_surprisal(
             word_index=switch_token_idx,
@@ -204,7 +209,7 @@ def calculate_surprisal_for_dataset(
         
         # Store word-level metadata (same for all context lengths)
         result['cs_word'] = cs_word_info['word']
-        result['cs_num_tokens'] = cs_word_info['num_tokens']
+        result['cs_num_chars'] = cs_word_info['num_chars']
         result['cs_word_frequency'] = get_word_frequency(
             cs_word_info['word'], 
             surprisal_calc.model, 
@@ -213,7 +218,7 @@ def calculate_surprisal_for_dataset(
         ) if pd.notna(cs_word_info['word']) else np.nan
         
         result['mono_word'] = mono_word_info['word']
-        result['mono_num_tokens'] = mono_word_info['num_tokens']
+        result['mono_num_chars'] = mono_word_info['num_chars']
         result['mono_word_frequency'] = get_word_frequency(
             mono_word_info['word'],
             surprisal_calc.model,
@@ -267,6 +272,102 @@ def calculate_surprisal_for_dataset(
         logger.info(f"Context clipped for {surprisal_calc.context_clipped_count} sentences due to max_length constraint")
     
     return results_df
+
+
+def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
+    if 'sent_id' not in results_df.columns:
+        results_df = results_df.copy()
+        results_df['sent_id'] = results_df.index
+
+    if 'is_switch' in results_df.columns:
+        long_df = results_df.copy()
+    else:
+        exclude_shared = {'matched_mono', 'matched_switch_index', 'matched_group'}
+        shared_cols = [
+            col for col in results_df.columns
+            if not col.startswith('cs_') and not col.startswith('mono_') and col not in exclude_shared
+        ]
+
+        cs_cols = [col for col in results_df.columns if col.startswith('cs_')]
+        mono_cols = [col for col in results_df.columns if col.startswith('mono_')]
+
+        long_rows = []
+
+        for _, row in results_df.iterrows():
+            base_shared = {col: row[col] for col in shared_cols}
+
+            cs_row = base_shared.copy()
+            cs_row['is_switch'] = 1
+
+            mono_row = base_shared.copy()
+            mono_row['is_switch'] = 0
+
+            for col in cs_cols:
+                base_col = col[len('cs_'):]
+                if base_col == 'translation':
+                    base_col = 'sentence'
+                cs_row[base_col] = row[col]
+
+            for col in mono_cols:
+                base_col = col[len('mono_'):]
+                if base_col == 'translation':
+                    base_col = 'sentence'
+                mono_row[base_col] = row[col]
+
+            if 'matched_mono' in results_df.columns:
+                mono_row['sentence'] = row['matched_mono']
+
+            if 'matched_switch_index' in results_df.columns:
+                mono_row['switch_index'] = row['matched_switch_index']
+
+            if 'matched_group' in results_df.columns:
+                mono_row['group'] = row['matched_group']
+
+            long_rows.append(cs_row)
+            long_rows.append(mono_row)
+
+        long_df = pd.DataFrame(long_rows)
+
+    drop_cols = [
+        col for col in long_df.columns
+        if col == 'similarity' or col.startswith('surprisal_difference_context_') or col.startswith('surprisal_difference_')
+    ]
+    if drop_cols:
+        long_df = long_df.drop(columns=drop_cols)
+
+    context_numbers = []
+    for col in long_df.columns:
+        if col.startswith('surprisal_context_'):
+            try:
+                context_numbers.append(int(col.split('_')[-1]))
+            except ValueError:
+                continue
+    context_numbers = sorted(set(context_numbers))
+
+    ordered_cols = [
+        'sent_id',
+        'is_switch'
+    ]
+
+    for ctx in context_numbers:
+        ordered_cols.append(f'surprisal_context_{ctx}')
+        ordered_cols.append(f'entropy_context_{ctx}')
+
+    ordered_cols.extend([
+        'num_chars',
+        'sent_length',
+        'switch_index',
+        'normalized_switch_point',
+        'word_frequency',
+        'word',
+        'sentence',
+        'context'
+    ])
+
+    remaining_cols = [col for col in long_df.columns if col not in ordered_cols]
+    final_cols = [col for col in ordered_cols if col in long_df.columns] + remaining_cols
+
+    return long_df[final_cols]
 
 
 def compute_statistics(results_df: pd.DataFrame, context_length: int) -> Dict:

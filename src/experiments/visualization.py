@@ -234,12 +234,8 @@ def plot_difference_histogram(
     """
     setup_plot_style()
     
-    # Filter for complete calculations only (all tokens valid)
-    valid_df = results_df[results_df['calculation_success'] == True].copy()
-    complete_df = valid_df[
-        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
-        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
-    ].copy()
+    # Filter for complete calculations only
+    complete_df = results_df[results_df['calculation_success'] == True].copy()
     
     # Determine which column to use
     if context_length is not None:
@@ -317,12 +313,8 @@ def plot_summary_statistics(
     """
     setup_plot_style()
     
-    # Filter for complete calculations only (all tokens valid)
-    valid_df = results_df[results_df['calculation_success'] == True].copy()
-    complete_df = valid_df[
-        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
-        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
-    ].copy()
+    # Filter for complete calculations only
+    complete_df = results_df[results_df['calculation_success'] == True].copy()
     
     # Determine which columns to use
     if context_length is not None:

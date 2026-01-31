@@ -285,11 +285,7 @@ def plot_surprisal_differences_by_context(
             df = datasets[window_size][context_length]
             
             # Filter for complete calculations
-            valid_df = df[df['calculation_success'] == True].copy()
-            complete_df = valid_df[
-                (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
-                (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
-            ].copy()
+            complete_df = df[df['calculation_success'] == True].copy()
             
             # Extract difference for this context
             diff_col = f'surprisal_difference_context_{context_length}'
