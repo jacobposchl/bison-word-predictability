@@ -25,9 +25,6 @@ from .pos_tagging import (
 
 logger = logging.getLogger(__name__)
 
-# Global cache for monolingual POS sequences
-_monolingual_pos_cache = {}
-
 
 def build_monolingual_pos_cache(monolingual_sentences: List[Dict]) -> Dict[int, List[str]]:
     """
@@ -175,9 +172,55 @@ def extract_pos_window(
     return pos_sequence[start:end]
 
 
+def filter_by_full_sentence_similarity(
+    cs_pos_sequence: List[str],
+    monolingual_sentences: List[Dict],
+    mono_pos_cache: Dict[int, List[str]],
+    threshold: float = 0.4
+) -> List[Tuple[int, Dict, float]]:
+    """
+    Filter monolingual sentences by full POS structure similarity.
+    
+    This is Stage 1 of the two-stage matching process. Only sentences with
+    full POS structure similarity >= threshold are considered for exact window matching.
+    
+    Args:
+        cs_pos_sequence: Full POS sequence from code-switched sentence
+        monolingual_sentences: List of monolingual sentence dictionaries
+        mono_pos_cache: Pre-computed POS cache mapping index to POS sequence
+        threshold: Minimum Levenshtein similarity for full sentence (0-1)
+        
+    Returns:
+        List of (index, sentence_dict, full_similarity) tuples that pass threshold
+    """
+    candidates = []
+    
+    for idx, mono_sent in enumerate(monolingual_sentences):
+        mono_pos_seq = mono_pos_cache.get(idx, [])
+        
+        if not mono_pos_seq:
+            continue
+        
+        # Compare FULL POS sequences
+        full_similarity = levenshtein_similarity(cs_pos_sequence, mono_pos_seq)
+        
+        if full_similarity >= threshold:
+            candidates.append((idx, mono_sent, full_similarity))
+    
+    return candidates
+
+
 def rank_matches_by_context( matches: List[Dict], source_sentence: Dict ) -> List[Dict]:
     """
-    Rank matches by contextual relevance: same speaker > same group > time proximity (only for same speaker).
+    Rank matches by contextual relevance:
+    - Same speaker: time proximity (closer = more relevant)
+    - Different speaker: similarity score (higher = more relevant)
+    
+    Hierarchical ranking:
+    1. Same speaker first (prioritized over different speakers)
+    2. Same group second (within same speaker priority)
+    3. For same speaker: rank by time proximity (ascending)
+    4. For different speaker: rank by similarity score (descending)
     
     Args:
         matches: List of match dictionaries from find_window_matches
@@ -195,15 +238,19 @@ def rank_matches_by_context( matches: List[Dict], source_sentence: Dict ) -> Lis
         """
         Create composite sort key for match ranking.
         
-        Returns tuple of (same_speaker_priority, same_group_priority, time_distance)
+        Returns tuple of (same_speaker_priority, same_group_priority, tertiary_metric)
         where lower values are better (sorted ascending).
-        Time distance is only meaningful for same-speaker matches.
+        
+        Tertiary metric depends on speaker:
+        - Same speaker: time distance (lower = closer in time = better)
+        - Different speaker: negative similarity (lower = higher similarity = better)
         """
         
         match_sent = match.get('match_sentence', {})
         match_group = match_sent.get('group', '')
         match_speaker = match_sent.get('participant_id', '')
         match_time = match_sent.get('start_time', 0.0)
+        similarity = match.get('similarity', 0.0)
         
         # Priority 1: Same speaker (0 if same, 1 if different)
         same_speaker_priority = 0 if match_speaker == source_speaker else 1
@@ -211,15 +258,16 @@ def rank_matches_by_context( matches: List[Dict], source_sentence: Dict ) -> Lis
         # Priority 2: Same group (0 if same, 1 if different)
         same_group_priority = 0 if match_group == source_group else 1
         
-        # Priority 3: Time proximity (only meaningful for same speaker)
+        # Priority 3: Context-dependent metric
         if match_speaker == source_speaker:
-            # Use actual time distance for same speaker
-            time_distance = abs(match_time - source_time)
+            # Same speaker: rank by time proximity (lower distance = better)
+            tertiary_metric = abs(match_time - source_time)
         else:
-            # Use large constant for different speakers (time proximity doesn't matter)
-            time_distance = float('inf')
+            # Different speaker: rank by similarity (negate so higher similarity = lower value = better)
+            # Use negative similarity so higher similarity scores come first when sorting ascending
+            tertiary_metric = -similarity
         
-        return (same_speaker_priority, same_group_priority, time_distance)
+        return (same_speaker_priority, same_group_priority, tertiary_metric)
     
     # Sort by the composite key
     ranked_matches = sorted(matches, key=sort_key)
@@ -233,33 +281,36 @@ def find_window_matches(
     window_size: int = 1,
     similarity_threshold: float = 0.4,
     mono_pos_cache: Optional[Dict[int, List[str]]] = None
-) -> List[Dict]:
+) -> Tuple[List[Dict], int, int]:
     """
     Find monolingual sentences matching POS window around switch point.
     
-    This function:
-    1. Identifies the switch point in the code-switched sentence
-    2. Extracts a window of n words before and after the switch
-    3. Finds all monolingual sentences with similar POS sequences
-    4. Returns matches with similarity >= threshold
+    Two-stage matching process:
+    1. Stage 1: Filter monolingual sentences by full POS structure similarity >= threshold
+    2. Stage 2: From filtered sentences, find exact matches for POS window around switch point
+    
+    This ensures both global sentence structure similarity AND local exact window matching.
     
     Args:
         code_switched_sentence: Dict with 'cantonese_translation', 'translated_pos',
                                'switch_index', 'pattern', 'group', 'participant_id', etc.
         monolingual_sentences: List of Cantonese monolingual sentence dicts
         window_size: Number of words before/after switch point (n)
-        similarity_threshold: Minimum Levenshtein similarity (0-1)
+        similarity_threshold: Minimum Levenshtein similarity for full sentence structure (0-1)
         mono_pos_cache: Optional pre-computed cache mapping sentence index to POS sequence.
                        If provided, avoids repeated string splitting for better performance.
         
     Returns:
-        List of match dictionaries with:
-        - 'match_sentence': The matched monolingual sentence
-        - 'similarity': Similarity score (0-1)
-        - 'window_size': The window size used
-        - 'pos_window': POS sequence from code-switched sentence
-        - 'matched_pos': POS sequence from monolingual sentence
-        - 'matched_window_start': Starting index of match in monolingual sentence
+        Tuple of (matches, stage1_count, stage2_count) where:
+        - matches: List of match dictionaries with:
+            - 'match_sentence': The matched monolingual sentence
+            - 'similarity': Full POS structure similarity (0-1)
+            - 'window_size': The window size used
+            - 'pos_window': POS sequence from code-switched sentence
+            - 'matched_pos': POS sequence from monolingual sentence (exact match)
+            - 'matched_window_start': Starting index of match in monolingual sentence
+        - stage1_count: Number of sentences that passed Stage 1 (full sentence similarity)
+        - stage2_count: Number of sentences that passed Stage 2 (exact window match)
     """
     # Extract switch point information
     switch_index = code_switched_sentence.get('switch_index', -1)
@@ -267,17 +318,15 @@ def find_window_matches(
     pattern = code_switched_sentence.get('pattern', '')
     
     if switch_index < 0 or not translated_pos:
-        return []
+        return [], 0, 0
     
     # Parse POS sequence
     pos_sequence = translated_pos.split()
     
     if not pos_sequence:
-        return []
+        return [], 0, 0
     
     # Validate switch_index is within bounds
-    # This should never happen if translation preserves Cantonese segments correctly.
-    # If it does, it indicates a data quality issue (translation or POS tagging problem).
     if switch_index >= len(pos_sequence):
         logger.error(
             f"switch_index ({switch_index}) is out of bounds for POS sequence length ({len(pos_sequence)}) "
@@ -285,7 +334,7 @@ def find_window_matches(
             f"may have failed. The first {switch_index} Cantonese words should be preserved exactly. "
             f"Skipping this sentence."
         )
-        return []
+        return [], 0, 0
     
     # Extract POS window around switch point
     window_start = max(0, switch_index - window_size)
@@ -293,82 +342,70 @@ def find_window_matches(
     pos_window = pos_sequence[window_start:window_end]
     
     if not pos_window:
-        return []
+        return [], 0, 0
     
     # Calculate the position of switch_index within the window
-    # This allows us to directly map the switch position to matched sentences
     switch_index_in_window = switch_index - window_start
     
+    # STAGE 1: Filter by full sentence POS structure similarity
+    if mono_pos_cache is None:
+        # Build temporary cache if not provided
+        mono_pos_cache = build_monolingual_pos_cache(monolingual_sentences)
+    
+    candidate_sentences = filter_by_full_sentence_similarity(
+        cs_pos_sequence=pos_sequence,
+        monolingual_sentences=monolingual_sentences,
+        mono_pos_cache=mono_pos_cache,
+        threshold=similarity_threshold
+    )
+    
+    # Track Stage 1 statistics
+    stage1_count = len(candidate_sentences)
+
+    if not candidate_sentences:
+        return [], stage1_count, 0
+    
+    # STAGE 2: Find exact window matches from candidates
     matches = []
     window_len = len(pos_window)
     
-    # Search through all monolingual sentences
-    for idx, mono_sent in enumerate(monolingual_sentences):
-        # Use cache if available, otherwise parse on the fly
-        if mono_pos_cache is not None:
-            mono_pos_seq = mono_pos_cache.get(idx, [])
-        else:
-            mono_pos_str = mono_sent.get('pos', '')
-            if not mono_pos_str:
-                continue
-            mono_pos_seq = mono_pos_str.split()
+    for idx, mono_sent, full_similarity in candidate_sentences:
+        mono_pos_seq = mono_pos_cache[idx]
         
-        if not mono_pos_seq:
-            continue
-        
-        # Try all possible windows in the monolingual sentence
-        best_similarity = 0.0
-        best_window = []
-        best_start_idx = -1
-        
-        # Sliding window
+        # Sliding window to find EXACT match
         for i in range(len(mono_pos_seq) - window_len + 1):
             mono_window = mono_pos_seq[i:i + window_len]
-            similarity = levenshtein_similarity(pos_window, mono_window)
             
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_window = mono_window
-                best_start_idx = i
-
-        # Also try comparing to full sequence if monolingual is shorter than window
-        if len(mono_pos_seq) < window_len:
-            similarity = levenshtein_similarity(pos_window, mono_pos_seq)
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_window = mono_pos_seq
-                best_start_idx = 0
-        
-        # Keep if above threshold AND we found a valid window position
-        # best_start_idx will be -1 if no window was ever found (all similarities were 0.0)
-        if best_similarity >= similarity_threshold and best_start_idx >= 0:
-            # Direct mapping: switch_index is at position switch_index_in_window within the CS window
-            # When we find a match starting at best_start_idx, the equivalent switch_index
-            # in the matched sentence is at best_start_idx + switch_index_in_window
-            matched_switch_index = best_start_idx + switch_index_in_window
-            # Ensure index is within bounds of monolingual sentence
-            matched_switch_index = min(matched_switch_index, len(mono_pos_seq) - 1)
-            
-            # Extract POS tags at switch positions
-            cs_switch_pos = pos_sequence[switch_index] if switch_index < len(pos_sequence) else 'UNKNOWN'
-            mono_switch_pos = mono_pos_seq[matched_switch_index] if matched_switch_index < len(mono_pos_seq) else 'UNKNOWN'
-            
-            matches.append({
-                'match_sentence': mono_sent,
-                'similarity': best_similarity,
-                'window_size': window_size,
-                'pos_window': ' '.join(pos_window),
-                'matched_pos': ' '.join(best_window),
-                'matched_window_start': best_start_idx,
-                'matched_switch_index': matched_switch_index,
-                'cs_switch_pos': cs_switch_pos,
-                'mono_switch_pos': mono_switch_pos
-            })
+            # EXACT comparison
+            if mono_window == pos_window:
+                # Direct mapping: switch_index is at position switch_index_in_window within the CS window
+                # When window matches at position i, the switch point maps to i + switch_index_in_window
+                matched_switch_index = i + switch_index_in_window
+                
+                # Extract POS tags at switch positions
+                cs_switch_pos = pos_sequence[switch_index]
+                mono_switch_pos = mono_pos_seq[matched_switch_index]
+                
+                matches.append({
+                    'match_sentence': mono_sent,
+                    'similarity': full_similarity,  # Store full sentence similarity
+                    'window_size': window_size,
+                    'pos_window': ' '.join(pos_window),
+                    'matched_pos': ' '.join(mono_window),
+                    'matched_window_start': i,
+                    'matched_switch_index': matched_switch_index,
+                    'cs_switch_pos': cs_switch_pos,
+                    'mono_switch_pos': mono_switch_pos
+                })
+                break  # Found exact match, no need to check other positions in this sentence
     
-    return matches
+    # Track Stage 2 statistics
+    stage2_count = len(matches)
+    
+    return matches, stage1_count, stage2_count
 
 
-def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float]]:
+def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float], int, int, int]:
     """
     Worker function to process a single code-switched sentence.
     
@@ -384,16 +421,19 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
             - top_k: Number of top matches to keep
             
     Returns:
-        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores) where:
+        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count) where:
         - cs_sent: The original code-switched sentence
         - detailed_matches: List of detailed match dictionaries (top_k matches)
         - has_matches: 1 if matches found, 0 otherwise
         - similarity_scores: List of similarity scores from ALL matches (not just top_k)
+        - total_matches_all: Total number of matches above threshold (before top_k truncation)
+        - stage1_count: Number of sentences passing Stage 1 (full sentence similarity)
+        - stage2_count: Number of sentences passing Stage 2 (exact window match)
     """
     cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k = args
     
     # Find all matches for this sentence
-    matches = find_window_matches(
+    matches, stage1_count, stage2_count = find_window_matches(
         cs_sent,
         monolingual_sentences,
         window_size=window_size,
@@ -456,7 +496,10 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
             }
             detailed_matches.append(detailed_match)
     
-    return (cs_sent, detailed_matches, has_matches, similarity_scores)
+    # total_matches_all is the count before top_k truncation
+    total_matches_all = len(matches) if matches else 0
+    
+    return (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count)
 
 
 def analyze_window_matching(
@@ -494,12 +537,27 @@ def analyze_window_matching(
                 'total_sentences': int,
                 'sentences_with_matches': int,
                 'match_rate': float,
-                'total_matches': int,
-                'avg_matches_per_sentence': float,
+                'total_matches': int,  # Top-k matches stored
+                'avg_matches_per_sentence': float,  # Average top-k matches
                 'avg_similarity': float,
                 'similarity_scores': List[float],
                 'detailed_matches': List[Dict],
-                'example_matches': List[Dict]  # Top 3-5 examples with their top 5 matches
+                'example_matches': List[Dict],
+                # Global statistics (all matches, not just top_k)
+                'total_matches_all': int,  # Total matches above threshold
+                'avg_matches_all': float,  # Average of all matches per sentence
+                # Match distribution statistics
+                'match_counts_per_sentence': List[int],  # Match count for each sentence
+                'min_matches': int,
+                'max_matches': int,
+                'median_matches': float,
+                'std_matches': float,
+                # Stage-level filtering statistics
+                'stage1_passed': int,  # Total sentences passing Stage 1 (full similarity)
+                'stage2_passed': int,  # Total sentences passing Stage 2 (exact window)
+                'stage1_pass_rate': float,  # % of sentence pairs passing Stage 1
+                'stage2_pass_rate': float,  # % of Stage 1 candidates passing Stage 2
+                'overall_pass_rate': float  # % of sentence pairs passing both stages
             },
             'window_2': {...},
             'window_3': {...}
@@ -541,6 +599,10 @@ def analyze_window_matching(
         detailed_matches = []
         similarity_scores = []
         sentences_with_matches = 0
+        total_matches_all_sentences = 0  # NEW: Track total matches before top_k truncation
+        total_stage1_passed = 0  # NEW: Track sentences passing Stage 1
+        total_stage2_passed = 0  # NEW: Track sentences passing Stage 2
+        match_counts_per_sentence = []  # NEW: Track match distribution
         
         # Prepare arguments for workers
         worker_args = [
@@ -566,7 +628,17 @@ def analyze_window_matching(
                 ))
         
         # Process results
-        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores in processing_results:
+        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores, total_matches_all, stage1_count, stage2_count in processing_results:
+            # Aggregate stage statistics
+            total_stage1_passed += stage1_count
+            total_stage2_passed += stage2_count
+            
+            # Track match count for this sentence (all matches, not just top_k)
+            match_counts_per_sentence.append(total_matches_all)
+            
+            # Aggregate total matches across all sentences (before top_k truncation)
+            total_matches_all_sentences += total_matches_all
+            
             if has_matches:
                 sentences_with_matches += 1
                 detailed_matches.extend(sent_detailed_matches)
@@ -579,6 +651,27 @@ def analyze_window_matching(
         total_matches = len(detailed_matches)
         avg_matches = total_matches / total_sentences if total_sentences > 0 else 0.0
         avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+        
+        # NEW: Calculate match count distribution statistics
+        from statistics import median, stdev
+        
+        if match_counts_per_sentence:
+            min_matches = min(match_counts_per_sentence)
+            max_matches = max(match_counts_per_sentence)
+            median_matches = median(match_counts_per_sentence)
+            std_matches = stdev(match_counts_per_sentence) if len(match_counts_per_sentence) > 1 else 0.0
+            avg_matches_all = sum(match_counts_per_sentence) / len(match_counts_per_sentence)
+        else:
+            min_matches = 0
+            max_matches = 0
+            median_matches = 0.0
+            std_matches = 0.0
+            avg_matches_all = 0.0
+        
+        # NEW: Calculate stage pass rates
+        stage1_pass_rate = total_stage1_passed / (total_sentences * len(monolingual_sentences)) if total_sentences > 0 else 0.0
+        stage2_pass_rate = total_stage2_passed / total_stage1_passed if total_stage1_passed > 0 else 0.0
+        overall_pass_rate = total_stage2_passed / (total_sentences * len(monolingual_sentences)) if total_sentences > 0 else 0.0
         
         # Select example matches (sentences with highest average similarity in top-5)
         sentence_avg_similarities = {}
@@ -624,7 +717,22 @@ def analyze_window_matching(
             'avg_similarity': avg_similarity,
             'similarity_scores': similarity_scores,
             'detailed_matches': detailed_matches,
-            'example_matches': example_matches
+            'example_matches': example_matches,
+            # NEW: Global statistics for all matches (not just top_k)
+            'total_matches_all': total_matches_all_sentences,
+            'avg_matches_all': avg_matches_all,
+            # NEW: Match count distribution statistics
+            'match_counts_per_sentence': match_counts_per_sentence,
+            'min_matches': min_matches,
+            'max_matches': max_matches,
+            'median_matches': median_matches,
+            'std_matches': std_matches,
+            # NEW: Stage-level statistics
+            'stage1_passed': total_stage1_passed,
+            'stage2_passed': total_stage2_passed,
+            'stage1_pass_rate': stage1_pass_rate,
+            'stage2_pass_rate': stage2_pass_rate,
+            'overall_pass_rate': overall_pass_rate
         }
     
     return results

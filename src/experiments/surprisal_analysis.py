@@ -94,10 +94,10 @@ def calculate_surprisal_for_dataset(
             - mono_entropy_context_{N}: Entropy of probability distribution at mono word position
             - surprisal_difference_context_{N}: cs_surprisal - mono_surprisal
             - cs_word: Word at switch point in CS translation
-            - cs_num_chars: Number of characters in CS word
+            - cs_word_length: Number of characters in CS word
             - cs_word_frequency: Word frequency from pycantonese corpus
             - mono_word: Word at matched position in mono sentence
-            - mono_num_chars: Number of characters in mono word
+            - mono_word_length: Number of characters in mono word
             - mono_word_frequency: Word frequency from pycantonese corpus
             
         Note: Rows with failed calculations (NaN surprisal values) are automatically filtered out.
@@ -127,6 +127,9 @@ def calculate_surprisal_for_dataset(
     for idx, row in iterator:
         result = row.to_dict()
         result['sent_id'] = idx
+        
+        # Preserve the original code-switched sentence
+        result['cs_original_sentence'] = row.get('cs_sentence', '')
         
         for col in COLUMNS_TO_EXCLUDE:
             result.pop(col, None)
@@ -209,7 +212,7 @@ def calculate_surprisal_for_dataset(
         
         # Store word-level metadata (same for all context lengths)
         result['cs_word'] = cs_word_info['word']
-        result['cs_num_chars'] = cs_word_info['num_chars']
+        result['cs_word_length'] = cs_word_info['num_chars']
         result['cs_word_frequency'] = get_word_frequency(
             cs_word_info['word'], 
             surprisal_calc.model, 
@@ -218,7 +221,7 @@ def calculate_surprisal_for_dataset(
         ) if pd.notna(cs_word_info['word']) else np.nan
         
         result['mono_word'] = mono_word_info['word']
-        result['mono_num_chars'] = mono_word_info['num_chars']
+        result['mono_word_length'] = mono_word_info['num_chars']
         result['mono_word_frequency'] = get_word_frequency(
             mono_word_info['word'],
             surprisal_calc.model,
@@ -328,6 +331,9 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
 
         long_df = pd.DataFrame(long_rows)
 
+    if 'num_chars' in long_df.columns and 'word_length' not in long_df.columns:
+        long_df = long_df.rename(columns={'num_chars': 'word_length'})
+
     drop_cols = [
         col for col in long_df.columns
         if col == 'similarity' or col.startswith('surprisal_difference_context_') or col.startswith('surprisal_difference_')
@@ -346,7 +352,8 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
 
     ordered_cols = [
         'sent_id',
-        'is_switch'
+        'is_switch',
+        'cs_original_sentence'
     ]
 
     for ctx in context_numbers:
@@ -354,10 +361,11 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
         ordered_cols.append(f'entropy_context_{ctx}')
 
     ordered_cols.extend([
-        'num_chars',
+        'word_length',
         'sent_length',
         'switch_index',
         'normalized_switch_point',
+        'switch_pos',
         'word_frequency',
         'word',
         'sentence',

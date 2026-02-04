@@ -394,6 +394,8 @@ def create_analysis_dataset(
                 'matched_start_time': best_match['matched_start_time'],
                 'matched_pos': best_match['matched_pos'],
                 'matched_switch_index': best_match['matched_switch_index'],  # Center of matched POS window
+                'cs_switch_pos': best_match.get('cs_switch_pos', 'UNKNOWN'),
+                'mono_switch_pos': best_match.get('mono_switch_pos', 'UNKNOWN'),
                 'similarity': best_match['similarity'],
                 # Keep matched_participant temporarily for context retrieval (removed later)
                 'matched_participant': best_match['matched_participant'],

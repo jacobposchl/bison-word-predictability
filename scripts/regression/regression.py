@@ -111,7 +111,7 @@ def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) ->
 
         for idx, row in df.iterrows():
             word = row.get('word', '')
-            word_length = row.get('num_chars', len(str(word)) if pd.notna(word) else 0)
+            word_length = row.get('word_length', len(str(word)) if pd.notna(word) else 0)
             sentence_length = row.get('sent_length', np.nan)
             position_normalized = row.get('normalized_switch_point', np.nan)
             pos_tag = row.get('switch_pos', row.get('pos_tag', 'UNKNOWN'))

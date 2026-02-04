@@ -44,10 +44,10 @@ def generate_window_matching_report(
     
     # Table header
     report_lines.append(f"{'Window':>8} {'Total':>8} {'Matched':>8} {'Match %':>10} "
-                       f"{'Total':>10} {'Avg/Sent':>10} {'Avg Sim':>10}")
+                       f"{'Total':>10} {'All':>10} {'Avg/Sent':>10} {'Avg Sim':>10}")
     report_lines.append(f"{'Size':>8} {'Sents':>8} {'Sents':>8} {'':>10} "
-                       f"{'Matches':>10} {'':>10} {'':>10}")
-    report_lines.append("-" * 80)
+                       f"{'Top-K':>10} {'Matches':>10} {'(Top-K)':>10} {'':>10}")
+    report_lines.append("-" * 90)
     
     # Process each window size
     for window_key in sorted(window_results.keys()):
@@ -56,6 +56,7 @@ def generate_window_matching_report(
         total_sentences = results['total_sentences']
         matched_sentences = results['sentences_with_matches']
         total_matches = results['total_matches']
+        total_matches_all = results.get('total_matches_all', total_matches)  # Use all matches if available
         similarity_scores = results['similarity_scores']
         
         match_rate = (matched_sentences / total_sentences * 100) if total_sentences > 0 else 0
@@ -64,7 +65,7 @@ def generate_window_matching_report(
         
         report_lines.append(
             f"{window_size:>8} {total_sentences:>8} {matched_sentences:>8} "
-            f"{match_rate:>9.1f}% {total_matches:>10} {avg_matches_per_sent:>10.2f} "
+            f"{match_rate:>9.1f}% {total_matches:>10} {total_matches_all:>10} {avg_matches_per_sent:>10.2f} "
             f"{avg_similarity:>10.3f}"
         )
     
@@ -81,6 +82,7 @@ def generate_window_matching_report(
         total_sentences = results['total_sentences']
         matched_sentences = results['sentences_with_matches']
         total_matches = results['total_matches']
+        total_matches_all = results.get('total_matches_all', total_matches)
         similarity_scores = results['similarity_scores']
         
         report_lines.append(f"Window Size: {window_size}")
@@ -89,8 +91,27 @@ def generate_window_matching_report(
                            f"({matched_sentences/total_sentences*100:.1f}%)")
         report_lines.append(f"  Sentences without matches: {total_sentences - matched_sentences} "
                            f"({(total_sentences-matched_sentences)/total_sentences*100:.1f}%)")
-        report_lines.append(f"  Total matches found: {total_matches}")
-        report_lines.append(f"  Average matches per sentence: {total_matches/total_sentences:.2f}")
+        report_lines.append(f"  Total matches found (all): {total_matches_all}")
+        report_lines.append(f"  Total matches stored (top-k): {total_matches}")
+        report_lines.append(f"  Average matches per sentence (all): {total_matches_all/total_sentences:.2f}")
+        report_lines.append(f"  Average matches per sentence (top-k): {total_matches/total_sentences:.2f}")
+        
+        # NEW: Match distribution statistics
+        if 'min_matches' in results:
+            report_lines.append(f"  Match count distribution:")
+            report_lines.append(f"    Min: {results['min_matches']}")
+            report_lines.append(f"    Max: {results['max_matches']}")
+            report_lines.append(f"    Median: {results['median_matches']:.2f}")
+            report_lines.append(f"    Std Dev: {results['std_matches']:.2f}")
+        
+        # NEW: Stage-level statistics
+        if 'stage1_passed' in results:
+            report_lines.append(f"  Two-stage matching statistics:")
+            report_lines.append(f"    Stage 1 (full sentence similarity): {results['stage1_passed']} candidates")
+            report_lines.append(f"    Stage 2 (exact window match): {results['stage2_passed']} matches")
+            report_lines.append(f"    Stage 1 pass rate: {results['stage1_pass_rate']*100:.2f}%")
+            report_lines.append(f"    Stage 2 pass rate: {results['stage2_pass_rate']*100:.2f}%")
+            report_lines.append(f"    Overall pass rate: {results['overall_pass_rate']*100:.2f}%")
         
         if similarity_scores:
             report_lines.append(f"  Similarity score statistics:")
