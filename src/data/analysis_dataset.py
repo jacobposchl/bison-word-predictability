@@ -379,6 +379,7 @@ def create_analysis_dataset(
         if best_match:
             analysis_rows.append({
                 # Code-switched sentence info
+                'cs_sentence': data['cs_sentence'],
                 'cs_translation': cs_translation,
                 'cs_pattern': data['cs_pattern'],
                 'cs_group': data['cs_group'],

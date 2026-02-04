@@ -9,6 +9,7 @@ from typing import List, Dict, Tuple
 from pathlib import Path
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from tqdm import tqdm
+import pycantonese
 
 logger = logging.getLogger(__name__)
 
@@ -205,13 +206,17 @@ class NLLBTranslator:
                 
                 cantonese_translation = self.translate_english_to_cantonese(english_text)
                 
-                # Add translation (preserve as space-separated)
-                translated_words.append(cantonese_translation)
+                # Segment translated Cantonese into individual words
+                segmented_words = list(pycantonese.segment(cantonese_translation))
+                
+                # Add segmented words to translated_words list
+                translated_words.extend(segmented_words)
                 
                 segment_translations.append({
                     'language': 'English',
                     'original': english_text,
                     'translated': cantonese_translation,
+                    'segmented_words': segmented_words,
                     'start_idx': start_idx,
                     'end_idx': end_idx
                 })
