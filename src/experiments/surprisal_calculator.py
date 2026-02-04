@@ -133,6 +133,16 @@ class MaskedLMSurprisalCalculator:
         # Encode required text to check token count
         required_encoding = self.tokenizer(required_text, add_special_tokens=True)
         required_token_count = len(required_encoding['input_ids'])
+
+        # DEBUG: Log token counts
+        logger.info(f"=== TOKEN COUNT DEBUG ===")
+        logger.info(f"Context words: {len(context_words)}")
+        logger.info(f"Target sentence words: {len(words)}")
+        logger.info(f"Required token count: {required_token_count}/{self.max_length}")
+        logger.info(f"Will clip: {required_token_count > self.max_length}")
+        if required_token_count > self.max_length:
+            logger.warning(f"CLIPPING! Required: {required_token_count}, Max: {self.max_length}")
+        logger.info(f"========================")
         
         # Calculate how many tokens we can use for post-switch words
         available_for_postswitch = self.max_length - required_token_count
@@ -309,7 +319,7 @@ class AutoregressiveLMSurprisalCalculator:
     Class for word-level surprisal calculation using Autoregressive Language Models.
     '''
 
-    def __init__(self, model_name: str, device: str = None, use_4bit: bool = False):
+    def __init__(self, model_name: str, device: str = None):
         '''
         Initialize autoregressive LM for surprisal calculation.
         
@@ -317,8 +327,6 @@ class AutoregressiveLMSurprisalCalculator:
         :type model_name: str
         :param device: device to use (cuda/cpu)
         :type device: str
-        :param use_4bit: whether to use 4-bit quantization (saves memory)
-        :type use_4bit: bool
         '''
 
         logger.info(f"Loading autoregressive model: {model_name}")
@@ -328,29 +336,10 @@ class AutoregressiveLMSurprisalCalculator:
         self.device = torch.device(device)
 
         logger.info(f"Using {device}")
-        if use_4bit:
-            logger.info("Using 4-bit quantization to save memory")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        # Load model with optional 4-bit quantization
-        if use_4bit and device == "cuda":
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True
-            )
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                quantization_config=quantization_config,
-                device_map="auto",
-                trust_remote_code=True
-            )
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-            self.model.to(self.device)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+        self.model.to(self.device)
         
         self.model.eval()
         
@@ -450,6 +439,16 @@ class AutoregressiveLMSurprisalCalculator:
         # Encode required text to check token count
         required_encoding = self.tokenizer(required_text, add_special_tokens=True)
         required_token_count = len(required_encoding['input_ids'])
+
+        # DEBUG: Log token counts
+        logger.info(f"=== TOKEN COUNT DEBUG ===")
+        logger.info(f"Context words: {len(context_words)}")
+        logger.info(f"Target sentence words: {len(words)}")
+        logger.info(f"Required token count: {required_token_count}/{self.max_length}")
+        logger.info(f"Will clip: {required_token_count > self.max_length}")
+        if required_token_count > self.max_length:
+            logger.warning(f"CLIPPING! Required: {required_token_count}, Max: {self.max_length}")
+        logger.info(f"========================")
         
         # Calculate how many tokens we can use for post-switch words
         available_for_postswitch = self.max_length - required_token_count
@@ -522,7 +521,7 @@ class AutoregressiveLMSurprisalCalculator:
             full_words_for_alignment, 
             adjusted_word_index
         )
-        \
+        
         input_sentence = "".join(required_words[:-1])
 
         if not token_indices:
@@ -677,8 +676,7 @@ def create_surprisal_calculator(model_type: str, config, device: str = None):
         model_name = config.get('experiment.autoregressive_model')
         return AutoregressiveLMSurprisalCalculator(
             model_name=model_name,
-            device=device,
-            use_4bit=True
+            device=device
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}. Use 'masked' or 'autoregressive'")
