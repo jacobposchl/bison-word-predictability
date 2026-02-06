@@ -10,7 +10,7 @@ import os
 import logging
 import pycantonese
 from tqdm import tqdm
-from ..data.eaf_processor import load_eaf_file, get_main_tier, parse_participant_info, get_all_eaf_files
+# from ..data.eaf_processor import load_eaf_file, get_main_tier, parse_participant_info, get_all_eaf_files
 from ..core.text_cleaning import is_filler, clean_word, has_content, split_on_internal_dashes
 
 logger = logging.getLogger(__name__)
