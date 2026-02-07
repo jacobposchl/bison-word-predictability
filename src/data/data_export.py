@@ -636,7 +636,12 @@ def export_translated_sentences(
                     valid_count += 1
                     
                     # Add POS tagging for valid translation
-                    # Handle mixed Cantonese/English by tagging word by word
+                    # Mixed-language handling: Even though truncation attempts to remove English words,
+                    # we defensively handle mixed-language scenarios because:
+                    # 1. Truncation only scans from switch_index onwards - if no error is found, no truncation occurs
+                    # 2. Edge cases or bugs in truncation logic may allow English words to remain
+                    # 3. The 'ENG' tag marks words that shouldn't be present but acknowledges their existence
+                    #    rather than causing POS tagging to fail
                     try:
                         translation_words = translation.split()
                         pos_tags = []
@@ -644,7 +649,7 @@ def export_translated_sentences(
                         for word in translation_words:
                             # Check if word is English (contains ASCII letters)
                             if word and any(c.isascii() and c.isalpha() for c in word):
-                                # Mark English words that we're keeping (after code-switch point)
+                                # Mark English words with 'ENG' tag (defensive measure for edge cases)
                                 pos_tags.append('ENG')
                             else:
                                 # Try to POS tag Cantonese word

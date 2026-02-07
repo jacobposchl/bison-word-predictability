@@ -236,12 +236,16 @@ def calculate_surprisal_for_dataset(
                 cs_context = None
                 mono_context = None
                 
-                if len(cs_context_sentences) >= context_len:
-                    cs_context = ' '.join(cs_context_sentences[-context_len:])
-                if len(mono_context_sentences) >= context_len:
-                    mono_context = ' '.join(mono_context_sentences[-context_len:])
+                # Only extract context if context_len > 0
+                if context_len > 0:
+                    if len(cs_context_sentences) >= context_len:
+                        cs_context = ' '.join(cs_context_sentences[-context_len:])
+                    if len(mono_context_sentences) >= context_len:
+                        mono_context = ' '.join(mono_context_sentences[-context_len:])
                 
-                if cs_context and mono_context:
+                # For context_len == 0, we always calculate (with context=None)
+                # For context_len > 0, we only calculate if we have valid context
+                if context_len == 0 or (cs_context and mono_context):
                     cs_result = surprisal_calc.calculate_surprisal(
                         word_index=switch_token_idx,
                         words=cs_words,
@@ -285,7 +289,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
     if 'is_switch' in results_df.columns:
         long_df = results_df.copy()
     else:
-        exclude_shared = {'matched_mono', 'matched_switch_index', 'matched_group'}
+        exclude_shared = {'matched_mono', 'matched_switch_index', 'matched_group', 'matched_participant'}
         shared_cols = [
             col for col in results_df.columns
             if not col.startswith('cs_') and not col.startswith('mono_') and col not in exclude_shared
@@ -325,6 +329,13 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
 
             if 'matched_group' in results_df.columns:
                 mono_row['group'] = row['matched_group']
+
+            # Handle participant IDs: cs_participant for CS rows, matched_participant for mono rows
+            if 'cs_participant' in results_df.columns:
+                cs_row['participant_id'] = row['cs_participant']
+            
+            if 'matched_participant' in results_df.columns:
+                mono_row['participant_id'] = row['matched_participant']
 
             long_rows.append(cs_row)
             long_rows.append(mono_row)
@@ -412,8 +423,10 @@ def compute_statistics(results_df: pd.DataFrame, context_length: int) -> Dict:
 
     has_context_col = 'cs_context' in results_df.columns and 'mono_context' in results_df.columns
     
-    if has_context_col:
-        # Only include rows where context is not "N/A"
+    # For context_length > 0, filter to only rows with valid context
+    # For context_length == 0, include all rows (context should be N/A or not required)
+    if has_context_col and context_length > 0:
+        # Only include rows where context is not "N/A" (for context_length > 0)
         valid_context_mask = (
             (results_df['cs_context'] != 'N/A') & 
             (results_df['mono_context'] != 'N/A') &
@@ -426,6 +439,7 @@ def compute_statistics(results_df: pd.DataFrame, context_length: int) -> Dict:
             pd.notna(results_df[mono_surprisal_col])
         ].copy()
     else:
+        # For context_length == 0 or when no context columns exist, just filter by valid surprisal
         complete_df = results_df[
             pd.notna(results_df[cs_surprisal_col]) &
             pd.notna(results_df[mono_surprisal_col])

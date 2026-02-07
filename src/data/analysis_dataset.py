@@ -430,11 +430,8 @@ def create_analysis_dataset(
             config
         )
     
-    columns_to_remove = ['cs_participant', 'matched_participant']
-    existing_columns_to_remove = [col for col in columns_to_remove if col in analysis_df.columns]
-    if existing_columns_to_remove:
-        analysis_df = analysis_df.drop(columns=existing_columns_to_remove)
-        logger.info(f"Removed temporary columns used for context retrieval: {existing_columns_to_remove}")
+    # Keep both cs_participant and matched_participant for downstream analysis
+    # (they are used in surprisal results to track speaker IDs)
     
     return analysis_df
 

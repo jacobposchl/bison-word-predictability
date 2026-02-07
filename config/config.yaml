@@ -47,7 +47,7 @@ analysis:
 context:
   # List of context lengths to analyze (in number of previous sentences)
   # Surprisal will be calculated for each length
-  context_lengths: [1, 2, 3]
+  context_lengths: [0, 1, 2, 3]
   
   # Minimum translation quality for context
   # calculated via: successfully translated words / all translated words 
