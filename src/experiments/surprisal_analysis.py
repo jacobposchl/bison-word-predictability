@@ -119,7 +119,7 @@ def calculate_surprisal_for_dataset(
     
     # Columns to exclude from input dataset (matching-related, not needed for surprisal results)
     COLUMNS_TO_EXCLUDE = [
-        'cs_pattern', 'cs_start_time', 'pos_window', 'matched_start_time', 'matched_pos',
+        'cs_start_time', 'pos_window', 'matched_start_time', 'matched_pos',
         'total_matches_above_threshold', 'matches_same_group', 'matches_same_speaker',
         'cs_context_valid', 'mono_context_valid'
     ]
@@ -289,7 +289,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
     if 'is_switch' in results_df.columns:
         long_df = results_df.copy()
     else:
-        exclude_shared = {'matched_mono', 'matched_switch_index', 'matched_group', 'matched_participant'}
+        exclude_shared = {'matched_mono', 'matched_switch_index', 'matched_group', 'matched_participant', 'participant'}
         shared_cols = [
             col for col in results_df.columns
             if not col.startswith('cs_') and not col.startswith('mono_') and col not in exclude_shared
@@ -345,9 +345,35 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
     if 'num_chars' in long_df.columns and 'word_length' not in long_df.columns:
         long_df = long_df.rename(columns={'num_chars': 'word_length'})
 
+    # Add is_propn column based on switch_pos (for all rows)
+    if 'switch_pos' in long_df.columns:
+        long_df['is_propn'] = (long_df['switch_pos'] == 'PROPN').astype(int)
+    else:
+        long_df['is_propn'] = 0
+    
+    # Add single_worded column based on pattern (only for is_switch=1 rows)
+    # Pattern must start with CX-E1 (Cantonese words followed by single English word)
+    if 'pattern' in long_df.columns and 'is_switch' in long_df.columns:
+        import re
+        def is_single_worded_pattern(pattern, is_switch):
+            if is_switch != 1:
+                return np.nan
+            if not pattern or pd.isna(pattern):
+                return 0
+            # Check if pattern starts with C followed by number, then E1
+            match = re.match(r'^C\d+-E1(?:-|$)', str(pattern))
+            return 1 if match else 0
+        
+        long_df['single_worded'] = long_df.apply(
+            lambda row: is_single_worded_pattern(row.get('pattern'), row.get('is_switch', 0)),
+            axis=1
+        )
+    else:
+        long_df['single_worded'] = np.nan
+
     drop_cols = [
         col for col in long_df.columns
-        if col == 'similarity' or col.startswith('surprisal_difference_context_') or col.startswith('surprisal_difference_')
+        if col == 'similarity' or col == 'participant' or col.startswith('surprisal_difference_context_') or col.startswith('surprisal_difference_')
     ]
     if drop_cols:
         long_df = long_df.drop(columns=drop_cols)
@@ -377,6 +403,8 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
         'switch_index',
         'normalized_switch_point',
         'switch_pos',
+        'is_propn',
+        'single_worded',
         'word_frequency',
         'word',
         'sentence',

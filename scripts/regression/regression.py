@@ -1,31 +1,29 @@
 """
-Logistic Regression Analysis for Code-Switch Detection
+Mixed-Effects Logistic Regression Analysis for Code-Switch Detection
 
-This script performs logistic regression to test whether surprisal and entropy
-improve prediction of code-switched vs monolingual sentences beyond baseline
-features (frequency, word length, sentence length, POS, group).
+This script performs mixed-effects logistic regression to test whether surprisal 
+and entropy improve prediction of code-switched vs monolingual sentences beyond 
+baseline features, while accounting for speaker clustering and matched pairs.
 
 Features:
-- word_frequency: Retrieved from surprisal results (calculated using pycantonese corpus data)
+- word_length: Number of characters in word
+- pos_collapsed: Part-of-speech (noun/verb/other) - one-hot encoded
 - group: Speaker group (Heritage/Homeland/Immersed) - one-hot encoded
-- word_length, sentence_length, position_normalized: Basic linguistic features
-- pos_tag: Part-of-speech tags - one-hot encoded
-- surprisal: Surprisal values from language models
-- entropy: Entropy values from language models
+- surprisal: Surprisal values from language models (context_0, context_1, context_2, context_3)
+- entropy: Entropy values from language models (context_0, context_1, context_2, context_3)
 
-Models:
-1. Control model: frequency + word_length + sentence_length + position + POS + group
+Random Effects:
+- Speaker ID: Accounts for individual speaker differences
+
+Models (fitted separately for each context length 0, 1, 2, 3):
+1. Control model: word_length + pos_collapsed + group
 2. Surprisal model: control features + surprisal
 3. Entropy model: control features + entropy
 4. Surprisal + Entropy model: control features + surprisal + entropy
 
-The script saves the regression datasets to:
-results/regression/{model}/window_{N}/context_{M}/dataset.csv
-
 Usage:
-    python scripts/regression/regression.py --model autoregressive
-    python scripts/regression/regression.py --model masked
-    python scripts/regression/regression.py --model autoregressive --results-dir results/surprisal_autoregressive
+    python scripts/regression/regression.py --model autoregressive --window 1
+    python scripts/regression/regression.py --model masked --window 1
 """
 
 import sys
@@ -38,27 +36,19 @@ sys.path.insert(0, str(project_root))
 import argparse
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    classification_report, 
-    roc_auc_score, 
-    roc_curve,
-    confusion_matrix,
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score
-)
-from sklearn.preprocessing import StandardScaler
-from scipy import stats
+from sklearn.metrics import roc_auc_score, accuracy_score
 from datetime import datetime
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
+import warnings
+
+# Logistic regression
+from statsmodels.genmod import families
+import statsmodels.formula.api as smf
 
 from src.core.config import Config
-from src.plots.regression.report_generator import create_results_row
 
+warnings.filterwarnings('ignore', category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -76,337 +66,396 @@ def parse_arguments():
         help='Type of model used for surprisal calculation'
     )
     parser.add_argument(
-        "--test-size",
-        type=float,
-        default=0.2,
-        help="Proportion of data to use for testing (default: 0.2)"
+        "--window",
+        type=int,
+        default=None,
+        help='Specific window size to analyze (default: all windows)'
+    )
+    parser.add_argument(
+        "--context-len",
+        type=int,
+        default=None,
+        help='Specific context length to analyze (default: all context lengths)'
     )
     
     return parser.parse_args()
 
 
 def load_surprisal_results(results_path: Path) -> pd.DataFrame:
+    """Load surprisal results CSV."""
     if not results_path.exists():
         raise FileNotFoundError(
             f"Surprisal results not found at: {results_path}\n"
-            f"Please run surprisal calculation first: python scripts/surprisal/surprisal.py --model {results_path.parent.name.split('_')[-1]}"
+            f"Please run surprisal calculation first"
         )
     
     df = pd.read_csv(results_path)
+    logger.info(f"Loaded {len(df)} rows from {results_path}")
     return df
 
 
+def collapse_pos_tag(pos: str) -> str:
+    """
+    Collapse POS tags to noun, verb, or other.
+    Filter out X tags by returning None.
+    """
+    if pd.isna(pos) or pos == 'UNKNOWN' or pos == 'X':
+        return None
+    
+    pos_upper = str(pos).upper()
+    
+    # Noun tags
+    if any(tag in pos_upper for tag in ['NN', 'NOUN', ' N']):
+        return 'noun'
+    # Verb tags
+    elif any(tag in pos_upper for tag in ['VB', 'VERB', ' V']):
+        return 'verb'
+    else:
+        return 'other'
 
 
-def prepare_data_for_regression(df: pd.DataFrame, context_length: int = None) -> pd.DataFrame:
-    if 'is_switch' in df.columns:
-        if context_length is not None:
-            surprisal_col = f'surprisal_context_{context_length}'
-            entropy_col = f'entropy_context_{context_length}'
-        else:
-            surprisal_col = 'surprisal'
-            entropy_col = 'entropy'
-
-        rows = []
-
-        for idx, row in df.iterrows():
-            word = row.get('word', '')
-            word_length = row.get('word_length', len(str(word)) if pd.notna(word) else 0)
-            sentence_length = row.get('sent_length', np.nan)
-            position_normalized = row.get('normalized_switch_point', np.nan)
-            pos_tag = row.get('switch_pos', row.get('pos_tag', 'UNKNOWN'))
-            word_frequency = row.get('word_frequency', np.nan)
-            group = row.get('group', 'Unknown')
-
-            rows.append({
-                'is_code_switched': int(row.get('is_switch', 0)),
-                'word': word if pd.notna(word) else '',
-                'word_length': word_length,
-                'sentence_length': sentence_length,
-                'position_normalized': position_normalized,
-                'pos_tag': pos_tag,
-                'word_frequency': word_frequency,
-                'group': group if pd.notna(group) else 'Unknown',
-                'surprisal': row.get(surprisal_col, np.nan),
-                'entropy': row.get(entropy_col, np.nan),
-                'sentence_id': row.get('sent_id', idx),
-                'original_row_id': row.get('sent_id', idx)
-            })
-
-        result_df = pd.DataFrame(rows)
-
-        n_before = len(result_df)
-        result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
-        n_after = len(result_df)
-
-        if n_before > n_after:
-            logger.warning(f"Dropped {n_before - n_after} rows with missing data")
-
-        return result_df
-
+def prepare_data_for_regression(df: pd.DataFrame, context_length: int) -> pd.DataFrame:
+    """
+    Prepare regression dataset from long-format surprisal results.
+    
+    Each row in long format represents either a CS or mono sentence.
+    Extracts relevant features for regression.
+    """
     rows = []
     
     for idx, row in df.iterrows():
-        # CS sentence row (label = 1)
-        cs_word = row.get('cs_word', '')
-        cs_sentence = row.get('cs_translation', '')
-        cs_switch_idx = int(row.get('switch_index', 0))
-        cs_group = row.get('cs_group', 'Unknown')
+        word = row.get('word', '')
+        word_length = row.get('word_length', len(str(word)) if pd.notna(word) else 0)
+        pos_tag = row.get('switch_pos', 'UNKNOWN')
+        pos_collapsed = collapse_pos_tag(pos_tag)
+        group = row.get('group', 'Unknown')
+        participant_id = row.get('participant_id', 'Unknown')
         
-        cs_words_list = cs_sentence.split() if pd.notna(cs_sentence) else []
-        cs_sentence_length = len(cs_words_list)
+        # Skip rows with X POS tags
+        if pos_collapsed is None:
+            continue
         
-        # Calculate normalized position
-        cs_position_norm = cs_switch_idx / cs_sentence_length if cs_sentence_length > 0 else np.nan
-        
-        cs_pos = row.get('cs_switch_pos', 'UNKNOWN')
-        
-        cs_word_frequency = row.get('cs_word_frequency', np.nan)
-        
-        if context_length is not None:
-            cs_surprisal_col = f'cs_surprisal_context_{context_length}'
-            cs_entropy_col = f'cs_entropy_context_{context_length}'
-        else:
-            cs_surprisal_col = 'cs_surprisal_total'
-            cs_entropy_col = 'cs_entropy'
+        surprisal_col = f'surprisal_context_{context_length}'
+        entropy_col = f'entropy_context_{context_length}'
         
         rows.append({
-            'is_code_switched': 1,
-            'word': cs_word if pd.notna(cs_word) else '',
-            'word_length': len(str(cs_word)) if pd.notna(cs_word) else 0,
-            'sentence_length': cs_sentence_length,
-            'position_normalized': cs_position_norm,
-            'pos_tag': cs_pos,
-            'word_frequency': cs_word_frequency,
-            'group': cs_group if pd.notna(cs_group) else 'Unknown',
-            'surprisal': row.get(cs_surprisal_col, np.nan),
-            'entropy': row.get(cs_entropy_col, np.nan),
-            'sentence_id': f"{idx}_cs",
-            'original_row_id': idx
-        })
-        
-        # Mono sentence row (label = 0)
-        mono_word = row.get('mono_word', '')
-        mono_sentence = row.get('matched_mono', '')
-        mono_switch_idx = int(row.get('matched_switch_index', 0))
-        mono_group = row.get('matched_group', 'Unknown')
-        
-
-        mono_words_list = mono_sentence.split() if pd.notna(mono_sentence) else []
-        mono_sentence_length = len(mono_words_list)
-        
-        mono_position_norm = mono_switch_idx / mono_sentence_length if mono_sentence_length > 0 else np.nan
-        
-        mono_pos = row.get('mono_switch_pos', 'UNKNOWN')
-        
-        mono_word_frequency = row.get('mono_word_frequency', np.nan)
-        
-        if context_length is not None:
-            mono_surprisal_col = f'mono_surprisal_context_{context_length}'
-            mono_entropy_col = f'mono_entropy_context_{context_length}'
-        else:
-            mono_surprisal_col = 'mono_surprisal_total'
-            mono_entropy_col = 'mono_entropy'
-        
-        rows.append({
-            'is_code_switched': 0,
-            'word': mono_word if pd.notna(mono_word) else '',
-            'word_length': len(str(mono_word)) if pd.notna(mono_word) else 0,
-            'sentence_length': mono_sentence_length,
-            'position_normalized': mono_position_norm,
-            'pos_tag': mono_pos,
-            'word_frequency': mono_word_frequency,
-            'group': mono_group if pd.notna(mono_group) else 'Unknown',
-            'surprisal': row.get(mono_surprisal_col, np.nan),
-            'entropy': row.get(mono_entropy_col, np.nan),
-            'sentence_id': f"{idx}_mono",
-            'original_row_id': idx
+            'is_code_switched': int(row.get('is_switch', 0)),
+            'word_length': word_length,
+            'pos_collapsed': pos_collapsed,
+            'group': group if pd.notna(group) else 'Unknown',
+            'participant_id': participant_id if pd.notna(participant_id) else 'Unknown',
+            'surprisal': row.get(surprisal_col, np.nan),
+            'entropy': row.get(entropy_col, np.nan),
+            'sent_id': row.get('sent_id', idx)
         })
     
     result_df = pd.DataFrame(rows)
     
+    # Filter out rows with missing data
     n_before = len(result_df)
-    result_df = result_df.dropna(subset=['word_frequency', 'surprisal'])
+    result_df = result_df.dropna(subset=['surprisal', 'pos_collapsed'])
     n_after = len(result_df)
     
     if n_before > n_after:
-        logger.warning(f"Dropped {n_before - n_after} rows with missing data")
-
+        logger.info(f"  Dropped {n_before - n_after} rows with missing data")
+    
+    # Ensure categorical types
+    result_df['pos_collapsed'] = pd.Categorical(result_df['pos_collapsed'])
+    result_df['group'] = pd.Categorical(result_df['group'])
+    result_df['participant_id'] = result_df['participant_id'].astype(str)
+    
+    logger.info(f"  Final dataset: {len(result_df)} rows")
+    logger.info(f"    CS={result_df['is_code_switched'].sum()}, Mono={(1 - result_df['is_code_switched']).sum()}")
+    logger.info(f"    Speakers={result_df['participant_id'].nunique()}")
+    
     return result_df
 
 
-def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-    feature_df = df.copy()
+def fit_logistic_models(data: pd.DataFrame) -> Tuple[Dict, Dict]:
+    """
+    Fit logistic regression models using GLM.
     
-    pos_dummies = pd.get_dummies(feature_df['pos_tag'], prefix='pos')
-    feature_df = pd.concat([feature_df, pos_dummies], axis=1)
+    Returns detailed coefficient information, effect sizes, and model comparisons.
+    """
     
-    group_dummies = pd.get_dummies(feature_df['group'], prefix='group')
-    feature_df = pd.concat([feature_df, group_dummies], axis=1)
+    # Standardize continuous variables (for effect size interpretation)
+    data = data.copy()
+    data['word_length_std'] = (data['word_length'] - data['word_length'].mean()) / data['word_length'].std()
+    data['surprisal_std'] = (data['surprisal'] - data['surprisal'].mean()) / data['surprisal'].std()
+    data['entropy_std'] = (data['entropy'] - data['entropy'].mean()) / data['entropy'].std()
     
-    numeric_features = [
-        'word_length',
-        'sentence_length', 
-        'position_normalized',
-        'word_frequency'
-    ]
+    # Create interaction term (standardized)
+    data['surprisal_x_entropy'] = data['surprisal_std'] * data['entropy_std']
     
-    pos_feature_names = [col for col in pos_dummies.columns]
-    group_feature_names = [col for col in group_dummies.columns]
-    
-    feature_names = numeric_features + pos_feature_names + group_feature_names
-    
-    feature_df = feature_df[numeric_features + pos_feature_names + group_feature_names]
-    
-    return feature_df, feature_names
-
-
-def fit_models(
-    X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
-    y_train: pd.Series,
-    y_test: pd.Series,
-    feature_names: List[str],
-    random_state: int = 42
-) -> Dict[str, Dict]:
-    
-    control_features = [
-        'word_length', 'sentence_length', 'position_normalized', 'word_frequency'
-    ] + [f for f in feature_names if f.startswith('pos_')] + [f for f in feature_names if f.startswith('group_')]
-    
-    surprisal_features = control_features + ['surprisal']
-    entropy_features = control_features + ['entropy']
-    surprisal_entropy_features = control_features + ['surprisal', 'entropy']
-    
-    feature_sets = {
-        'control': control_features,
-        'surprisal': surprisal_features,
-        'entropy': entropy_features,
-        'surprisal_entropy': surprisal_entropy_features
+    formulas = {
+        'control': 'is_code_switched ~ word_length_std + C(pos_collapsed) + C(group)',
+        'surprisal': 'is_code_switched ~ word_length_std + C(pos_collapsed) + C(group) + surprisal_std',
+        'entropy': 'is_code_switched ~ word_length_std + C(pos_collapsed) + C(group) + entropy_std',
+        'surprisal_entropy': 'is_code_switched ~ word_length_std + C(pos_collapsed) + C(group) + surprisal_std + entropy_std',
+        'interaction': 'is_code_switched ~ word_length_std + C(pos_collapsed) + C(group) + surprisal_std + entropy_std + surprisal_x_entropy'
     }
     
     results = {}
+    fitted_models = {}
     
-    for model_name, features in feature_sets.items():
-        available_features = [f for f in features if f in X_train.columns]
-        missing_features = [f for f in features if f not in X_train.columns]
+    for model_name, formula in formulas.items():
+        logger.info(f"    Fitting {model_name} model...")
         
-        if missing_features:
-            raise ValueError(
-                f"Model '{model_name}': Missing required features {missing_features}. "
-                f"Available columns: {list(X_train.columns)}"
+        try:
+            # Fit logistic regression using GLM
+            model = smf.glm(
+                formula=formula,
+                data=data,
+                family=families.Binomial()
             )
-        
-
-        X_train_subset = X_train[available_features]
-        X_test_subset = X_test[available_features]
-        
-        # Scale
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_subset)
-        X_test_scaled = scaler.transform(X_test_subset)
-        
-        # Fit
-        model = LogisticRegression(
-            random_state=random_state,
-            max_iter=1000,
-            solver='lbfgs'
-        )
-        model.fit(X_train_scaled, y_train)
-        
-        # Predictions
-        y_pred = model.predict(X_test_scaled)
-        y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
-        
-        # Metrics
-        auc = roc_auc_score(y_test, y_pred_proba)
-        accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        
-        # Classification report
-        report = classification_report(y_test, y_pred, output_dict=True)
-        
-        # Coefficients
-        coefficients = dict(zip(available_features, model.coef_[0]))
-        
-        # Intercept
-        intercept = model.intercept_[0]
-        
-        results[model_name] = {
-            'model': model,
-            'scaler': scaler,
-            'features': available_features,
-            'auc': auc,
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall,
-            'f1': f1,
-            'classification_report': report,
-            'coefficients': coefficients,
-            'intercept': intercept,
-            'y_pred': y_pred,
-            'y_pred_proba': y_pred_proba
+            
+            fitted_model = model.fit()
+            fitted_models[model_name] = fitted_model
+            
+            # Get predictions
+            y_pred_proba = fitted_model.fittedvalues
+            y_pred = (y_pred_proba > 0.5).astype(int)
+            y_true = data['is_code_switched'].values
+            
+            # Calculate metrics
+            auc = roc_auc_score(y_true, y_pred_proba)
+            accuracy = accuracy_score(y_true, y_pred)
+            
+            # Extract coefficient details
+            coef_df = pd.DataFrame({
+                'coefficient': fitted_model.params,
+                'std_error': fitted_model.bse,
+                'z_value': fitted_model.tvalues,
+                'p_value': fitted_model.pvalues,
+                'ci_lower': fitted_model.conf_int()[0],
+                'ci_upper': fitted_model.conf_int()[1]
+            })
+            
+            # Calculate odds ratios
+            coef_df['odds_ratio'] = np.exp(coef_df['coefficient'])
+            coef_df['or_ci_lower'] = np.exp(coef_df['ci_lower'])
+            coef_df['or_ci_upper'] = np.exp(coef_df['ci_upper'])
+            
+            results[model_name] = {
+                'model': fitted_model,
+                'formula': formula,
+                'auc': auc,
+                'accuracy': accuracy,
+                'coefficients_table': coef_df,
+                'loglikelihood': fitted_model.llf,
+                'aic': fitted_model.aic,
+                'bic': fitted_model.bic,
+                'n_params': len(fitted_model.params),
+                'y_pred_proba': y_pred_proba
+            }
+            
+            logger.info(f"      {model_name}: LogLik={fitted_model.llf:.2f}, AIC={fitted_model.aic:.1f}")
+            
+        except Exception as e:
+            logger.error(f"      Error fitting {model_name}: {e}")
+            results[model_name] = {'error': str(e)}
+    
+    # Likelihood ratio tests (comparing nested models)
+    lr_tests = {}
+    if 'control' in fitted_models and 'surprisal' in fitted_models:
+        lr_stat = 2 * (fitted_models['surprisal'].llf - fitted_models['control'].llf)
+        df = fitted_models['surprisal'].df_model - fitted_models['control'].df_model
+        from scipy.stats import chi2
+        p_value = 1 - chi2.cdf(lr_stat, df)
+        lr_tests['surprisal_vs_control'] = {
+            'chi2': lr_stat,
+            'df': df,
+            'p_value': p_value
         }
     
-    return results
+    if 'control' in fitted_models and 'entropy' in fitted_models:
+        lr_stat = 2 * (fitted_models['entropy'].llf - fitted_models['control'].llf)
+        df = fitted_models['entropy'].df_model - fitted_models['control'].df_model
+        p_value = 1 - chi2.cdf(lr_stat, df)
+        lr_tests['entropy_vs_control'] = {
+            'chi2': lr_stat,
+            'df': df,
+            'p_value': p_value
+        }
+    
+    if 'surprisal' in fitted_models and 'surprisal_entropy' in fitted_models:
+        lr_stat = 2 * (fitted_models['surprisal_entropy'].llf - fitted_models['surprisal'].llf)
+        df = fitted_models['surprisal_entropy'].df_model - fitted_models['surprisal'].df_model
+        p_value = 1 - chi2.cdf(lr_stat, df)
+        lr_tests['entropy_added_to_surprisal'] = {
+            'chi2': lr_stat,
+            'df': df,
+            'p_value': p_value
+        }
+    
+    if 'surprisal_entropy' in fitted_models and 'interaction' in fitted_models:
+        lr_stat = 2 * (fitted_models['interaction'].llf - fitted_models['surprisal_entropy'].llf)
+        df = fitted_models['interaction'].df_model - fitted_models['surprisal_entropy'].df_model
+        p_value = 1 - chi2.cdf(lr_stat, df)
+        lr_tests['interaction_added_to_main_effects'] = {
+            'chi2': lr_stat,
+            'df': df,
+            'p_value': p_value
+        }
+    
+    return results, lr_tests
 
 
-def compare_models(results: Dict[str, Dict], y_test: pd.Series) -> pd.DataFrame:
-    comparison_data = []
+def print_model_comparison(results: Dict, lr_tests: Dict, data: pd.DataFrame, window: int, context: int):
+    """Print comprehensive model comparison including coefficients, effect sizes, and LR tests."""
     
-    for model_name, result in results.items():
-        comparison_data.append({
-            'model': model_name,
-            'auc': result['auc'],
-            'accuracy': result['accuracy'],
-            'precision': result['precision'],
-            'recall': result['recall'],
-            'f1': result['f1'],
-            'n_features': len(result['features'])
-        })
+    print("\n" + "="*120)
+    print(f"LOGISTIC REGRESSION RESULTS - Window={window}, Context Length={context}")
+    print("="*120)
     
-    comparison_df = pd.DataFrame(comparison_data)
-    comparison_df = comparison_df.sort_values('auc', ascending=False)
+    # Dataset summary
+    n_total = len(data)
+    n_cs = data['is_code_switched'].sum()
+    n_mono = n_total - n_cs
+    n_speakers = data['participant_id'].nunique()
     
-    print("\n" + "="*80)
-    print("MODEL PERFORMANCE")
-    print("="*80)
-    print(f"\n{'Model':<20} {'AUC':>8} {'Accuracy':>10} {'Precision':>10} {'Recall':>8} {'F1':>8} {'Features':>10}")
-    print("-"*80)
-    for _, row in comparison_df.iterrows():
-        print(f"{row['model']:<20} {row['auc']:>8.4f} {row['accuracy']:>10.4f} {row['precision']:>10.4f} {row['recall']:>8.4f} {row['f1']:>8.4f} {row['n_features']:>10}")
-    print("="*80)
+    print(f"\nDataset: N={n_total:,} observations (CS={n_cs:,}, Mono={n_mono:,}), Speakers={n_speakers}")
     
-    return comparison_df
+    # Model fit statistics
+    print("\n" + "─" * 120)
+    print("TABLE 1: Model Fit Statistics")
+    print("─" * 120)
+    print(f"{'Model':<30} {'Log-Likelihood':>15} {'AIC':>10} {'BIC':>10} {'Parameters':>12} {'AUC':>10}")
+    print("─" * 120)
+    
+    model_display_names = {
+        'control': 'Control',
+        'surprisal': 'Surprisal',
+        'entropy': 'Entropy',
+        'surprisal_entropy': 'Surprisal + Entropy',
+        'interaction': 'Interaction (S × E)'
+    }
+    
+    for model_name in ['control', 'surprisal', 'entropy', 'surprisal_entropy', 'interaction']:
+        if model_name not in results or 'error' in results[model_name]:
+            continue
+        r = results[model_name]
+        display_name = model_display_names.get(model_name, model_name)
+        print(f"{display_name:<30} {r['loglikelihood']:>15.2f} {r['aic']:>10.1f} {r['bic']:>10.1f} "
+              f"{r['n_params']:>12} {r['auc']:>10.4f}")
+    
+    # Likelihood ratio tests
+    print("\n" + "─" * 120)
+    print("TABLE 2: Likelihood Ratio Tests (Nested Model Comparisons)")
+    print("─" * 120)
+    print(f"{'Comparison':<50} {'χ²':>12} {'df':>8} {'p-value':>12} {'':>8}")
+    print("─" * 120)
+    
+    for test_name, test_result in lr_tests.items():
+        sig = '***' if test_result['p_value'] < 0.001 else \
+              '**' if test_result['p_value'] < 0.01 else \
+              '*' if test_result['p_value'] < 0.05 else 'ns'
+        display_name = test_name.replace('_', ' ').title().replace('Vs', 'vs.')
+        print(f"{display_name:<50} {test_result['chi2']:>12.2f} {test_result['df']:>8} "
+              f"{test_result['p_value']:>12.4f} {sig:>8}")
+    
+    print("\nSignificance: *** p<0.001, ** p<0.01, * p<0.05, ns = not significant")
+    
+    # Key coefficients from each model
+    print("\n" + "─" * 120)
+    print("TABLE 3: Standardized Coefficients and Odds Ratios")
+    print("─" * 120)
+    
+    model_display_names = {
+        'control': 'Control',
+        'surprisal': 'Surprisal',
+        'entropy': 'Entropy',
+        'surprisal_entropy': 'Surprisal + Entropy',
+        'interaction': 'Interaction (Surprisal × Entropy)'
+    }
+    
+    for model_name in ['control', 'surprisal', 'entropy', 'surprisal_entropy', 'interaction']:
+        if model_name not in results or 'error' in results[model_name]:
+            continue
+        
+        display_name = model_display_names.get(model_name, model_name)
+        print(f"\n{display_name}:")
+        print(f"  {'Predictor':<25} {'β':>10} {'SE':>10} {'z':>10} {'p':>10} {'':>5} {'OR':>10} {'95% CI':>20}")
+        print("  " + "─" * 110)
+        
+        coef_df = results[model_name]['coefficients_table']
+        
+        # Focus on key predictors
+        key_vars = ['word_length_std', 'surprisal_std', 'entropy_std', 'surprisal_x_entropy']
+        for var in key_vars:
+            if var in coef_df.index:
+                row = coef_df.loc[var]
+                sig = '***' if row['p_value'] < 0.001 else \
+                      '**' if row['p_value'] < 0.01 else \
+                      '*' if row['p_value'] < 0.05 else ''
+                # Custom display names
+                var_display_map = {
+                    'word_length_std': 'Word Length',
+                    'surprisal_std': 'Surprisal',
+                    'entropy_std': 'Entropy',
+                    'surprisal_x_entropy': 'Surprisal × Entropy'
+                }
+                var_display = var_display_map.get(var, var.replace('_std', '').replace('_', ' ').title())
+                ci_display = f"[{row['or_ci_lower']:.2f}, {row['or_ci_upper']:.2f}]"
+                print(f"  {var_display:<25} {row['coefficient']:>10.4f} {row['std_error']:>10.4f} "
+                      f"{row['z_value']:>10.3f} {row['p_value']:>10.4f} {sig:>5} "
+                      f"{row['odds_ratio']:>10.3f} {ci_display:>20}")
+    
+    # Correlation matrix
+    print("\n" + "─" * 120)
+    print("TABLE 4: Correlation Matrix")
+    print("─" * 120)
+    corr_vars = ['is_code_switched', 'word_length', 'surprisal', 'entropy']
+    available_vars = [v for v in corr_vars if v in data.columns]
+    if len(available_vars) > 1:
+        corr_matrix = data[available_vars].corr()
+        
+        # Format column names
+        corr_display = corr_matrix.copy()
+        corr_display.index = ['CS (target)', 'Word Length', 'Surprisal', 'Entropy'][:len(corr_display)]
+        corr_display.columns = ['CS', 'Length', 'Surprisal', 'Entropy'][:len(corr_display.columns)]
+        
+        print(corr_display.round(3).to_string())
+    
+    print("\n" + "="*120 + "\n")
+
 
 def main():
     args = parse_arguments()
     
-    print("\n" + "="*80)
+    print("\n" + "="*95)
     print("LOGISTIC REGRESSION ANALYSIS - Code-Switch Detection")
-    print("="*80)
+    print("="*95)
     
     config = Config()
     
-    window_sizes = config.get_analysis_window_sizes()
-    context_lengths = config.get('context.context_lengths', [3])
+    # Get window sizes to analyze
+    if args.window is not None:
+        window_sizes = [args.window]
+        logger.info(f"Analyzing only window size: {args.window}")
+    else:
+        window_sizes = config.get_analysis_window_sizes()
+        logger.info(f"Analyzing all window sizes: {window_sizes}")
+    
+    # Get context lengths to analyze
+    if args.context_len is not None:
+        context_lengths = [args.context_len]
+        logger.info(f"Analyzing only context length: {args.context_len}")
+    else:
+        context_lengths = config.get('context.context_lengths', [0, 1, 2, 3])
+        logger.info(f"Analyzing all context lengths: {context_lengths}")
     
     if not isinstance(context_lengths, list):
         context_lengths = [context_lengths]
     
     results_base = Path(config.get_surprisal_results_dir()) / args.model
-    results_base_dir = Path(config.get_results_dir())
-    output_base = results_base_dir / f"regression_{args.model}"
-    
+    output_base = Path(config.get_results_dir()) / f"regression_{args.model}"
     output_base.mkdir(parents=True, exist_ok=True)
     
     all_results = []
     
     for window_size in window_sizes:
-        window_results_dir = results_base / f"window_{window_size}"
-        window_results_path = window_results_dir / "surprisal_results.csv"
+        window_results_path = results_base / f"window_{window_size}" / "surprisal_results.csv"
         
         if not window_results_path.exists():
             logger.warning(f"Skipping window {window_size}: file not found")
@@ -415,85 +464,75 @@ def main():
         df = load_surprisal_results(window_results_path)
         
         for context_length in context_lengths:
-            print(f"\n{'─'*80}")
-            print(f"Window: {window_size} | Context: {context_length}")
-            print(f"{'─'*80}")
+            logger.info(f"\nProcessing: Window={window_size}, Context Length={context_length}")
             
-            cs_surprisal_col = f'cs_surprisal_context_{context_length}'
-            if cs_surprisal_col not in df.columns:
-                logger.warning(f"Context {context_length} not found, skipping...")
+            # Check if columns exist
+            surprisal_col = f'surprisal_context_{context_length}'
+            if surprisal_col not in df.columns:
+                logger.warning(f"  Context {context_length} not found in data, skipping...")
                 continue
             
+            # Prepare data for this context length
             regression_df = prepare_data_for_regression(df, context_length=context_length)
             
             if len(regression_df) == 0:
-                logger.warning(f"No valid data, skipping...")
+                logger.warning(f"  No valid data, skipping...")
                 continue
             
-            X_base, feature_names = prepare_features(regression_df)
+            # Fit models
+            results, lr_tests = fit_logistic_models(regression_df)
             
-            X = X_base.copy()
-            X['surprisal'] = regression_df['surprisal'].values
-            feature_names = feature_names + ['surprisal']
+            # Print comprehensive comparison
+            print_model_comparison(results, lr_tests, regression_df, window_size, context_length)
             
-            entropy_available = regression_df['entropy'].notna().any()
-            if entropy_available:
-                X['entropy'] = regression_df['entropy'].values
-                feature_names = feature_names + ['entropy']
-            
-            y = regression_df['is_code_switched']
-            
-            random_seed = config.get('experiment.random_seed', 42)
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, 
-                test_size=args.test_size,
-                random_state=random_seed,
-                stratify=y
-            )
-            
-            print(f"Dataset: {len(X_train)} train, {len(X_test)} test | Features: {len(feature_names)}")
-            
-            results = fit_models(
-                X_train, X_test, y_train, y_test,
-                feature_names, random_state=random_seed
-            )
-            
-            comparison_df = compare_models(results, y_test)
-            
-            results_row = create_results_row(
-                results=results,
-                model_type=args.model,
-                window_size=window_size,
-                context_length=context_length,
-                n_train=len(X_train),
-                n_test=len(X_test)
-            )
-            all_results.append(results_row)
-            
+            # Save results
             context_output_dir = output_base / f"window_{window_size}" / f"context_{context_length}"
             context_output_dir.mkdir(parents=True, exist_ok=True)
             
+            # Save coefficient tables
+            for model_name, result in results.items():
+                if 'error' not in result and 'coefficients_table' in result:
+                    coef_csv = context_output_dir / f"{model_name}_coefficients.csv"
+                    result['coefficients_table'].to_csv(coef_csv)
+            
+            # Save LR tests
+            lr_df = pd.DataFrame(lr_tests).T
+            lr_df.to_csv(context_output_dir / "likelihood_ratio_tests.csv")
+            
+            # Save detailed results
             import pickle
-            results_pkl_path = context_output_dir / "model_results.pkl"
-            plot_data = {
-                'results': results,
-                'y_test': y_test.tolist() if hasattr(y_test, 'tolist') else list(y_test)
-            }
-            with open(results_pkl_path, 'wb') as f:
-                pickle.dump(plot_data, f)
+            results_pkl = context_output_dir / "model_results.pkl"
+            with open(results_pkl, 'wb') as f:
+                pickle.dump({'results': results, 'lr_tests': lr_tests}, f)
+            
+            # Add to summary
+            for model_name, result in results.items():
+                if 'error' not in result:
+                    all_results.append({
+                        'model_type': args.model,
+                        'window_size': window_size,
+                        'context_length': context_length,
+                        'regression_model': model_name,
+                        'loglikelihood': result['loglikelihood'],
+                        'aic': result['aic'],
+                        'bic': result['bic'],
+                        'auc': result['auc'],
+                        'n_params': result['n_params'],
+                        'n_observations': len(regression_df)
+                    })
     
+    # Save overall summary
     if all_results:
-        results_df = pd.DataFrame(all_results)
-        results_csv_path = output_base / "regression_results.csv"
-        results_df.to_csv(results_csv_path, index=False)
-        print(f"\n{'='*80}")
-        print(f"✓ Results saved: {results_csv_path}")
+        summary_df = pd.DataFrame(all_results)
+        summary_csv = output_base / "regression_summary.csv"
+        summary_df.to_csv(summary_csv, index=False)
+        print(f"\n{'='*95}")
+        print(f"✓ Summary saved: {summary_csv}")
         print(f"✓ Total configurations: {len(all_results)}")
-        print(f"{'='*80}\n")
+        print(f"{'='*95}\n")
     else:
         logger.warning("No results to save!")
 
 
 if __name__ == "__main__":
     main()
-
