@@ -12,11 +12,8 @@ processing:
 # Translation settings
 translation:
 
-  model: "facebook/nllb-200-3.3B" 
-  # Options:
-  # facebook/nllb-200-distilled-600M
-  # facebook/nllb-200-distilled-1.3B
-  # facebook/nllb-200-3.3B (optimal)
+  model: "facebook/nllb-200-3.3B"
+  
   device: "cuda"
   
   # use caching for translations
@@ -56,10 +53,9 @@ context:
 
 # Experiment settings
 experiment:
-  # HuggingFace model for masked LM surprisal calculation
+
   masked_model: "hon9kon9ize/bert-large-cantonese"
-  
-  # HuggingFace model for autoregressive LM surprisal calculation
+
   autoregressive_model: "hon9kon9ize/CantoneseLLMChat-v1.0-7B"
   
   # Device to use for surprisal calculation (GPU recommended)
