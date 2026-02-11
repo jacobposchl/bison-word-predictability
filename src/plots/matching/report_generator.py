@@ -23,12 +23,13 @@ def generate_window_matching_report(
     """
     Generate comprehensive CSV reports for window matching analysis.
     
-    Creates five CSV files:
-    1. similarity_scores.csv - Statistics on similarity scores per window
-    2. ranking_distribution.csv - Match distribution by speaker/group relationship
-    3. filtering_table.csv - Shows the filtering pipeline from start to finish
-    4. window_cutoffs.csv - Shows POS windows cut off due to sentence boundaries
-    5. context_quality.csv - Shows context quality statistics per window
+    Creates six CSV files:
+    1. match_similarity_scores.csv - Statistics on similarity scores from matches only
+    2. total_similarity_scores.csv - Statistics on ALL similarity scores (Stage 1)
+    3. ranking_distribution.csv - Match distribution by speaker/group relationship
+    4. filtering_table.csv - Shows the filtering pipeline from start to finish
+    5. window_cutoffs.csv - Shows POS windows cut off due to sentence boundaries
+    6. context_quality.csv - Shows context quality statistics per window
     
     Args:
         window_results: Results from analyze_window_matching()
@@ -50,32 +51,57 @@ def generate_window_matching_report(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # 1. Generate similarity_scores.csv
-    logger.info("Generating similarity_scores.csv...")
-    similarity_data = []
+    # 1. Generate match_similarity_scores.csv (only from matches)
+    logger.info("Generating match_similarity_scores.csv...")
+    match_similarity_data = []
     
     for window_key in sorted(window_results.keys()):
         results = window_results[window_key]
         window_size = results['window_size']
-        similarity_scores = results['similarity_scores']
+        match_similarity_scores = results.get('match_similarity_scores', results.get('similarity_scores', []))
         
-        if similarity_scores:
-            similarity_data.append({
+        if match_similarity_scores:
+            match_similarity_data.append({
                 'window_size': window_size,
-                'mean': np.mean(similarity_scores),
-                'median': np.median(similarity_scores),
-                'std': np.std(similarity_scores),
-                'min': np.min(similarity_scores),
-                'max': np.max(similarity_scores),
-                'count': len(similarity_scores)
+                'mean': np.mean(match_similarity_scores),
+                'median': np.median(match_similarity_scores),
+                'std': np.std(match_similarity_scores),
+                'min': np.min(match_similarity_scores),
+                'max': np.max(match_similarity_scores),
+                'count': len(match_similarity_scores)
             })
     
-    similarity_df = pd.DataFrame(similarity_data)
-    similarity_csv = output_path / 'similarity_scores.csv'
-    similarity_df.to_csv(similarity_csv, index=False)
-    logger.info(f"Saved {similarity_csv}")
+    match_similarity_df = pd.DataFrame(match_similarity_data)
+    match_similarity_csv = output_path / 'match_similarity_scores.csv'
+    match_similarity_df.to_csv(match_similarity_csv, index=False)
+    logger.info(f"Saved {match_similarity_csv}")
     
-    # 2. Generate ranking_distribution.csv
+    # 2. Generate total_similarity_scores.csv (ALL Stage 1 scores)
+    logger.info("Generating total_similarity_scores.csv...")
+    total_similarity_data = []
+    
+    for window_key in sorted(window_results.keys()):
+        results = window_results[window_key]
+        window_size = results['window_size']
+        all_similarity_scores = results.get('all_similarity_scores', [])
+        
+        if all_similarity_scores:
+            total_similarity_data.append({
+                'window_size': window_size,
+                'mean': np.mean(all_similarity_scores),
+                'median': np.median(all_similarity_scores),
+                'std': np.std(all_similarity_scores),
+                'min': np.min(all_similarity_scores),
+                'max': np.max(all_similarity_scores),
+                'count': len(all_similarity_scores)
+            })
+    
+    total_similarity_df = pd.DataFrame(total_similarity_data)
+    total_similarity_csv = output_path / 'total_similarity_scores.csv'
+    total_similarity_df.to_csv(total_similarity_csv, index=False)
+    logger.info(f"Saved {total_similarity_csv}")
+    
+    # 3. Generate ranking_distribution.csv
     logger.info("Generating ranking_distribution.csv...")
     ranking_data = []
     
@@ -175,7 +201,7 @@ def generate_window_matching_report(
     logger.info(f"Saved {cutoff_csv}")
     
     # 5. Generate context_quality.csv (if context stats available)
-    csv_files = [similarity_csv.name, ranking_csv.name, filtering_csv.name, cutoff_csv.name]
+    csv_files = [match_similarity_csv.name, total_similarity_csv.name, ranking_csv.name, filtering_csv.name, cutoff_csv.name]
     
     if context_stats_by_window:
         logger.info("Generating context_quality.csv...")

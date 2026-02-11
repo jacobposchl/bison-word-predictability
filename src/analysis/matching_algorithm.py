@@ -150,7 +150,7 @@ def filter_by_full_sentence_similarity(
     monolingual_sentences: List[Dict],
     mono_pos_cache: Dict[int, List[str]],
     threshold: float = 0.4
-) -> List[Tuple[int, Dict, float]]:
+) -> Tuple[List[Tuple[int, Dict, float]], List[float]]:
     """
     Filter monolingual sentences by full POS structure similarity.
     
@@ -164,9 +164,12 @@ def filter_by_full_sentence_similarity(
         threshold: Minimum Levenshtein similarity for full sentence (0-1)
         
     Returns:
-        List of (index, sentence_dict, full_similarity) tuples that pass threshold
+        Tuple of:
+        - List of (index, sentence_dict, full_similarity) tuples that pass threshold
+        - List of ALL similarity scores computed (for distribution analysis)
     """
     candidates = []
+    all_similarity_scores = []
     
     for idx, mono_sent in enumerate(monolingual_sentences):
         mono_pos_seq = mono_pos_cache.get(idx, [])
@@ -176,11 +179,12 @@ def filter_by_full_sentence_similarity(
         
         # Compare FULL POS sequences
         full_similarity = levenshtein_similarity(cs_pos_sequence, mono_pos_seq)
+        all_similarity_scores.append(full_similarity)
         
         if full_similarity >= threshold:
             candidates.append((idx, mono_sent, full_similarity))
     
-    return candidates
+    return candidates, all_similarity_scores
 
 
 def rank_matches_by_context( matches: List[Dict], source_sentence: Dict ) -> List[Dict]:
@@ -274,7 +278,7 @@ def find_window_matches(
                        If provided, avoids repeated string splitting for better performance.
         
     Returns:
-        Tuple of (matches, stage1_count, stage2_count, is_cutoff) where:
+        Tuple of (matches, stage1_count, stage2_count, is_cutoff, all_similarity_scores) where:
         - matches: List of match dictionaries with:
             - 'match_sentence': The matched monolingual sentence
             - 'similarity': Full POS structure similarity (0-1)
@@ -285,6 +289,7 @@ def find_window_matches(
         - stage1_count: Number of sentences that passed Stage 1 (full sentence similarity)
         - stage2_count: Number of sentences that passed Stage 2 (exact window match)
         - is_cutoff: Whether the POS window was cut off due to sentence boundaries
+        - all_similarity_scores: List of ALL similarity scores computed in Stage 1
     """
     # Extract switch point information
     switch_index = code_switched_sentence.get('switch_index', -1)
@@ -331,7 +336,7 @@ def find_window_matches(
         # Build temporary cache if not provided
         mono_pos_cache = build_monolingual_pos_cache(monolingual_sentences)
     
-    candidate_sentences = filter_by_full_sentence_similarity(
+    candidate_sentences, all_similarity_scores = filter_by_full_sentence_similarity(
         cs_pos_sequence=pos_sequence,
         monolingual_sentences=monolingual_sentences,
         mono_pos_cache=mono_pos_cache,
@@ -342,7 +347,7 @@ def find_window_matches(
     stage1_count = len(candidate_sentences)
 
     if not candidate_sentences:
-        return [], stage1_count, 0, is_cutoff
+        return [], stage1_count, 0, is_cutoff, all_similarity_scores
     
     # STAGE 2: Find exact window matches from candidates
     matches = []
@@ -381,10 +386,10 @@ def find_window_matches(
     # Track Stage 2 statistics
     stage2_count = len(matches)
     
-    return matches, stage1_count, stage2_count, is_cutoff
+    return matches, stage1_count, stage2_count, is_cutoff, all_similarity_scores
 
 
-def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float], int, int, int, bool]:
+def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float], List[float], int, int, int, bool]:
     """
     Worker function to process a single code-switched sentence.
     
@@ -400,11 +405,12 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
             - top_k: Number of top matches to keep
             
     Returns:
-        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff) where:
+        Tuple of (cs_sent, detailed_matches, has_matches, match_similarity_scores, all_similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff) where:
         - cs_sent: The original code-switched sentence
         - detailed_matches: List of detailed match dictionaries (top_k matches)
         - has_matches: 1 if matches found, 0 otherwise
-        - similarity_scores: List of similarity scores from ALL matches (not just top_k)
+        - match_similarity_scores: List of similarity scores from matched sentences only (not just top_k)
+        - all_similarity_scores: List of ALL similarity scores computed in Stage 1
         - total_matches_all: Total number of matches above threshold (before top_k truncation)
         - stage1_count: Number of sentences passing Stage 1 (full sentence similarity)
         - stage2_count: Number of sentences passing Stage 2 (exact window match)
@@ -413,7 +419,7 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
     cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k = args
     
     # Find all matches for this sentence
-    matches, stage1_count, stage2_count, is_cutoff = find_window_matches(
+    matches, stage1_count, stage2_count, is_cutoff, all_similarity_scores = find_window_matches(
         cs_sent,
         monolingual_sentences,
         window_size=window_size,
@@ -423,13 +429,13 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
     
     detailed_matches = []
     has_matches = 0
-    similarity_scores = []
+    match_similarity_scores = []
     
     if matches:
         has_matches = 1
         
         # Collect similarity scores from ALL matches (before truncation)
-        similarity_scores = [m['similarity'] for m in matches]
+        match_similarity_scores = [m['similarity'] for m in matches]
         
         # Calculate stats from ALL matches (before truncation)
         total_matches_count = len(matches)
@@ -479,7 +485,7 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
     # total_matches_all is the count before top_k truncation
     total_matches_all = len(matches) if matches else 0
     
-    return (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff)
+    return (cs_sent, detailed_matches, has_matches, match_similarity_scores, all_similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff)
 
 
 def analyze_window_matching(
@@ -577,7 +583,8 @@ def analyze_window_matching(
         
         # Process all sentences
         detailed_matches = []
-        similarity_scores = []
+        match_similarity_scores = []  # Similarity scores from matches only
+        all_similarity_scores = []  # ALL similarity scores computed (Stage 1)
         sentences_with_matches = 0
         total_matches_all_sentences = 0  # NEW: Track total matches before top_k truncation
         total_stage1_passed = 0  # NEW: Track sentences passing Stage 1
@@ -612,7 +619,7 @@ def analyze_window_matching(
         all_similarity_scores_per_sentence = {}  # Maps (cs_sentence, cs_translation) -> list of similarity scores
         
         # Process results
-        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff in processing_results:
+        for cs_sent, sent_detailed_matches, has_matches, sent_match_scores, sent_all_scores, total_matches_all, stage1_count, stage2_count, is_cutoff in processing_results:
             # Aggregate stage statistics
             total_stage1_passed += stage1_count
             total_stage2_passed += stage2_count
@@ -631,20 +638,24 @@ def analyze_window_matching(
             cs_sentence = cs_sent.get('code_switch_original', '')
             cs_translation = cs_sent.get('cantonese_translation', '')
             sentence_key = (cs_sentence, cs_translation)
-            all_similarity_scores_per_sentence[sentence_key] = sent_similarity_scores
+            all_similarity_scores_per_sentence[sentence_key] = sent_match_scores
+            
+            # Collect ALL similarity scores (Stage 1)
+            all_similarity_scores.extend(sent_all_scores)
             
             if has_matches:
                 sentences_with_matches += 1
                 detailed_matches.extend(sent_detailed_matches)
                 # Collect similarity scores from ALL matches (not just top_k)
-                similarity_scores.extend(sent_similarity_scores)
+                match_similarity_scores.extend(sent_match_scores)
         
         # Calculate statistics
         total_sentences = len(translated_sentences)
         match_rate = sentences_with_matches / total_sentences if total_sentences > 0 else 0.0
         total_matches = len(detailed_matches)
         avg_matches = total_matches / total_sentences if total_sentences > 0 else 0.0
-        avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+        avg_match_similarity = sum(match_similarity_scores) / len(match_similarity_scores) if match_similarity_scores else 0.0
+        avg_all_similarity = sum(all_similarity_scores) / len(all_similarity_scores) if all_similarity_scores else 0.0
         
         # NEW: Calculate match count distribution statistics
         from statistics import median, stdev
@@ -708,8 +719,11 @@ def analyze_window_matching(
             'match_rate': match_rate,
             'total_matches': total_matches,
             'avg_matches_per_sentence': avg_matches,
-            'avg_similarity': avg_similarity,
-            'similarity_scores': similarity_scores,
+            'avg_similarity': avg_match_similarity,  # Average of match scores only
+            'avg_all_similarity': avg_all_similarity,  # Average of ALL Stage 1 scores
+            'match_similarity_scores': match_similarity_scores,  # Scores from matches only
+            'all_similarity_scores': all_similarity_scores,  # ALL Stage 1 scores
+            'similarity_scores': match_similarity_scores,  # Backwards compatibility
             'detailed_matches': detailed_matches,
             'example_matches': example_matches,
             # NEW: Global statistics for all matches (not just top_k)
