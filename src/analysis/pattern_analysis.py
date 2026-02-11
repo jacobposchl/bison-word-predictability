@@ -12,8 +12,8 @@ import pycantonese
 from tqdm import tqdm
 
 from ..core.text_cleaning import is_filler, clean_word, has_content, split_on_internal_dashes
-from ..utils.text_validation import _is_cjk_character, _is_ascii_alphabetic, segment_by_script
-from ..utils.data_helpers import find_switch_points
+from ..utils.text_validation import segment_by_script
+from ..data.analysis_dataset import get_all_eaf_files, load_eaf_file, get_main_tier, parse_participant_info
 
 logger = logging.getLogger(__name__)
 
