@@ -24,10 +24,14 @@ def plot_roc_curves(results: Dict[str, Dict], y_test, output_dir: Path):
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     plt.figure(figsize=(10, 8))
-    for model_name, result in results.items():
+    for i, (model_name, result) in enumerate(results.items()):
         fpr, tpr, _ = roc_curve(y_test, result['y_pred_proba'])
-        plt.plot(fpr, tpr, label=f"{model_name} (AUC={result['auc']:.3f})", linewidth=2)
+        plt.plot(fpr, tpr, label=f"{model_name} (AUC={result['auc']:.3f})", 
+                linewidth=2, color=cb_colors[i % len(cb_colors)])
     
     plt.plot([0, 1], [0, 1], 'k--', label='Random')
     plt.xlabel('False Positive Rate', fontsize=12)
@@ -65,8 +69,11 @@ def plot_model_comparison(results: Dict[str, Dict], output_dir: Path):
     comp_df = pd.DataFrame(comparison_data)
     comp_df = comp_df.set_index('model')
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     fig, ax = plt.subplots(figsize=(10, 6))
-    comp_df.plot(kind='bar', ax=ax, width=0.8)
+    comp_df.plot(kind='bar', ax=ax, width=0.8, color=cb_colors)
     ax.set_ylabel('Score', fontsize=12)
     ax.set_title('Model Performance Comparison', fontsize=14, fontweight='bold')
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')

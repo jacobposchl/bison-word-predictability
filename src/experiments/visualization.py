@@ -90,18 +90,21 @@ def plot_surprisal_distributions(
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(11, 7))
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Plot KDE distributions separately to ensure proper legend
     sns.kdeplot(data=cs_df, x='surprisal', label='Code-Switched',
-               color='#e74c3c', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[1], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     sns.kdeplot(data=mono_df, x='surprisal', label='Monolingual',
-               color='#3498db', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[0], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     
     # Add mean lines (dotted)
     cs_mean = cs_data.mean()
     mono_mean = mono_data.mean()
-    ax.axvline(cs_mean, color='#e74c3c', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(cs_mean, color=cb_colors[1], linestyle='--', linewidth=2, alpha=0.8,
                label=f'CS Mean: {cs_mean:.2f}')
-    ax.axvline(mono_mean, color='#3498db', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(mono_mean, color=cb_colors[0], linestyle='--', linewidth=2, alpha=0.8,
                label=f'Mono Mean: {mono_mean:.2f}')
     
     # Build title based on available information
@@ -183,9 +186,12 @@ def plot_scatter_comparison(
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Scatter plot
     ax.scatter(valid_df[mono_col], valid_df[cs_col],
-               alpha=0.5, s=30, color='#66C2A5', edgecolors='black', linewidth=0.5)
+               alpha=0.5, s=30, color=cb_colors[1], edgecolors='black', linewidth=0.5)
     
     # Identity line
     max_val = max(valid_df[cs_col].max(), valid_df[mono_col].max())
@@ -263,9 +269,12 @@ def plot_difference_histogram(
     # Histogram with KDE overlay
     differences = complete_df[diff_col].values
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Plot histogram with KDE overlay for smoothed curve
     sns.histplot(data=complete_df, x=diff_col, bins=30, kde=True,
-                color='#8DA0CB', ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+                color=cb_colors[2], ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
     
     # Add mean line
     mean_diff = differences.mean()
@@ -370,8 +379,10 @@ def plot_summary_statistics(
     
     # Panel 2: Scatter plot (top-right)
     ax2 = fig.add_subplot(gs[0, 1])
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
     ax2.scatter(complete_df[mono_col], complete_df[cs_col],
-               alpha=0.5, s=25, color='#66C2A5', edgecolors='black', linewidth=0.5)
+               alpha=0.5, s=25, color=cb_colors[1], edgecolors='black', linewidth=0.5)
     max_val = max(complete_df[cs_col].max(), complete_df[mono_col].max())
     min_val = min(complete_df[cs_col].min(), complete_df[mono_col].min())
     ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2)
@@ -383,7 +394,7 @@ def plot_summary_statistics(
     # Panel 3: Difference histogram (bottom-left)
     ax3 = fig.add_subplot(gs[1, 0])
     differences = complete_df[diff_col].values
-    ax3.hist(differences, bins=30, alpha=0.7, color='#8DA0CB', edgecolor='black', linewidth=1.2)
+    ax3.hist(differences, bins=30, alpha=0.7, color=cb_colors[2], edgecolor='black', linewidth=1.2)
     ax3.axvline(0, color='red', linestyle='--', linewidth=2)
     ax3.axvline(differences.mean(), color='darkblue', linestyle='-', linewidth=2)
     ax3.set_xlabel('Surprisal Difference (CS - Mono, bits)', fontweight='bold')

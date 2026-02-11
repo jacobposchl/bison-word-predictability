@@ -118,18 +118,21 @@ def plot_surprisal_distributions(
     mono_df = pd.DataFrame({'surprisal': all_mono_surprisals, 'type': 'Monolingual'})
     combined_df = pd.concat([cs_df, mono_df], ignore_index=True)
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Plot KDE distributions separately to ensure proper legend
     sns.kdeplot(data=cs_df, x='surprisal', label='Code-Switched',
-               color='#e74c3c', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[1], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     sns.kdeplot(data=mono_df, x='surprisal', label='Monolingual',
-               color='#3498db', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[0], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     
     # Add mean lines (dotted)
     cs_mean = np.mean(all_cs_surprisals)
     mono_mean = np.mean(all_mono_surprisals)
-    ax.axvline(cs_mean, color='#e74c3c', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(cs_mean, color=cb_colors[1], linestyle='--', linewidth=2, alpha=0.8,
                label=f'CS Mean: {cs_mean:.2f}')
-    ax.axvline(mono_mean, color='#3498db', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(mono_mean, color=cb_colors[0], linestyle='--', linewidth=2, alpha=0.8,
                label=f'Mono Mean: {mono_mean:.2f}')
     
     ax.set_xlabel('Surprisal', fontsize=13, fontweight='medium')
@@ -213,18 +216,21 @@ def plot_surprisal_distributions_by_context(
     cs_df = pd.DataFrame({'surprisal': all_cs_surprisals, 'type': 'Code-Switched'})
     mono_df = pd.DataFrame({'surprisal': all_mono_surprisals, 'type': 'Monolingual'})
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Plot KDE distributions separately to ensure proper legend
     sns.kdeplot(data=cs_df, x='surprisal', label='Code-Switched',
-               color='#e74c3c', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[1], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     sns.kdeplot(data=mono_df, x='surprisal', label='Monolingual',
-               color='#3498db', ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
+               color=cb_colors[0], ax=ax, linewidth=2.5, alpha=0.6, fill=True, common_norm=False)
     
     # Add mean lines (dotted)
     cs_mean = np.mean(all_cs_surprisals)
     mono_mean = np.mean(all_mono_surprisals)
-    ax.axvline(cs_mean, color='#e74c3c', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(cs_mean, color=cb_colors[1], linestyle='--', linewidth=2, alpha=0.8,
                label=f'CS Mean: {cs_mean:.2f}')
-    ax.axvline(mono_mean, color='#3498db', linestyle='--', linewidth=2, alpha=0.8,
+    ax.axvline(mono_mean, color=cb_colors[0], linestyle='--', linewidth=2, alpha=0.8,
                label=f'Mono Mean: {mono_mean:.2f}')
     
     ax.set_xlabel('Surprisal', fontsize=13, fontweight='medium')
@@ -303,9 +309,12 @@ def plot_surprisal_differences_by_context(
     # Create DataFrame for plotting
     diff_df = pd.DataFrame({'difference': all_differences})
     
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    
     # Plot histogram with KDE overlay
     sns.histplot(data=diff_df, x='difference', bins=30, kde=True,
-                color='#8DA0CB', ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+                color=cb_colors[2], ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
     
     # Add mean line
     mean_diff = np.mean(all_differences)
@@ -383,21 +392,24 @@ def plot_surprisal_distributions_matrix(
                 mono_values = df[mono_col].dropna() if mono_col in df.columns else []
                 
                 if len(cs_values) > 0 and len(mono_values) > 0:
+                    # ColorBrewer YlOrBr palette
+                    cb_colors = sns.color_palette("YlOrBr", 3)
+                    
                     # Create DataFrames for plotting
                     cs_df = pd.DataFrame({'surprisal': cs_values.tolist()})
                     mono_df = pd.DataFrame({'surprisal': mono_values.tolist()})
                     
                     # Plot KDE distributions
                     sns.kdeplot(data=cs_df, x='surprisal', label='Code-Switched',
-                               color='#e74c3c', ax=ax, linewidth=2, alpha=0.6, fill=True, common_norm=False)
+                               color=cb_colors[1], ax=ax, linewidth=2, alpha=0.6, fill=True, common_norm=False)
                     sns.kdeplot(data=mono_df, x='surprisal', label='Monolingual',
-                               color='#3498db', ax=ax, linewidth=2, alpha=0.6, fill=True, common_norm=False)
+                               color=cb_colors[0], ax=ax, linewidth=2, alpha=0.6, fill=True, common_norm=False)
                     
                     # Add mean lines (dotted)
                     cs_mean = np.mean(cs_values)
                     mono_mean = np.mean(mono_values)
-                    ax.axvline(cs_mean, color='#e74c3c', linestyle='--', linewidth=1.5, alpha=0.8)
-                    ax.axvline(mono_mean, color='#3498db', linestyle='--', linewidth=1.5, alpha=0.8)
+                    ax.axvline(cs_mean, color=cb_colors[1], linestyle='--', linewidth=1.5, alpha=0.8)
+                    ax.axvline(mono_mean, color=cb_colors[0], linestyle='--', linewidth=1.5, alpha=0.8)
                     
                     # Set labels and title
                     if i == 2:  # Bottom row

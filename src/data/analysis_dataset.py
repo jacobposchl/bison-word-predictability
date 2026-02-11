@@ -289,7 +289,7 @@ def create_analysis_dataset(
     all_sentences_df: pd.DataFrame = None,
     translator = None,
     window_size: int = None
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, Dict]:
     """
     Create analysis dataset from pre-computed window matching results.
     
@@ -309,12 +309,9 @@ def create_analysis_dataset(
         window_size: Window size to use (if None, uses first window size from config)
         
     Returns:
-        DataFrame with columns:
-        - translated_cs: Full Cantonese translation
-        - matched_mono: Top-1 matched monolingual sentence
-        - cs_context, mono_context: Discourse context (if provided)
-        - context quality metrics
-        - switch_index: Index where code-switch occurs
+        Tuple of (DataFrame, context_stats) where:
+        - DataFrame with analysis dataset
+        - context_stats: Dict with context quality statistics (or None if no context added)
     """
 
     logger.info("Creating analysis dataset from pre-computed window matching results...")
@@ -328,15 +325,16 @@ def create_analysis_dataset(
     
     if not filtered_translated_sentences:
         logger.warning("No sentences provided!")
-        return pd.DataFrame(columns=['translated_cs', 'matched_mono', 'context', 'surprisal', 'switch_index'])
+        return pd.DataFrame(columns=['translated_cs', 'matched_mono', 'context', 'surprisal', 'switch_index']), None
     
     # Extract results
     window_key = f'window_{window_size}'
     if window_key not in window_results:
         logger.error(f"No results for window size {window_size}")
-        return pd.DataFrame()
+        return pd.DataFrame(), None
     
     detailed_matches = window_results[window_key]['detailed_matches']
+    all_similarity_scores_per_sentence = window_results[window_key].get('all_similarity_scores_per_sentence', {})
     
     # Build analysis dataset: one row per code-switched sentence with best match
     # Group matches by CS sentence to collect statistics
@@ -404,7 +402,10 @@ def create_analysis_dataset(
                 # Match statistics (from ALL matches, not just those in all_matches list)
                 'total_matches_above_threshold': best_match.get('total_matches_above_threshold', len(all_matches)),
                 'matches_same_group': best_match.get('all_matches_same_group', sum(1 for m in all_matches if m['same_group'])),
-                'matches_same_speaker': best_match.get('all_matches_same_speaker', sum(1 for m in all_matches if m['same_speaker']))
+                'matches_same_speaker': best_match.get('all_matches_same_speaker', sum(1 for m in all_matches if m['same_speaker'])),
+                
+                # All similarity scores for this sentence (for visualization)
+                'all_similarity_scores': str(all_similarity_scores_per_sentence.get((data['cs_sentence'], cs_translation), []))
             })
     
     # Count sentences without matches
@@ -421,9 +422,10 @@ def create_analysis_dataset(
     analysis_df = pd.DataFrame(analysis_rows)
     
     # Add discourse context if all_sentences_df and translator are provided
+    context_stats = None
     if all_sentences_df is not None and translator is not None:
         logger.info("\nAdding discourse context from previous sentences...")
-        analysis_df = add_context_to_analysis_dataset(
+        analysis_df, context_stats = add_context_to_analysis_dataset(
             analysis_df,
             all_sentences_df,
             translator,
@@ -433,7 +435,7 @@ def create_analysis_dataset(
     # Keep both cs_participant and matched_participant for downstream analysis
     # (they are used in surprisal results to track speaker IDs)
     
-    return analysis_df
+    return analysis_df, context_stats
 
 
 def add_context_to_analysis_dataset(
@@ -441,7 +443,7 @@ def add_context_to_analysis_dataset(
     all_sentences_df: pd.DataFrame,
     translator,
     config
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, Dict]:
     """
     Add discourse context columns to analysis dataset.
     
@@ -454,11 +456,13 @@ def add_context_to_analysis_dataset(
         config: Config object
         
     Returns:
-        DataFrame with added context columns:
+        Tuple of (DataFrame, context_stats) where:
+        - DataFrame with added context columns:
             - cs_context: Translated context for CS sentence
             - cs_context_valid: Whether CS context meets quality threshold
             - mono_context: Context for mono sentence (already Cantonese)
             - mono_context_valid: Whether mono context meets quality threshold
+        - context_stats: Dict with quality statistics
             
     """
 
@@ -509,6 +513,12 @@ def add_context_to_analysis_dataset(
     logger.info("Processing rows with cached translations...")
     results = []
     
+    # Track context quality statistics
+    cs_quality_scores = []
+    mono_quality_scores = []
+    cs_contexts_with_issues = 0
+    mono_contexts_with_issues = 0
+    
     for _, row in tqdm(analysis_df.iterrows(), total=len(analysis_df), desc="Adding context"):
         row_data = row.to_dict()
         
@@ -536,6 +546,12 @@ def add_context_to_analysis_dataset(
             min_quality
         )
         
+        # Track context quality
+        if cs_context_result['quality_score'] > 0:
+            cs_quality_scores.append(cs_context_result['quality_score'])
+        if not cs_context_result['is_valid']:
+            cs_contexts_with_issues += 1
+        
         # Assemble mono context from cache
         mono_context_result = _assemble_context_from_cache(
             mono_context_sents,
@@ -543,6 +559,12 @@ def add_context_to_analysis_dataset(
             mono_quality_stats,
             min_quality
         )
+        
+        # Track context quality
+        if mono_context_result['quality_score'] > 0:
+            mono_quality_scores.append(mono_context_result['quality_score'])
+        if not mono_context_result['is_valid']:
+            mono_contexts_with_issues += 1
         
         # Add context data to row
         row_data.update({
@@ -557,11 +579,32 @@ def add_context_to_analysis_dataset(
     
     result_df = pd.DataFrame(results)
     
+    # Calculate context quality statistics
+    context_stats = {
+        'cs_contexts_with_issues': cs_contexts_with_issues,
+        'mono_contexts_with_issues': mono_contexts_with_issues,
+        'total_contexts': len(result_df)
+    }
+    
+    if cs_quality_scores:
+        context_stats['cs_quality_mean'] = np.mean(cs_quality_scores)
+        context_stats['cs_quality_median'] = np.median(cs_quality_scores)
+        context_stats['cs_quality_std'] = np.std(cs_quality_scores)
+        context_stats['cs_quality_min'] = np.min(cs_quality_scores)
+        context_stats['cs_quality_max'] = np.max(cs_quality_scores)
+    
+    if mono_quality_scores:
+        context_stats['mono_quality_mean'] = np.mean(mono_quality_scores)
+        context_stats['mono_quality_median'] = np.median(mono_quality_scores)
+        context_stats['mono_quality_std'] = np.std(mono_quality_scores)
+        context_stats['mono_quality_min'] = np.min(mono_quality_scores)
+        context_stats['mono_quality_max'] = np.max(mono_quality_scores)
+    
     # Log context statistics
     logger.info(f"\nContext statistics:")
     logger.info(f"  CS context valid: {result_df['cs_context_valid'].sum()} / {len(result_df)}")
     logger.info(f"  Mono context valid: {result_df['mono_context_valid'].sum()} / {len(result_df)}")
     logger.info(f"  Both contexts valid: {((result_df['cs_context_valid']) & (result_df['mono_context_valid'])).sum()} / {len(result_df)}")
     
-    return result_df
+    return result_df, context_stats
 

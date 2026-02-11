@@ -25,13 +25,16 @@ from src.core.config import Config
 from src.plots.preprocessing.plot_preprocessing import (
     plot_matrix_language_distribution,
     plot_switch_position,
-    plot_sentence_length_distribution,
     plot_participant_variation,
     plot_code_switch_density
 )
 from src.plots.matching.plot_matching import (
     plot_matches_per_sentence_distribution,
-    plot_similarity_threshold_analysis
+    plot_similarity_threshold_analysis,
+    plot_similarity_by_group,
+    plot_levenshtein_similarity_distribution,
+    plot_similarity_violin_by_group,
+    plot_match_ranking_distribution
 )
 from src.experiments.visualization import (
     plot_surprisal_distributions,
@@ -91,20 +94,13 @@ def generate_preprocessing_figures(config: Config):
         logger.info(f"  Loading switch positions from {cantonese_translated_csv}")
         cantonese_translated_df = pd.read_csv(cantonese_translated_csv)
         plot_switch_position(cantonese_translated_df, figures_dir)
-    else:
-        logger.warning(f"  {cantonese_translated_csv} not found, using all_sentences.csv instead")
-        plot_switch_position(code_switched, figures_dir)
     
-    # 3. Sentence length distribution
-    logger.info("  3. Sentence length distribution...")
-    plot_sentence_length_distribution(code_switched, figures_dir)
-    
-    # 4. Participant variation
-    logger.info("  4. Participant variation...")
+    # 3. Participant variation
+    logger.info("  3. Participant variation...")
     plot_participant_variation(code_switched, figures_dir)
     
-    # 5. Code-switch density
-    logger.info("  5. Code-switch density...")
+    # 4. Code-switch density
+    logger.info("  4. Code-switch density...")
     plot_code_switch_density(code_switched, figures_dir)
     
     logger.info(f"\nAll preprocessing figures saved to: {figures_dir}")
@@ -141,6 +137,22 @@ def generate_matching_figures(config: Config):
     # 2. Similarity threshold analysis
     logger.info("  2. Similarity threshold analysis...")
     plot_similarity_threshold_analysis(window_datasets, str(figures_dir))
+    
+    # 3. Levenshtein similarity distribution (one plot per window)
+    logger.info("  3. Levenshtein similarity distribution...")
+    plot_levenshtein_similarity_distribution(window_datasets, str(figures_dir))
+    
+    # 4. Similarity violin plots by group (one plot per window)
+    logger.info("  4. Similarity violin plots by group...")
+    plot_similarity_violin_by_group(window_datasets, str(figures_dir))
+    
+    # 5. Match ranking distribution
+    logger.info("  5. Match ranking distribution...")
+    plot_match_ranking_distribution(window_datasets, str(figures_dir))
+    
+    # Optional: Similarity by group (commented out)
+    # logger.info("  6. Similarity by group...")
+    # plot_similarity_by_group(window_datasets, str(figures_dir))
     
     logger.info(f"\nAll matching figures saved to: {figures_dir}")
     return True

@@ -165,17 +165,18 @@ def plot_matrix_language_distribution(
     
     # Prepare data for stacked bar chart
     x = np.arange(len(groups))
-    width = 0.65
+    width = 0.45  # Narrower bars to make room for labels
     
     cantonese_counts = [group_matrix_counts.get(g, {}).get('Cantonese', 0) for g in groups]
     english_counts = [group_matrix_counts.get(g, {}).get('English', 0) for g in groups]
     equal_counts = [group_matrix_counts.get(g, {}).get('Equal', 0) for g in groups]
     
-    # Professional color palette
+    # ColorBrewer YlOrBr palette (Yellow-Orange-Brown)
+    cb_colors = sns.color_palette("YlOrBr", 3)
     colors = {
-        'Cantonese': '#3498db',  # Blue
-        'English': '#e74c3c',     # Red
-        'Equal': '#95a5a6'        # Gray
+        'Cantonese': cb_colors[0],  # Light yellow
+        'English': cb_colors[1],     # Orange
+        'Equal': cb_colors[2]        # Brown
     }
     
     # Create stacked bars with better styling
@@ -188,16 +189,16 @@ def plot_matrix_language_distribution(
                 label='Equal', color=colors['Equal'], edgecolor='white', linewidth=1.5, alpha=0.9)
     
     # Styling
-    ax.set_xlabel('Speaker Group', fontsize=13, fontweight='medium')
-    ax.set_ylabel('Number of Sentences', fontsize=13, fontweight='medium')
+    ax.set_xlabel('Speaker Group', fontsize=14, fontweight='medium')
+    ax.set_ylabel('Number of Sentences', fontsize=14, fontweight='medium')
     ax.set_title('Matrix Language Distribution by Speaker Group', 
-                fontsize=15, fontweight='bold', pad=20)
+                fontsize=18, fontweight='bold', pad=20)
     ax.set_xticks(x)
-    ax.set_xticklabels(groups, fontsize=12)
+    ax.set_xticklabels(groups, fontsize=14)
     
     # Improve legend
     ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
-             fontsize=11, framealpha=0.95)
+             fontsize=14, framealpha=0.95)
     
     # Better grid styling
     ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
@@ -220,18 +221,38 @@ def plot_matrix_language_distribution(
             
             # Add total label at top
             ax.text(i, total + total*0.02, f'n={total}', ha='center', va='bottom', 
-                   fontsize=10, fontweight='medium')
+                   fontsize=12, fontweight='medium')
             
-            # Add percentage labels on each segment (if segment is large enough)
-            if cantonese_counts[i] > 0 and cant_pct > 5:
-                ax.text(i, cantonese_counts[i] / 2, f'{cant_pct:.0f}%', 
-                       ha='center', va='center', fontsize=9, fontweight='medium', color='white')
-            if english_counts[i] > 0 and eng_pct > 5:
-                ax.text(i, cantonese_counts[i] + english_counts[i] / 2, f'{eng_pct:.0f}%', 
-                       ha='center', va='center', fontsize=9, fontweight='medium', color='white')
-            if equal_counts[i] > 0 and equal_pct > 5:
-                ax.text(i, cantonese_counts[i] + english_counts[i] + equal_counts[i] / 2, f'{equal_pct:.0f}%', 
-                       ha='center', va='center', fontsize=9, fontweight='medium', color='white')
+            # All percentage labels positioned to the right of bars with brackets
+            # Cantonese segment
+            if cantonese_counts[i] > 0:
+                cant_y_pos = cantonese_counts[i] / 2
+                # Draw bracket line from bar to text
+                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
+                       [cant_y_pos, cant_y_pos, cant_y_pos], 
+                       color='#333333', linewidth=1.2, alpha=0.7)
+                ax.text(i + width/2 + 0.08, cant_y_pos, f'{cant_pct:.0f}%', 
+                       ha='left', va='center', fontsize=12, fontweight='medium')
+            
+            # English segment
+            if english_counts[i] > 0:
+                eng_y_pos = cantonese_counts[i] + english_counts[i] / 2
+                # Draw bracket line from bar to text
+                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
+                       [eng_y_pos, eng_y_pos, eng_y_pos], 
+                       color='#333333', linewidth=1.2, alpha=0.7)
+                ax.text(i + width/2 + 0.08, eng_y_pos, f'{eng_pct:.0f}%', 
+                       ha='left', va='center', fontsize=12, fontweight='medium')
+            
+            # Equal segment
+            if equal_counts[i] > 0:
+                equal_y_pos = cantonese_counts[i] + english_counts[i] + equal_counts[i] / 2
+                # Draw bracket line from bar to text
+                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
+                       [equal_y_pos, equal_y_pos, equal_y_pos], 
+                       color='#333333', linewidth=1.2, alpha=0.7)
+                ax.text(i + width/2 + 0.08, equal_y_pos, f'{equal_pct:.0f}%', 
+                       ha='left', va='center', fontsize=12, fontweight='medium')
     
     plt.tight_layout()
     
@@ -260,38 +281,39 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
         df['switch_position'] = df['switch_index']
         # Filter out any NaN values
         df = df[df['switch_position'].notna()].copy()
-    else:
-        # Fall back to calculating from pattern (for all_sentences.csv)
-        # Filter to only sentences with actual switches (pattern must have both C and E)
-        df = df[
-            df['pattern'].str.contains('C', na=False) & 
-            df['pattern'].str.contains('E', na=False) &
-            (df['pattern'] != 'FILLER_ONLY')
-        ].copy()
-        
-        # Calculate raw switch positions (word index, not normalized)
-        df['switch_position'] = df['pattern'].apply(_get_raw_switch_position)
-        df = df[df['switch_position'].notna()].copy()
-    
-    if len(df) == 0:
-        logger.warning("No valid switch positions found, skipping switch position plot")
-        return
     
     # Create figure (single plot)
     fig, ax = plt.subplots(figsize=(11, 7))
     
-    # Plot single distribution for all switch positions (all groups combined)
-    sns.histplot(data=df, x='switch_position', bins='auto', kde=True,
-                color='#3498db', ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
     
-    # Set x-axis limits from minimum switch index to 50
+    # Set up integer bins (one bin per position) for accurate representation
     min_pos = int(df['switch_position'].min())
-    ax.set_xlim(left=min_pos, right=50)
+    max_pos = min(int(df['switch_position'].max()), 50)  # Cap at 50 for visualization
+    bins = range(min_pos, max_pos + 2)  # +2 to include max_pos in a bin
     
-    ax.set_xlabel('Switch Position (word index)', fontsize=13, fontweight='medium')
-    ax.set_ylabel('Count', fontsize=13, fontweight='medium')
+    # Plot single distribution for all switch positions (all groups combined)
+    sns.histplot(data=df, x='switch_position', bins=bins, kde=True,
+                color=cb_colors[1], ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+    
+    # Add vertical line at x=2 to show minimum cutoff
+    ax.axvline(x=2, color='#333333', linestyle='--', linewidth=2, alpha=0.7,
+               label='Minimum position (2 words)')
+    
+    # Set x-axis limits
+    ax.set_xlim(left=min_pos - 0.5, right=50)
+    
+    # Set x-axis ticks every 5 positions
+    ax.set_xticks(range(0, 51, 5))
+    ax.tick_params(axis='both', labelsize=14)
+    
+    ax.set_xlabel('Switch Position (word index)', fontsize=14, fontweight='medium')
+    ax.set_ylabel('Count', fontsize=14, fontweight='medium')
     ax.set_title('Distribution of Code-Switch Positions', 
-                fontsize=15, fontweight='bold', pad=20)
+                fontsize=18, fontweight='bold', pad=20)
+    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
+             fontsize=14, framealpha=0.95)
     ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
     ax.set_axisbelow(True)
     ax.spines['top'].set_visible(False)
@@ -308,68 +330,6 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     logger.info(f"Saved switch position plot to {output_path}")
 
 
-def plot_sentence_length_distribution(df: pd.DataFrame, figures_dir: str) -> None:
-    """
-    Plot distribution of sentence lengths (word counts).
-    
-    Args:
-        df: DataFrame with code-switching sentences (must have 'reconstructed_sentence', 'group', and 'matrix_language' columns)
-        figures_dir: Directory to save figures
-    """
-    os.makedirs(figures_dir, exist_ok=True)
-    
-    # Calculate sentence lengths
-    df = df.copy()
-    df['sentence_length'] = df['reconstructed_sentence'].str.split().str.len()
-    
-    groups = ['Homeland', 'Heritage', 'Immersed']
-    matrix_lang_colors = {'Cantonese': '#3498db', 'English': '#e74c3c', 'Equal': '#95a5a6'}
-    group_colors = {'Homeland': '#e74c3c', 'Heritage': '#3498db', 'Immersed': '#2ecc71'}
-    
-    # Create figure (single plot)
-    fig, ax = plt.subplots(figsize=(11, 7))
-    
-    # Violin plot by group
-    data_for_violin = [df[df['group'] == group]['sentence_length'].values for group in groups if len(df[df['group'] == group]) > 0]
-    labels_for_violin = [group for group in groups if len(df[df['group'] == group]) > 0]
-    
-    parts = ax.violinplot(data_for_violin, positions=range(len(labels_for_violin)), 
-                          showmeans=True, showmedians=True)
-    
-    # Color each violin by group
-    for i, pc in enumerate(parts['bodies']):
-        pc.set_facecolor(group_colors.get(labels_for_violin[i], '#3498db'))
-        pc.set_alpha(0.7)
-        pc.set_edgecolor('white')
-        pc.set_linewidth(1.5)
-    
-    # Style the means and medians
-    for partname in ('cbars', 'cmins', 'cmaxes', 'cmeans', 'cmedians'):
-        if partname in parts:
-            parts[partname].set_edgecolor('#333333')
-            parts[partname].set_linewidth(1.5)
-    
-    ax.set_xticks(range(len(labels_for_violin)))
-    ax.set_xticklabels(labels_for_violin, fontsize=12)
-    ax.set_ylabel('Sentence Length (words)', fontsize=13, fontweight='medium')
-    ax.set_xlabel('Speaker Group', fontsize=13, fontweight='medium')
-    ax.set_title('Sentence Length Distribution by Speaker Group', fontsize=15, fontweight='bold', pad=20)
-    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#d0d0d0')
-    ax.spines['bottom'].set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    
-    output_path = os.path.join(figures_dir, 'sentence_length_distribution.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"Saved sentence length distribution plot to {output_path}")
-
-
 def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     """
     Plot participant-level variation in code-switching behavior.
@@ -384,7 +344,9 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     participant_counts = df.groupby(['participant_id', 'group']).size().reset_index(name='num_sentences')
     
     groups = ['Homeland', 'Heritage', 'Immersed']
-    group_colors = {'Homeland': '#e74c3c', 'Heritage': '#3498db', 'Immersed': '#2ecc71'}
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    group_colors = {'Homeland': cb_colors[0], 'Heritage': cb_colors[1], 'Immersed': cb_colors[2]}
     
     # Create figure
     fig, ax = plt.subplots(figsize=(11, 7))
@@ -404,7 +366,7 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     
     # Color each box by group
     for i, patch in enumerate(bp['boxes']):
-        patch.set_facecolor(group_colors.get(labels_for_box[i], '#9b59b6'))
+        patch.set_facecolor(group_colors.get(labels_for_box[i], cb_colors[0]))
         patch.set_alpha(0.8)
         patch.set_edgecolor('white')
         patch.set_linewidth(1.5)
@@ -415,10 +377,10 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
             for item in bp[element]:
                 item.set_color('#333333')
     
-    ax.set_ylabel('Number of Code-Switched Sentences', fontsize=13, fontweight='medium')
-    ax.set_xlabel('Speaker Group', fontsize=13, fontweight='medium')
-    ax.set_title('Participant-Level Variation in Code-Switching', fontsize=15, fontweight='bold', pad=20)
-    ax.set_xticklabels(labels_for_box, fontsize=12)
+    ax.set_ylabel('Number of Code-Switched Sentences', fontsize=14, fontweight='medium')
+    ax.set_xlabel('Speaker Group', fontsize=14, fontweight='medium')
+    ax.set_title('Participant-Level Variation in Code-Switching', fontsize=18, fontweight='bold', pad=20)
+    ax.set_xticklabels(labels_for_box, fontsize=14)
     
     # Professional styling
     ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
@@ -467,7 +429,9 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     df['ratio_clipped'] = df['cantonese_english_ratio'].clip(upper=ratio_95th)
     
     groups = ['Homeland', 'Heritage', 'Immersed']
-    colors = {'Homeland': '#e74c3c', 'Heritage': '#3498db', 'Immersed': '#2ecc71'}
+    # ColorBrewer YlOrBr palette
+    cb_colors = sns.color_palette("YlOrBr", 3)
+    colors = {'Homeland': cb_colors[0], 'Heritage': cb_colors[1], 'Immersed': cb_colors[2]}
     
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -479,16 +443,28 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
         if len(group_df) > 0:
             # Use seaborn's kdeplot for smoother distribution with increased transparency
             sns.kdeplot(data=group_df, x='ratio_clipped', label=group, 
-                       color=colors.get(group, '#95a5a6'), ax=ax, linewidth=2.5, 
+                       color=colors.get(group, cb_colors[2]), ax=ax, linewidth=2.5, 
                        alpha=0.3, fill=True, common_norm=False)
     
-    ax.set_xlabel('Cantonese to English Word Ratio', fontsize=12)
-    ax.set_ylabel('Density', fontsize=12)
-    ax.set_title('Distribution of Cantonese to English Word Ratio per Sentence\nby Speaker Group', 
-                fontsize=14, fontweight='bold')
-    ax.legend()
-    ax.grid(axis='y', alpha=0.3)
-    ax.set_xlim(left=0)  # Start x-axis at 0 for better readability
+    ax.set_xlabel('Cantonese to English Word Ratio', fontsize=14, fontweight='medium')
+    ax.set_ylabel('Density', fontsize=14, fontweight='medium')
+    ax.set_title('Cantonese to English Word Ratio Per Code-Switched Sentence', 
+                fontsize=18, fontweight='bold', pad=20)
+    
+    # Set x-axis ticks every 5 units
+    x_min = int(df['ratio_clipped'].min() // 5) * 5
+    x_max = int(df['ratio_clipped'].max() // 5 + 1) * 5
+    ax.set_xticks(range(x_min, x_max + 1, 5))
+    ax.tick_params(axis='both', labelsize=14)
+    
+    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
+             fontsize=14, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
     

@@ -121,13 +121,20 @@ def main():
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Track counts for filtering report
+        num_cs_sentences = len(filtered_translated_sentences)
+        num_mono_sentences = len(monolingual_sentences)
+        
         # Create and save analysis dataset for each window size
         logger.info("\nCreating analysis datasets for each window size...")
+        analysis_datasets = {}  # Store datasets for report generation
+        context_stats_by_window = {}  # Store context quality stats
+        
         for window_size in window_sizes:
             logger.info(f"\nProcessing window size {window_size}...")
             
             # Create analysis dataset for this window size
-            analysis_df = create_analysis_dataset(
+            analysis_df, context_stats = create_analysis_dataset(
                 config,
                 filtered_translated_sentences,
                 window_results,
@@ -144,15 +151,25 @@ def main():
             analysis_csv_path = output_dir / f"analysis_dataset_window_{window_size}.csv"
             analysis_df.to_csv(analysis_csv_path, index=False, encoding='utf-8-sig')
             logger.info(f"Saved analysis dataset: {analysis_csv_path} ({len(analysis_df)} rows)")
+            
+            # Store for report generation
+            analysis_datasets[window_size] = analysis_df
+            # context_stats should always exist when we have data (only None on errors)
+            if context_stats is not None:
+                context_stats_by_window[window_size] = context_stats
         
-        # Generate window matching report (for all window sizes)
-        window_report = generate_window_matching_report(window_results, similarity_threshold=similarity_threshold)
-        
-        # Save window matching report
-        window_report_path = output_dir / "window_matching_report.txt"
-        with open(window_report_path, 'w', encoding='utf-8') as f:
-            f.write(window_report)
-        
+        # Generate window matching CSV reports (for all window sizes)
+        logger.info("\nGenerating matching analysis CSV reports...")
+        report_message = generate_window_matching_report(
+            window_results,
+            similarity_threshold=similarity_threshold,
+            output_dir=str(output_dir),
+            analysis_datasets=analysis_datasets,
+            num_cs_sentences=num_cs_sentences,
+            num_mono_sentences=num_mono_sentences,
+            context_stats_by_window=context_stats_by_window
+        )
+        logger.info(report_message)
         logger.info(f"\nAnalysis complete! Results saved to: {output_dir}")
         logger.info(f"Created {len(window_sizes)} analysis datasets (one per window size)")
         logger.info(f"To generate figures, run: python scripts/plots/figures.py --matching")

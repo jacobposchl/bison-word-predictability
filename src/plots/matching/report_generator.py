@@ -4,17 +4,227 @@ Report generation functions for matching analysis.
 
 import logging
 import pandas as pd
+import numpy as np
 from typing import Dict
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 def generate_window_matching_report(
     window_results: Dict,
+    similarity_threshold: float = 0.4,
+    output_dir: str = None,
+    analysis_datasets: Dict = None,
+    num_cs_sentences: int = None,
+    num_mono_sentences: int = None,
+    context_stats_by_window: Dict = None
+) -> str:
+    """
+    Generate comprehensive CSV reports for window matching analysis.
+    
+    Creates five CSV files:
+    1. similarity_scores.csv - Statistics on similarity scores per window
+    2. ranking_distribution.csv - Match distribution by speaker/group relationship
+    3. filtering_table.csv - Shows the filtering pipeline from start to finish
+    4. window_cutoffs.csv - Shows POS windows cut off due to sentence boundaries
+    5. context_quality.csv - Shows context quality statistics per window
+    
+    Args:
+        window_results: Results from analyze_window_matching()
+        similarity_threshold: The similarity threshold used
+        output_dir: Directory to save CSV files (if None, returns text report)
+        analysis_datasets: Dict mapping window_size to DataFrame (analysis datasets)
+        num_cs_sentences: Total number of CS sentences from preprocessing
+        num_mono_sentences: Total number of monolingual sentences
+        context_stats_by_window: Dict mapping window_size to context quality stats
+        
+    Returns:
+        Message indicating where files were saved, or text report if no output_dir
+    """
+    
+    if output_dir is None or analysis_datasets is None:
+        # Fallback to old text report if parameters not provided
+        return _generate_text_report(window_results, similarity_threshold)
+    
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # 1. Generate similarity_scores.csv
+    logger.info("Generating similarity_scores.csv...")
+    similarity_data = []
+    
+    for window_key in sorted(window_results.keys()):
+        results = window_results[window_key]
+        window_size = results['window_size']
+        similarity_scores = results['similarity_scores']
+        
+        if similarity_scores:
+            similarity_data.append({
+                'window_size': window_size,
+                'mean': np.mean(similarity_scores),
+                'median': np.median(similarity_scores),
+                'std': np.std(similarity_scores),
+                'min': np.min(similarity_scores),
+                'max': np.max(similarity_scores),
+                'count': len(similarity_scores)
+            })
+    
+    similarity_df = pd.DataFrame(similarity_data)
+    similarity_csv = output_path / 'similarity_scores.csv'
+    similarity_df.to_csv(similarity_csv, index=False)
+    logger.info(f"Saved {similarity_csv}")
+    
+    # 2. Generate ranking_distribution.csv
+    logger.info("Generating ranking_distribution.csv...")
+    ranking_data = []
+    
+    for window_key in sorted(window_results.keys()):
+        results = window_results[window_key]
+        window_size = results['window_size']
+        
+        # Load the analysis dataset for this window
+        if window_size in analysis_datasets:
+            df = analysis_datasets[window_size]
+            
+            # Total matches (sum of all total_matches_above_threshold)
+            total_matches = df['total_matches_above_threshold'].sum()
+            
+            # Same speaker matches (per sentence)
+            same_speaker_values = df['matches_same_speaker'].values
+            
+            # Same group matches (per sentence)
+            same_group_values = df['matches_same_group'].values
+            
+            ranking_data.append({
+                'window_size': window_size,
+                'total_matches': int(total_matches),
+                'same_speaker_mean': np.mean(same_speaker_values),
+                'same_speaker_median': np.median(same_speaker_values),
+                'same_speaker_std': np.std(same_speaker_values),
+                'same_speaker_min': int(np.min(same_speaker_values)),
+                'same_speaker_max': int(np.max(same_speaker_values)),
+                'same_group_mean': np.mean(same_group_values),
+                'same_group_median': np.median(same_group_values),
+                'same_group_std': np.std(same_group_values),
+                'same_group_min': int(np.min(same_group_values)),
+                'same_group_max': int(np.max(same_group_values))
+            })
+    
+    ranking_df = pd.DataFrame(ranking_data)
+    ranking_csv = output_path / 'ranking_distribution.csv'
+    ranking_df.to_csv(ranking_csv, index=False)
+    logger.info(f"Saved {ranking_csv}")
+    
+    # 3. Generate filtering_table.csv
+    logger.info("Generating filtering_table.csv...")
+    filtering_data = []
+    
+    for window_key in sorted(window_results.keys()):
+        results = window_results[window_key]
+        window_size = results['window_size']
+        
+        # Stage 1: Sentences passing full sentence similarity threshold
+        stage1_passed = results.get('stage1_passed', 0)
+        
+        # Stage 2: Matches passing exact POS window matching
+        stage2_passed = results.get('stage2_passed', 0)
+        
+        # Final: Sentences with at least one match (from analysis dataset)
+        if window_size in analysis_datasets:
+            final_matched_sentences = len(analysis_datasets[window_size])
+        else:
+            final_matched_sentences = results['sentences_with_matches']
+        
+        filtering_data.append({
+            'window_size': window_size,
+            'total_cs_sentences': num_cs_sentences if num_cs_sentences else results['total_sentences'],
+            'total_mono_sentences': num_mono_sentences,
+            'stage1_passed_pairs': stage1_passed,
+            'stage2_passed_matches': stage2_passed,
+            'final_matched_sentences': final_matched_sentences
+        })
+    
+    filtering_df = pd.DataFrame(filtering_data)
+    filtering_csv = output_path / 'filtering_table.csv'
+    filtering_df.to_csv(filtering_csv, index=False)
+    logger.info(f"Saved {filtering_csv}")
+    
+    # 4. Generate window_cutoffs.csv
+    logger.info("Generating window_cutoffs.csv...")
+    cutoff_data = []
+    
+    for window_key in sorted(window_results.keys()):
+        results = window_results[window_key]
+        window_size = results['window_size']
+        
+        cutoff_count = results.get('cutoff_count', 0)
+        cutoff_percentage = results.get('cutoff_percentage', 0.0)
+        
+        cutoff_data.append({
+            'window_size': window_size,
+            'total_sentences': results['total_sentences'],
+            'cutoff_count': cutoff_count,
+            'cutoff_percentage': cutoff_percentage,
+            'full_window_count': results['total_sentences'] - cutoff_count
+        })
+    
+    cutoff_df = pd.DataFrame(cutoff_data)
+    cutoff_csv = output_path / 'window_cutoffs.csv'
+    cutoff_df.to_csv(cutoff_csv, index=False)
+    logger.info(f"Saved {cutoff_csv}")
+    
+    # 5. Generate context_quality.csv (if context stats available)
+    csv_files = [similarity_csv.name, ranking_csv.name, filtering_csv.name, cutoff_csv.name]
+    
+    if context_stats_by_window:
+        logger.info("Generating context_quality.csv...")
+        context_data = []
+        
+        for window_size in sorted(context_stats_by_window.keys()):
+            stats = context_stats_by_window[window_size]
+            
+            row = {
+                'window_size': window_size,
+                'total_contexts': stats.get('total_contexts', 0),
+                'cs_contexts_with_issues': stats.get('cs_contexts_with_issues', 0),
+                'mono_contexts_with_issues': stats.get('mono_contexts_with_issues', 0),
+            }
+            
+            # Add CS quality statistics
+            if 'cs_quality_mean' in stats:
+                row['cs_quality_mean'] = stats['cs_quality_mean']
+                row['cs_quality_median'] = stats['cs_quality_median']
+                row['cs_quality_std'] = stats['cs_quality_std']
+                row['cs_quality_min'] = stats['cs_quality_min']
+                row['cs_quality_max'] = stats['cs_quality_max']
+            
+            # Add mono quality statistics
+            if 'mono_quality_mean' in stats:
+                row['mono_quality_mean'] = stats['mono_quality_mean']
+                row['mono_quality_median'] = stats['mono_quality_median']
+                row['mono_quality_std'] = stats['mono_quality_std']
+                row['mono_quality_min'] = stats['mono_quality_min']
+                row['mono_quality_max'] = stats['mono_quality_max']
+            
+            context_data.append(row)
+        
+        if context_data:
+            context_df = pd.DataFrame(context_data)
+            context_csv = output_path / 'context_quality.csv'
+            context_df.to_csv(context_csv, index=False)
+            logger.info(f"Saved {context_csv}")
+            csv_files.append(context_csv.name)
+    
+    return f"Generated CSV reports in: {output_path}\n" + "\n".join([f"  - {f}" for f in csv_files])
+
+
+def _generate_text_report(
+    window_results: Dict,
     similarity_threshold: float = 0.4
 ) -> str:
     """
-    Generate comprehensive report for window matching analysis.
+    Generate text report (legacy format for backwards compatibility).
     
     Args:
         window_results: Results from analyze_window_matching()

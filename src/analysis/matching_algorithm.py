@@ -344,6 +344,11 @@ def find_window_matches(
     if not pos_window:
         return [], 0, 0
     
+    # Check if window was cut off (ideal size is 2*window_size + 1)
+    ideal_window_size = 2 * window_size + 1
+    actual_window_size = len(pos_window)
+    is_cutoff = actual_window_size < ideal_window_size
+    
     # Calculate the position of switch_index within the window
     switch_index_in_window = switch_index - window_start
     
@@ -402,10 +407,10 @@ def find_window_matches(
     # Track Stage 2 statistics
     stage2_count = len(matches)
     
-    return matches, stage1_count, stage2_count
+    return matches, stage1_count, stage2_count, is_cutoff
 
 
-def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float], int, int, int]:
+def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[int, List[str]], int] ) -> Tuple[Dict, List[Dict], int, List[float], int, int, int, bool]:
     """
     Worker function to process a single code-switched sentence.
     
@@ -421,7 +426,7 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
             - top_k: Number of top matches to keep
             
     Returns:
-        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count) where:
+        Tuple of (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff) where:
         - cs_sent: The original code-switched sentence
         - detailed_matches: List of detailed match dictionaries (top_k matches)
         - has_matches: 1 if matches found, 0 otherwise
@@ -429,11 +434,12 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
         - total_matches_all: Total number of matches above threshold (before top_k truncation)
         - stage1_count: Number of sentences passing Stage 1 (full sentence similarity)
         - stage2_count: Number of sentences passing Stage 2 (exact window match)
+        - is_cutoff: Whether the POS window was cut off due to sentence boundaries
     """
     cs_sent, monolingual_sentences, window_size, similarity_threshold, mono_pos_cache, top_k = args
     
     # Find all matches for this sentence
-    matches, stage1_count, stage2_count = find_window_matches(
+    matches, stage1_count, stage2_count, is_cutoff = find_window_matches(
         cs_sent,
         monolingual_sentences,
         window_size=window_size,
@@ -499,7 +505,7 @@ def _process_single_cs_sentence( args: Tuple[Dict, List[Dict], int, float, Dict[
     # total_matches_all is the count before top_k truncation
     total_matches_all = len(matches) if matches else 0
     
-    return (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count)
+    return (cs_sent, detailed_matches, has_matches, similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff)
 
 
 def analyze_window_matching(
@@ -603,6 +609,7 @@ def analyze_window_matching(
         total_stage1_passed = 0  # NEW: Track sentences passing Stage 1
         total_stage2_passed = 0  # NEW: Track sentences passing Stage 2
         match_counts_per_sentence = []  # NEW: Track match distribution
+        cutoff_count = 0  # Track POS windows cut off due to sentence boundaries
         
         # Prepare arguments for workers
         worker_args = [
@@ -627,17 +634,30 @@ def analyze_window_matching(
                     leave=False
                 ))
         
+        # Store per-sentence similarity scores
+        all_similarity_scores_per_sentence = {}  # Maps (cs_sentence, cs_translation) -> list of similarity scores
+        
         # Process results
-        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores, total_matches_all, stage1_count, stage2_count in processing_results:
+        for cs_sent, sent_detailed_matches, has_matches, sent_similarity_scores, total_matches_all, stage1_count, stage2_count, is_cutoff in processing_results:
             # Aggregate stage statistics
             total_stage1_passed += stage1_count
             total_stage2_passed += stage2_count
+            
+            # Track cutoffs
+            if is_cutoff:
+                cutoff_count += 1
             
             # Track match count for this sentence (all matches, not just top_k)
             match_counts_per_sentence.append(total_matches_all)
             
             # Aggregate total matches across all sentences (before top_k truncation)
             total_matches_all_sentences += total_matches_all
+            
+            # Store all similarity scores for this sentence using unique key
+            cs_sentence = cs_sent.get('code_switch_original', '')
+            cs_translation = cs_sent.get('cantonese_translation', '')
+            sentence_key = (cs_sentence, cs_translation)
+            all_similarity_scores_per_sentence[sentence_key] = sent_similarity_scores
             
             if has_matches:
                 sentences_with_matches += 1
@@ -732,7 +752,12 @@ def analyze_window_matching(
             'stage2_passed': total_stage2_passed,
             'stage1_pass_rate': stage1_pass_rate,
             'stage2_pass_rate': stage2_pass_rate,
-            'overall_pass_rate': overall_pass_rate
+            'overall_pass_rate': overall_pass_rate,
+            # NEW: Per-sentence similarity scores (for visualization)
+            'all_similarity_scores_per_sentence': all_similarity_scores_per_sentence,
+            # NEW: Window cutoff tracking
+            'cutoff_count': cutoff_count,
+            'cutoff_percentage': (cutoff_count / total_sentences * 100) if total_sentences > 0 else 0.0
         }
     
     return results
