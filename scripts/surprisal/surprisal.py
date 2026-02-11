@@ -1,11 +1,9 @@
 """
 Surprisal Comparison Analysis
 
-This script compares surprisal values at code-switch points between:
+This script calculates surprisal values at switch indices of both:
 1. Code-switched sentences (translated to full Cantonese)
 2. Matched monolingual Cantonese baseline sentences
-
-Supports discourse context by using k previous sentences from the same speaker.
 
 Usage:
     # With context (default)

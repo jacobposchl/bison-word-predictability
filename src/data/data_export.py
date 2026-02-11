@@ -523,7 +523,6 @@ def export_translated_sentences(
                     # 2. Edge cases or bugs in truncation logic may allow English words to remain
                     # 3. The 'ENG' tag marks words that shouldn't be present but acknowledges their existence
                     #    rather than causing POS tagging to fail
-                    pos_has_real_tags = False  # Track if we got real POS tags (not just UNK/ENG)
                     fallback_words = []  # Track which words got fallback tags
                     try:
                         translation_words = translation.split()
@@ -542,12 +541,9 @@ def export_translated_sentences(
                                     word_pos = extract_pos_sequence(tagged_word)
                                     if word_pos:
                                         pos_tags.extend(word_pos)
-                                        # Check if we got real POS tags (not X, UNK, or ENG)
-                                        if any(tag not in ['X', 'UNK', 'ENG'] for tag in word_pos):
-                                            pos_has_real_tags = True
                                         # Track fallback tags
                                         for tag in word_pos:
-                                            if tag in ['X', 'UNK']:
+                                            if tag in ['X', 'UNK', 'ENG']:
                                                 fallback_words.append((word, tag))
                                     else:
                                         pos_tags.append('UNK')
@@ -561,20 +557,23 @@ def export_translated_sentences(
                         # If POS sequence is still empty despite having translation, mark all as unknown
                         if not pos_seq and translation:
                             pos_seq = ' '.join(['UNK'] * len(translation_words))
+                            fallback_words = [(word, 'UNK') for word in translation_words]
                             
                     except Exception as e:
                         logger.warning(f"Error POS tagging translation at row {idx}: {e}")
                         # Fallback: create UNK tags for each word
                         translation_words = translation.split()
                         pos_seq = ' '.join(['UNK'] * len(translation_words)) if translation_words else ''
-                        pos_has_real_tags = False
                         # Track all words as UNK
                         fallback_words = [(word, 'UNK') for word in translation_words]
+                    
+                    # A sentence is successful only if it has NO fallback tags (all real POS tags)
+                    pos_has_real_tags = len(fallback_words) == 0
                     
                     # Track if this sentence got real POS tags
                     if pos_has_real_tags:
                         pos_success_count += 1
-                    elif fallback_words:  # Has fallbacks - track for invalid POS report
+                    else:  # Has fallbacks - track for invalid POS report
                         invalid_pos_records.append({
                             'original_sentence': sentence,
                             'cantonese_translation': translation,

@@ -254,7 +254,7 @@ def find_window_matches(
     window_size: int = 1,
     similarity_threshold: float = 0.4,
     mono_pos_cache: Optional[Dict[int, List[str]]] = None
-) -> Tuple[List[Dict], int, int]:
+) -> Tuple[List[Dict], int, int, bool]:
     """
     Find monolingual sentences matching POS window around switch point.
     
@@ -274,7 +274,7 @@ def find_window_matches(
                        If provided, avoids repeated string splitting for better performance.
         
     Returns:
-        Tuple of (matches, stage1_count, stage2_count) where:
+        Tuple of (matches, stage1_count, stage2_count, is_cutoff) where:
         - matches: List of match dictionaries with:
             - 'match_sentence': The matched monolingual sentence
             - 'similarity': Full POS structure similarity (0-1)
@@ -284,6 +284,7 @@ def find_window_matches(
             - 'matched_window_start': Starting index of match in monolingual sentence
         - stage1_count: Number of sentences that passed Stage 1 (full sentence similarity)
         - stage2_count: Number of sentences that passed Stage 2 (exact window match)
+        - is_cutoff: Whether the POS window was cut off due to sentence boundaries
     """
     # Extract switch point information
     switch_index = code_switched_sentence.get('switch_index', -1)
@@ -297,7 +298,7 @@ def find_window_matches(
     pos_sequence = translated_pos.split()
     
     if not pos_sequence:
-        return [], 0, 0
+        return [], 0, 0, False
     
     # Validate switch_index is within bounds
     if switch_index >= len(pos_sequence):
@@ -307,7 +308,7 @@ def find_window_matches(
             f"may have failed. The first {switch_index} Cantonese words should be preserved exactly. "
             f"Skipping this sentence."
         )
-        return [], 0, 0
+        return [], 0, 0, False
     
     # Extract POS window around switch point
     window_start = max(0, switch_index - window_size)
@@ -315,7 +316,7 @@ def find_window_matches(
     pos_window = pos_sequence[window_start:window_end]
     
     if not pos_window:
-        return [], 0, 0
+        return [], 0, 0, False
     
     # Check if window was cut off (ideal size is 2*window_size + 1)
     ideal_window_size = 2 * window_size + 1
@@ -341,7 +342,7 @@ def find_window_matches(
     stage1_count = len(candidate_sentences)
 
     if not candidate_sentences:
-        return [], stage1_count, 0
+        return [], stage1_count, 0, is_cutoff
     
     # STAGE 2: Find exact window matches from candidates
     matches = []
