@@ -6,7 +6,7 @@ This module provides functions for data processing, filtering, and sorting.
 
 import re
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 
 
 def parse_pattern_segments(pattern: str) -> List[Tuple[str, int]]:
@@ -24,29 +24,6 @@ def parse_pattern_segments(pattern: str) -> List[Tuple[str, int]]:
     
     matches = re.findall(r'([CE])(\d+)', pattern)
     return [(lang, int(count)) for lang, count in matches]
-
-
-def is_monolingual(pattern: str) -> Optional[str]:
-    """
-    Determine if a pattern represents a monolingual sentence.
-    
-    Args:
-        pattern: Pattern string like "C10", "E8", or "C5-E3"
-        
-    Returns:
-        'Cantonese' if pure Cantonese, 'English' if pure English,
-        None if code-switched
-    """
-    segments = parse_pattern_segments(pattern)
-    languages = {lang for lang, _ in segments}
-    
-    if len(languages) == 0:
-        return None
-    elif len(languages) == 1:
-        lang = languages.pop()
-        return 'Cantonese' if lang == 'C' else 'English'
-    else:
-        return None
 
 
 def split_sentence_by_pattern(sentence: str, pattern: str) -> List[Tuple[str, str]]:
@@ -99,20 +76,6 @@ def count_words_from_pattern(pattern: str) -> int:
     numbers = re.findall(r'\d+', pattern)
     return sum(int(n) for n in numbers)
 
-
-def count_words_from_text(text: str) -> int:
-    """
-    Count words in a text string by splitting on whitespace.
-    
-    Args:
-        text: Text string
-        
-    Returns:
-        Number of words
-    """
-    if not text or not text.strip():
-        return 0
-    return len(text.split())
 
 
 def filter_by_min_words(sentences: List[Dict], min_words: int) -> List[Dict]:
@@ -179,3 +142,38 @@ def find_switch_points(pattern: str) -> List[int]:
         switch_points.append(word_idx)
     
     return switch_points
+
+def get_english_word_count(pattern: str) -> int:
+    """
+    Get total English words in pattern.
+    
+    Args:
+        pattern: Pattern string like "C5-E3-C2"
+        
+    Returns:
+        Total count of English words
+        
+    Example:
+        >>> get_english_word_count("C5-E3-C2")
+        3
+    """
+    segments = parse_pattern_segments(pattern)
+    return sum(count for lang, count in segments if lang == 'E')
+
+
+def get_cantonese_word_count(pattern: str) -> int:
+    """
+    Get total Cantonese words in pattern.
+    
+    Args:
+        pattern: Pattern string like "C5-E3-C2"
+        
+    Returns:
+        Total count of Cantonese words
+        
+    Example:
+        >>> get_cantonese_word_count("C5-E3-C2")
+        7  # 5 + 2
+    """
+    segments = parse_pattern_segments(pattern)
+    return sum(count for lang, count in segments if lang == 'C')

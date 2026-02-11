@@ -8,126 +8,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from collections import Counter
-from typing import List, Dict, Optional
 import logging
 import os
-import re
+
+from ...utils.data_helpers import (
+    get_english_word_count,
+    get_cantonese_word_count
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_pattern_segments(pattern: str) -> List[tuple]:
-    """Parse pattern string into segments (e.g., 'C5-E3-C2' -> [('C', 5), ('E', 3), ('C', 2)])."""
-    if not pattern or pattern == 'FILLER_ONLY':
-        return []
-    segments = re.findall(r'([CE])(\d+)', pattern)
-    return [(lang, int(count)) for lang, count in segments]
-
-
-def _count_switches(pattern: str) -> int:
-    """Count number of language switches in a pattern."""
-    segments = _parse_pattern_segments(pattern)
-    if len(segments) <= 1:
-        return 0
-    switches = 0
-    for i in range(1, len(segments)):
-        if segments[i][0] != segments[i-1][0]:
-            switches += 1
-    return switches
-
-
-def _get_pattern_length(pattern: str) -> int:
-    """Get total word count from pattern."""
-    segments = _parse_pattern_segments(pattern)
-    return sum(count for _, count in segments)
-
-
-def _get_english_word_count(pattern: str) -> int:
-    """Get total English words in pattern."""
-    segments = _parse_pattern_segments(pattern)
-    return sum(count for lang, count in segments if lang == 'E')
-
-
-def _get_cantonese_word_count(pattern: str) -> int:
-    """Get total Cantonese words in pattern."""
-    segments = _parse_pattern_segments(pattern)
-    return sum(count for lang, count in segments if lang == 'C')
-
-
-def _get_switch_position(pattern: str, sentence_length: Optional[int] = None) -> Optional[float]:
-    """Get normalized switch position (0-1) from pattern. Returns position of first switch."""
-    segments = _parse_pattern_segments(pattern)
-    if len(segments) < 2:
-        return None
-    
-    # Find first switch (first E segment after C, or first C segment after E)
-    first_lang = segments[0][0]
-    first_count = segments[0][1]
-    
-    # If starts with C and switches to E, switch position is after first_count words
-    if first_lang == 'C' and len(segments) > 1 and segments[1][0] == 'E':
-        switch_index = first_count
-        if sentence_length:
-            return switch_index / sentence_length if sentence_length > 0 else None
-        # If no sentence length, use pattern length
-        pattern_len = _get_pattern_length(pattern)
-        return switch_index / pattern_len if pattern_len > 0 else None
-    
-    # If starts with E, switch is at position 0
-    if first_lang == 'E':
-        return 0.0
-    
-    return None
-
-
-def _get_raw_switch_position(pattern: str) -> Optional[int]:
-    """Get raw switch position (word index) from pattern. Returns position of first switch."""
-    segments = _parse_pattern_segments(pattern)
-    if len(segments) < 2:
-        return None
-    
-    # Find first switch (first E segment after C, or first C segment after E)
-    first_lang = segments[0][0]
-    first_count = segments[0][1]
-    
-    # If starts with C and switches to E, switch position is after first_count words
-    if first_lang == 'C' and len(segments) > 1 and segments[1][0] == 'E':
-        return first_count
-    
-    # If starts with E, switch is at position 0
-    if first_lang == 'E':
-        return 0
-    
-    return None
-
-
-def _categorize_pattern(pattern: str) -> str:
-    """Categorize pattern into common types (e.g., 'C-E', 'C-E-C', 'E-C', etc.)."""
-    segments = _parse_pattern_segments(pattern)
-    if not segments:
-        return 'Other'
-    
-    # Get simplified pattern (just language sequence)
-    lang_sequence = '-'.join([lang for lang, _ in segments])
-    
-    # Map to common categories
-    if lang_sequence == 'C-E':
-        return 'C-E'
-    elif lang_sequence == 'E-C':
-        return 'E-C'
-    elif lang_sequence == 'C-E-C':
-        return 'C-E-C'
-    elif lang_sequence == 'E-C-E':
-        return 'E-C-E'
-    elif lang_sequence.startswith('C-') and lang_sequence.endswith('-C'):
-        return 'C-E-C+'
-    elif lang_sequence.startswith('E-') and lang_sequence.endswith('-E'):
-        return 'E-C-E+'
-    elif len(segments) == 2:
-        return lang_sequence
-    else:
-        return 'Complex'
 
 
 def plot_matrix_language_distribution(
@@ -411,8 +300,8 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     
     # Calculate English and Cantonese word counts
     df = df.copy()
-    df['english_word_count'] = df['pattern'].apply(_get_english_word_count)
-    df['cantonese_word_count'] = df['pattern'].apply(_get_cantonese_word_count)
+    df['english_word_count'] = df['pattern'].apply(get_english_word_count)
+    df['cantonese_word_count'] = df['pattern'].apply(get_cantonese_word_count)
     
     # Calculate ratio: Cantonese / English
     # Filter out sentences with 0 English words to avoid division by zero
