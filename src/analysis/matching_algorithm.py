@@ -19,9 +19,9 @@ from .pos_tagging import (
     pos_tag_cantonese,
     pos_tag_english,
     pos_tag_mixed_sentence,
-    extract_pos_sequence,
-    parse_pattern_segments
+    extract_pos_sequence
 )
+from ..utils.data_helpers import find_switch_points, parse_pattern_segments
 
 logger = logging.getLogger(__name__)
 
@@ -121,33 +121,6 @@ def levenshtein_similarity(seq1: List[str], seq2: List[str]) -> float:
     similarity = 1.0 - (edit_dist / max_len) if max_len > 0 else 0.0
     
     return max(0.0, similarity)  # Ensure non-negative
-
-
-def find_switch_points(pattern: str) -> List[int]:
-    """
-    Find positions where language switches occur in a pattern.
-    
-    Args:
-        pattern: Pattern string like "C5-E3-C2"
-        
-    Returns:
-        List of word indices where switches occur
-        
-    Example:
-        >>> find_switch_points("C5-E3-C2")
-        [5, 8]  # Switch at word 5 (C->E) and word 8 (E->C)
-    """
-
-    segments = parse_pattern_segments(pattern)
-    switch_points = []
-    word_idx = 0
-    
-    for i in range(len(segments) - 1):
-        _, count = segments[i]
-        word_idx += count
-        switch_points.append(word_idx)
-    
-    return switch_points
 
 
 def extract_pos_window(

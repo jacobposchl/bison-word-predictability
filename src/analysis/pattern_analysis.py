@@ -10,101 +10,12 @@ import os
 import logging
 import pycantonese
 from tqdm import tqdm
-# from ..data.eaf_processor import load_eaf_file, get_main_tier, parse_participant_info, get_all_eaf_files
+
 from ..core.text_cleaning import is_filler, clean_word, has_content, split_on_internal_dashes
+from ..utils.text_validation import _is_cjk_character, _is_ascii_alphabetic, segment_by_script
+from ..utils.data_helpers import find_switch_points
 
 logger = logging.getLogger(__name__)
-
-
-def _is_cjk_character(char: str) -> bool:
-    """
-    Check if a character is a CJK character.
-    
-    Args:
-        char: Single character
-        
-    Returns:
-        True if character is CJK, False otherwise
-    """
-    code_point = ord(char)
-    return (
-        (0x4E00 <= code_point <= 0x9FFF) or      # CJK Unified Ideographs
-        (0x3400 <= code_point <= 0x4DBF) or      # CJK Extension A
-        (0x20000 <= code_point <= 0x2A6DF) or    # CJK Extension B
-        (0x2A700 <= code_point <= 0x2B73F) or    # CJK Extension C
-        (0x2B740 <= code_point <= 0x2B81F) or    # CJK Extension D
-        (0xF900 <= code_point <= 0xFAFF) or      # CJK Compatibility Ideographs
-        (0x2F800 <= code_point <= 0x2FA1F)       # CJK Compatibility Ideographs Supplement
-    )
-
-
-def _is_ascii_alphabetic(char: str) -> bool:
-    """
-    Check if a character is an ASCII alphabetic character.
-    
-    Args:
-        char: Single character
-        
-    Returns:
-        True if character is ASCII letter (a-z, A-Z), False otherwise
-    """
-    return ord(char) < 128 and char.isalpha()
-
-
-def segment_by_script(text: str) -> List[Tuple[str, str]]:
-    """
-    Segment text into runs of same script (CJK vs ASCII).
-    
-    This handles cases like "我local人" → [("我", "C"), ("local", "E"), ("人", "C")]
-    and "我 local 人" → [("我", "C"), ("local", "E"), ("人", "C")]
-    
-    Args:
-        text: Input text that may contain mixed scripts
-        
-    Returns:
-        List of (segment_text, language_code) tuples
-        language_code is 'C' for Cantonese or 'E' for English
-    """
-    if not text:
-        return []
-    
-    segments = []
-    current_segment = []
-    current_script = None
-    
-    for char in text:
-        # Determine script type for this character
-        if _is_cjk_character(char):
-            script = 'C'
-        elif _is_ascii_alphabetic(char):
-            script = 'E'
-        else:
-            # Punctuation, whitespace, numbers, etc.
-            # Attach to previous segment if exists, otherwise skip
-            if current_segment:
-                current_segment.append(char)
-            continue
-        
-        # Check if script changed
-        if current_script is None:
-            # First character
-            current_script = script
-            current_segment = [char]
-        elif current_script == script:
-            # Same script, continue segment
-            current_segment.append(char)
-        else:
-            # Script changed, finalize current segment and start new one
-            if current_segment:
-                segments.append((''.join(current_segment), current_script))
-            current_script = script
-            current_segment = [char]
-    
-    # Don't forget the last segment
-    if current_segment:
-        segments.append((''.join(current_segment), current_script))
-    
-    return segments
 
 
 def tokenize_main_tier_sentence(text: str) -> List[Tuple[str, str]]:
@@ -390,27 +301,5 @@ def process_all_files( data_path: str ) -> List[Dict]:
     logger.info(f"Total sentences collected: {len(all_sentence_patterns)}")
     
     return all_sentence_patterns
-
-
-def find_switch_positions(pattern: str) -> List[int]:
-    """
-    Find word indices where code-switches occur.
-    
-    Args:
-        pattern: Pattern like "C5-E2-C3"
-        
-    Returns:
-        List of switch positions (word indices where switch happens)
-    """
-    segments = pattern.split('-')
-    positions = []
-    current_pos = 0
-    
-    for i in range(len(segments) - 1):
-        lang, count = segments[i][0], int(segments[i][1:])
-        current_pos += count
-        positions.append(current_pos)
-    
-    return positions
 
 

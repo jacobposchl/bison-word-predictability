@@ -11,6 +11,8 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from tqdm import tqdm
 import pycantonese
 
+from ..utils.data_helpers import parse_pattern_segments
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,7 +160,7 @@ class NLLBTranslator:
             Dictionary with translation details
         """
         # Parse pattern
-        segments = self._parse_pattern(pattern)
+        segments = parse_pattern_segments(pattern)
         
         # Validate pattern matches word count
         total_pattern_words = sum(count for _, count in segments)
@@ -265,20 +267,3 @@ class NLLBTranslator:
             results.append(result)
         
         return results
-    
-    def _parse_pattern(self, pattern: str) -> List[Tuple[str, int]]:
-        """
-        Parse pattern string into segments.
-        
-        Args:
-            pattern: Pattern like "C5-E2-C3"
-            
-        Returns:
-            List of (language, count) tuples
-        """
-        segments = []
-        for segment in pattern.split('-'):
-            lang = segment[0]
-            count = int(segment[1:])
-            segments.append((lang, count))
-        return segments

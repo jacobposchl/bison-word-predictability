@@ -7,33 +7,15 @@ import logging
 from typing import List, Tuple, Optional, Dict
 from tqdm import tqdm
 from collections import defaultdict
-from src.analysis.pos_tagging import parse_pattern_segments
+
+from src.utils.text_validation import is_english_word
+from src.utils.data_helpers import parse_pattern_segments
 from src.analysis.matching_algorithm import analyze_window_matching
 
 logger = logging.getLogger(__name__)
 
 # Delimiter for joining context sentences (preserves sentence boundaries)
 CONTEXT_SENTENCE_DELIMITER = ' ||| '
-
-
-def is_english_word(word: str) -> bool:
-    """
-    Check if word is primarily English characters.
-    
-    Args:
-        word: Word to check
-        
-    Returns:
-        True if word contains primarily ASCII characters
-    """
-
-    if not word:
-        return False
-    alpha_chars = [c for c in word if c.isalpha()]
-    if not alpha_chars:
-        return False
-    return all(ord(c) < 128 for c in alpha_chars)
-
 
 
 def _build_participant_index(all_sentences_df: pd.DataFrame) -> Dict[str, pd.DataFrame]:

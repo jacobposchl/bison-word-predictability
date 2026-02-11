@@ -70,10 +70,10 @@ def generate_preprocessing_figures(config: Config):
     logger.info(f"Loading data from {all_sentences_csv}")
     all_sentences_df = pd.read_csv(all_sentences_csv)
     
+    # Filter to code-switched sentences (note: FILLER_ONLY sentences are already excluded from CSV)
     code_switched = all_sentences_df[
         all_sentences_df['pattern'].str.contains('C', na=False) & 
-        all_sentences_df['pattern'].str.contains('E', na=False) &
-        (all_sentences_df['pattern'] != 'FILLER_ONLY')
+        all_sentences_df['pattern'].str.contains('E', na=False)
     ].copy()
     
     logger.info(f"Found {len(code_switched)} code-switching sentences out of {len(all_sentences_df)} total")
