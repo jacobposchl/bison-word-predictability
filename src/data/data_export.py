@@ -451,6 +451,15 @@ def export_translated_sentences(
                     # Truncate translation at first error after switch_index
                     translation_words = translation.split()
                     
+                    # Calculate where the code-switch segment ends (switch_index + length of first English segment)
+                    segments = parse_pattern_segments(pattern)
+                    first_english_length = 0
+                    if len(segments) >= 2 and segments[1][0] == 'E':
+                        first_english_length = segments[1][1]
+                    
+                    # Expected end of code-switch segment (exclusive)
+                    cs_segment_end = switch_index + first_english_length
+                    
                     # Find first problematic word after switch_index
                     truncate_at = None
                     for i in range(switch_index, len(translation_words)):
@@ -462,15 +471,24 @@ def export_translated_sentences(
                             truncate_at = i
                             break
                     
-                    # Truncate if error found
-                    if truncate_at is not None:
+                    # Check if truncation would cut into the critical code-switch segment
+                    if truncate_at is not None and truncate_at < cs_segment_end:
+                        # Critical segment would be truncated - reject this sentence
+                        is_valid = False
+                        error_msg = f"Translation has errors in critical code-switch segment (truncate at word {truncate_at}, need {cs_segment_end} words). Switch point or code-switch segment corrupted."
+                        # Note: invalid_count increment and invalid_records append handled in else block below
+                    elif truncate_at is not None:
+                        # Truncation is safe (after code-switch segment) - apply it
                         translation_words = translation_words[:truncate_at]
                         translation = ' '.join(translation_words)
+                        logger.info(f"Truncated translation at word {truncate_at} (after code-switch segment ends at {cs_segment_end})")
                     
-                    # Validate switch word itself is valid Cantonese
-                    if switch_index >= len(translation_words):
-                        is_valid = False
-                        error_msg = f"Code switched word itself is unable to be translated..."
+                    # Only continue validation if still valid after truncation check
+                    if is_valid:
+                        # Validate switch word itself is valid Cantonese
+                        if switch_index >= len(translation.split()):
+                            is_valid = False
+                            error_msg = f"Switch index ({switch_index}) out of bounds after truncation (translation has {len(translation.split())} words)"
 
 
                 if is_valid:
