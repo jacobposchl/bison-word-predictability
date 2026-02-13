@@ -478,52 +478,42 @@ def export_translated_sentences(
                     valid_count += 1
                     
                     # Add POS tagging for translation
-                    fallback_words = []  # Track which words got fallback tags
                     try:
-                        translation_words = translation.split()
-                        pos_tags = []
-                        
-                        # Track word count for this sentence
-                        total_words += len(translation_words)
-                        
-                        for word in translation_words:
-                            # POS tag Cantonese word
-                            try:
-                                tagged_word = pos_tag_cantonese(word)
-                                word_pos = extract_pos_sequence(tagged_word)
-                                if word_pos:
-                                    pos_tags.extend(word_pos)
-                                    # Track fallback tags
-                                    has_fallback = False
-                                    for tag in word_pos:
-                                        if tag in ['X', 'UNK', 'ENG']:
-                                            fallback_words.append((word, tag))
-                                            has_fallback = True
-                                    
-                                    if has_fallback:
-                                        words_with_fallback_pos += len(word_pos)
-                                    else:
-                                        words_with_real_pos += len(word_pos)
-                                else:
-                                    pos_tags.append('UNK')
-                                    fallback_words.append((word, 'UNK'))
-                                    words_with_fallback_pos += 1
-                            except Exception:
-                                pos_tags.append('UNK')
-                                fallback_words.append((word, 'UNK'))
-                                words_with_fallback_pos += 1
-                        
+                        # POS tag the entire translation at once
+                        tagged_translation = pos_tag_cantonese(translation)
+                        pos_tags = extract_pos_sequence(tagged_translation)
                         pos_seq = ' '.join(pos_tags) if pos_tags else ''
                         
-                        # If POS sequence is still empty despite having translation, mark all as unknown
-                        if not pos_seq and translation:
-                            num_unk = len(translation_words)
-                            pos_seq = ' '.join(['UNK'] * num_unk)
-                            fallback_words = [(word, 'UNK') for word in translation_words]
-                            # Adjust word-level counts if we added UNK tags
-                            if num_unk > len(fallback_words) - num_unk:
-                                additional_fallbacks = num_unk - len([w for w, t in fallback_words if t == 'UNK'])
-                                words_with_fallback_pos += additional_fallbacks
+                        # Get segmented words from tagged output
+                        segmented_words = [word for word, _ in tagged_translation]
+                        
+                        # Track word count for this sentence
+                        total_words += len(segmented_words)
+                        
+                        # Check for fallback tags (X, UNK, ENG)
+                        fallback_tags = [(word, tag) for word, tag in tagged_translation if tag in ['X', 'UNK', 'ENG']]
+                        has_fallback = len(fallback_tags) > 0
+                        
+                        # Update word-level statistics
+                        if has_fallback:
+                            words_with_fallback_pos += len(fallback_tags)
+                            words_with_real_pos += len(pos_tags) - len(fallback_tags)
+                        else:
+                            words_with_real_pos += len(pos_tags)
+                        
+                        # Track sentence-level POS success
+                        if has_fallback:
+                            invalid_pos_records.append({
+                                'original_sentence': sentence,
+                                'cantonese_translation': translation,
+                                'pattern': pattern,
+                                'fallback_words': ', '.join([f"{word} ({tag})" for word, tag in fallback_tags]),
+                                'pos_sequence': pos_seq,
+                                'group': row.get('group', ''),
+                                'participant_id': row.get('participant_id', '')
+                            })
+                        else:
+                            pos_success_count += 1
                             
                     except Exception as e:
                         logger.warning(f"Error POS tagging translation at row {idx}: {e}")
@@ -531,26 +521,22 @@ def export_translated_sentences(
                         translation_words = translation.split()
                         num_words = len(translation_words)
                         pos_seq = ' '.join(['UNK'] * num_words) if translation_words else ''
-                        # Track all words as UNK
-                        fallback_words = [(word, 'UNK') for word in translation_words]
+                        
+                        # Track all words as fallback
+                        total_words += num_words
                         words_with_fallback_pos += num_words
-                    
-                    # A sentence is successful only if it has NO fallback tags (all real POS tags)
-                    pos_has_real_tags = len(fallback_words) == 0
-                    
-                    # Track if this sentence got real POS tags
-                    if pos_has_real_tags:
-                        pos_success_count += 1
-                    else:  # Has fallbacks - track for invalid POS report
-                        invalid_pos_records.append({
-                            'original_sentence': sentence,
-                            'cantonese_translation': translation,
-                            'pattern': pattern,
-                            'fallback_words': ', '.join([f"{word} ({tag})" for word, tag in fallback_words]),
-                            'pos_sequence': pos_seq,
-                            'group': row.get('group', ''),
-                            'participant_id': row.get('participant_id', '')
-                        })
+                        
+                        # Add to invalid POS records
+                        if translation_words:
+                            invalid_pos_records.append({
+                                'original_sentence': sentence,
+                                'cantonese_translation': translation,
+                                'pattern': pattern,
+                                'fallback_words': ', '.join([f"{word} (UNK)" for word in translation_words]),
+                                'pos_sequence': pos_seq,
+                                'group': row.get('group', ''),
+                                'participant_id': row.get('participant_id', '')
+                            })
                 else:
                     invalid_count += 1
                     # Track invalid translation for reporting
