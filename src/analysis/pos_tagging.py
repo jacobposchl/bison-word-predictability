@@ -54,13 +54,19 @@ def pos_tag_cantonese(sentence: str) -> List[Tuple[str, str]]:
         return []
     
     try:
+
         # Use PyCantonese's segmentation to properly segment Cantonese text
         words = pycantonese.segment(sentence)
+
         if not words:
             return []
+        
         tagged = pycantonese.pos_tag(words)
+
         return [(word, pos) for word, pos in tagged if word.strip()]
+    
     except Exception as e:
+        
         logger.warning(f"Error tagging Cantonese sentence '{sentence[:50]}...': {e}")
         return []
 
@@ -92,36 +98,6 @@ def pos_tag_english(sentence: str) -> List[Tuple[str, str]]:
         return []
 
 
-def pos_tag_mixed_sentence( sentence: str, pattern: str ) -> List[Tuple[str, str, str]]:
-    """
-    Tag a mixed-language sentence by segmenting and tagging each language portion.
-    
-    Args:
-        sentence: Space-separated sentence text
-        pattern: Pattern like "C5-E3-C2"
-        
-    Returns:
-        List of (word, pos_tag, language) tuples
-        
-    Example:
-        >>> pos_tag_mixed_sentence("我 係 local 人", "C2-E1-C1")
-        [('我', 'PRON', 'C'), ('係', 'VERB', 'C'), ('local', 'ADJ', 'E'), ('人', 'NOUN', 'C')]
-    """
-    
-    segments = split_sentence_by_pattern(sentence, pattern)
-    result = []
-    
-    for segment_text, lang in segments:
-        if lang == 'C':
-            tagged = pos_tag_cantonese(segment_text)
-            result.extend([(word, pos, 'C') for word, pos in tagged])
-        elif lang == 'E':
-            tagged = pos_tag_english(segment_text)
-            result.extend([(word, pos, 'E') for word, pos in tagged])
-    
-    return result
-
-
 def extract_pos_sequence(tagged: List[Tuple]) -> List[str]:
     """
     Extract just the POS tags from tagged output.
@@ -132,12 +108,8 @@ def extract_pos_sequence(tagged: List[Tuple]) -> List[str]:
     Returns:
         List of POS tag strings
     """
-    if not tagged:
-        return []
     
-    # Handle both (word, pos) and (word, pos, lang) formats
-    if len(tagged[0]) == 3:
-        return [pos for _, pos, _ in tagged]
-    else:
-        return [pos for _, pos in tagged]
+    assert len(tagged[0]) == 2, "Pycantonese POS tagging error, should return tuple of length 2..."
+    
+    return [pos for _, pos in tagged]
 

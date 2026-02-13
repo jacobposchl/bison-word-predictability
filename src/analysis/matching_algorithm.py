@@ -11,17 +11,8 @@ import multiprocessing
 import os
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
-from Levenshtein import distance as levenshtein_distance
-from functools import lru_cache
 from tqdm import tqdm
 
-from .pos_tagging import (
-    pos_tag_cantonese,
-    pos_tag_english,
-    pos_tag_mixed_sentence,
-    extract_pos_sequence
-)
-from ..utils.data_helpers import find_switch_points, parse_pattern_segments
 
 logger = logging.getLogger(__name__)
 

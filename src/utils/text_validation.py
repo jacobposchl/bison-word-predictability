@@ -161,3 +161,20 @@ def segment_by_script(text: str) -> List[Tuple[str, str]]:
         segments.append((''.join(current_segment), current_script))
     
     return segments
+
+
+def remove_punctuation(text: str) -> str:
+    """
+    Remove punctuation from text while preserving word spacing.
+    
+    Args:
+        text: Text to clean
+        
+    Returns:
+        Text with punctuation removed and normalized spacing
+    """
+    import string
+    # Remove punctuation but keep spaces
+    cleaned = ''.join(c if c not in string.punctuation else ' ' for c in text)
+    # Normalize multiple spaces
+    return ' '.join(cleaned.split())

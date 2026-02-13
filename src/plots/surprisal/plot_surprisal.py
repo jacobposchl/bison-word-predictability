@@ -150,10 +150,13 @@ def plot_surprisal_distributions(
     plt.tight_layout()
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved surprisal distribution plot to: {output_path}")
+    logger.info(f"Saved surprisal distribution plot to: {output_path} and {output_path_pdf}")
     return str(output_path)
 
 
@@ -248,10 +251,13 @@ def plot_surprisal_distributions_by_context(
     plt.tight_layout()
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved surprisal distribution plot to: {output_path}")
+    logger.info(f"Saved surprisal distribution plot to: {output_path} and {output_path_pdf}")
     return str(output_path)
 
 
@@ -336,10 +342,13 @@ def plot_surprisal_differences_by_context(
     plt.tight_layout()
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved surprisal difference plot to: {output_path}")
+    logger.info(f"Saved surprisal difference plot to: {output_path} and {output_path_pdf}")
     return str(output_path)
 
 
@@ -444,9 +453,12 @@ def plot_surprisal_distributions_matrix(
     plt.tight_layout(rect=[0, 0, 1, 0.98])
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved surprisal distribution matrix plot to: {output_path}")
+    logger.info(f"Saved surprisal distribution matrix plot to: {output_path} and {output_path_pdf}")
     return str(output_path)
 

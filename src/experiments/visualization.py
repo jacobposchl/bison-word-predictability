@@ -130,9 +130,12 @@ def plot_surprisal_distributions(
     ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    print(f"Saved distribution plot to {output_path}")
+    print(f"Saved distribution plot to {output_path} and {output_path_pdf}")
 
 
 def plot_scatter_comparison(
@@ -217,9 +220,12 @@ def plot_scatter_comparison(
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    print(f"Saved scatter plot to {output_path}")
+    print(f"Saved scatter plot to {output_path} and {output_path_pdf}")
 
 
 def plot_difference_histogram(
@@ -294,9 +300,12 @@ def plot_difference_histogram(
     ax.spines['bottom'].set_color('#d0d0d0')
     
     plt.tight_layout()
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    print(f"Saved difference histogram to {output_path}")
+    print(f"Saved difference histogram to {output_path} and {output_path_pdf}")
 
 
 def plot_summary_statistics(
@@ -448,6 +457,9 @@ Effect Size:
     fig.suptitle('Surprisal Comparison: Code-Switched Translation vs. Monolingual Baseline',
                 fontsize=16, fontweight='bold', y=0.98)
     
+    # Save both PNG and PDF
+    output_path_pdf = output_path.with_suffix('.pdf')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    print(f"Saved summary figure to {output_path}")
+    print(f"Saved summary figure to {output_path} and {output_path_pdf}")

@@ -6,13 +6,12 @@ for code-switching sentences.
 """
 
 import pandas as pd
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 import logging
 import os
 
-from src.utils.text_validation import verify_cantonese_only
-from src.utils.data_helpers import count_words_from_pattern, filter_by_min_words, sort_dataframe
+from src.utils.text_validation import verify_cantonese_only, contains_english_words, is_english_word
+from src.utils.data_helpers import count_words_from_pattern, filter_by_min_words, sort_dataframe, find_switch_points
 
 logger = logging.getLogger(__name__)
 
@@ -124,20 +123,19 @@ def export_all_sentences_to_csv(
     return csv_all, stats
 
 
-def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str, is_cantonese: bool = False) -> pd.DataFrame:
+def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str) -> pd.DataFrame:
     """
-    Add POS tagging column to a DataFrame.
+    Add Cantonese POS tagging column to a DataFrame.
     
     Args:
         df: DataFrame to add POS column to
         sentence_col: Name of column containing sentences
         pos_col: Name of column to create for POS tags
-        is_cantonese: True if sentences are Cantonese, False if English
         
     Returns:
         DataFrame with POS column added
     """
-    from src.analysis.pos_tagging import pos_tag_cantonese, pos_tag_english, extract_pos_sequence
+    from src.analysis.pos_tagging import pos_tag_cantonese, extract_pos_sequence
     
     logger.info(f"Adding POS tagging to {pos_col} column...")
     
@@ -149,11 +147,7 @@ def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str, is_
             continue
         
         try:
-            if is_cantonese:
-                tagged = pos_tag_cantonese(sentence)
-            else:
-                tagged = pos_tag_english(sentence)
-            
+            tagged = pos_tag_cantonese(sentence)
             pos_seq = extract_pos_sequence(tagged)
             pos_sequences.append(' '.join(pos_seq) if pos_seq else '')
         except Exception as e:
@@ -218,7 +212,7 @@ def export_cantonese_monolingual(
     df = sort_dataframe(df)
     
     # Add POS tagging
-    df = _add_pos_to_dataframe(df, 'reconstructed_sentence', 'pos', is_cantonese=True)
+    df = _add_pos_to_dataframe(df, 'reconstructed_sentence', 'pos')
     
     # Save CSV
     csv_path = config.get_csv_cantonese_mono_without_fillers_path()
@@ -262,30 +256,17 @@ def export_translated_sentences(
         Tuple of (DataFrame with translated sentences structure, statistics dictionary)
     """
 
-    # Import parse_pattern_segments early since it's needed for filtering
     from src.utils.data_helpers import parse_pattern_segments
     
     logger.info("Exporting translated code-switched sentences...")
     
-    # Filter code-switching sentences (without fillers)
+    # Filter code-switching sentences
     code_switched_sentences = filter_code_switching_sentences(all_sentences)
-    logger.info(f"Found {len(code_switched_sentences)} code-switching sentences (without fillers)")
+    logger.info(f"Found {len(code_switched_sentences)} code-switching sentences")
     
-    # Convert to DataFrame for easier filtering
     df_source = pd.DataFrame(code_switched_sentences)
     
-    if len(df_source) == 0:
-        logger.warning("No code-switching sentences found!")
-        return pd.DataFrame(), {
-            'initial_total': 0,
-            'after_cantonese_filter': 0,
-            'after_pattern_filter': 0,
-            'translation_valid': 0,
-            'translation_invalid': 0,
-            'final_with_translation': 0,
-            'final_with_pos': 0,
-            'min_cantonese_words': 0
-        }
+    assert len(df_source) != 0, "No code switched sentences found..."
     
     # Track filtering stats for summary
     stats = {
@@ -339,35 +320,20 @@ def export_translated_sentences(
         logger.warning("No Cantonese matrix language sentences found!")
         return pd.DataFrame(), stats
     
-    # Create new DataFrame with desired structure
+    # Create new DataFrame with
     # Column order: code_switch_original, cantonese_translation, translated_pos, pattern, then other columns
     
-    # Calculate switch_index for each sentence (index where English starts)
-    def get_switch_index(pattern: str) -> int:
-        """Extract the index of the first English word (the switch word).
-        
-        For pattern C18-E1, returns 18 (the first English word, 0-based indexing).
-        This is the actual switch word position.
-        
-        """
-        try:
-            segments = parse_pattern_segments(pattern)
-            if len(segments) < 2:
-                return -1
-            first_lang, first_count = segments[0]
-            if first_lang == 'C' and first_count > 0:
-                return first_count
-            return -1
-        except Exception:
-            return -1
-    
-    switch_indices = [get_switch_index(pattern) for pattern in df_cantonese[pattern_col].values]
+    # Get switch indices using find_switch_points (first switch point for each pattern)
+    switch_indices = []
+    for pattern in df_cantonese[pattern_col].values:
+        switch_points = find_switch_points(pattern)
+        switch_indices.append(switch_points[0] if switch_points else -1)
     
     # Get reconstructed sentence (without fillers) - use the field from sentence dictionaries
     if 'reconstructed_text_without_fillers' in df_cantonese.columns:
         reconstructed_sentences = df_cantonese['reconstructed_text_without_fillers'].values
-    elif 'reconstructed_sentence' in df_cantonese.columns:
-        reconstructed_sentences = df_cantonese['reconstructed_sentence'].values
+    else:
+        raise ValueError("No reconstructed sentences without fillers?")
     
     # Get pattern column (pattern is always without fillers now)
     pattern_values = df_cantonese[pattern_col].values if pattern_col in df_cantonese.columns else df_cantonese.get('pattern', [''] * len(df_cantonese)).values
@@ -427,8 +393,13 @@ def export_translated_sentences(
         valid_count = 0
         invalid_count = 0
         invalid_records = []  # Track invalid translations for separate CSV
-        pos_success_count = 0  # Track successful POS tagging (not just fallbacks)
+        pos_success_count = 0  # Track successful POS tagging
         invalid_pos_records = []  # Track sentences with fallback POS tags
+        
+        # Word-level statistics
+        total_words = 0
+        words_with_real_pos = 0
+        words_with_fallback_pos = 0
         
         # Create progress bar with detailed description
         pbar = tqdm(df.iterrows(), total=len(df), desc="Translating & verifying")
@@ -444,21 +415,17 @@ def export_translated_sentences(
             pos_seq = ''
             
             try:
-                # Use original tokenization (sentence is already space-separated to match pattern)
+                # Sentence is already space-separated
                 words = sentence.split()
                 
                 # Translate
-                translation_result = translator.translate_code_switched_sentence(
-                    sentence=sentence,
-                    pattern=pattern,
-                    words=words
-                )
+                translation_result = translator.translate_code_switched_sentence(sentence=sentence, pattern=pattern, words=words)
                 translation = translation_result.get('translated_sentence', '')
                 
                 # Enhanced verification: check if English words are within the code-switched segment
                 is_valid, error_msg = verify_cantonese_only(translation)
                 
-                # If verification failed but we have a valid switch_index, check if English words are outside our segment
+                # If verification failed check if failures are outside our segment
                 if not is_valid and switch_index >= 0:
                     # Get the length of the first English segment from pattern
                     segments = parse_pattern_segments(pattern)
@@ -468,17 +435,15 @@ def export_translated_sentences(
                         # We only need to check the Cantonese portion (indices 0 to switch_index, exclusive)
                         # English words at switch_index or after are allowed
                         translation_words = translation.split()
-                        english_in_cantonese_portion = False
                         cantonese_end = switch_index  # Exclusive end of Cantonese portion
                         
-                        for i, word in enumerate(translation_words[:cantonese_end]):
-                            if word and any(c.isascii() and c.isalpha() for c in word):
-                                english_in_cantonese_portion = True
-                                break
+                        # Check if any english words left in "should-be" cantonese section (0 until first english word - exclusive)
+                        cantonese_portion = ' '.join(translation_words[:cantonese_end])
+                        has_english, english_words = contains_english_words(cantonese_portion)
                         
                         # If no English in the Cantonese portion, consider it valid
                         # (English in the first English segment or after is fine)
-                        if not english_in_cantonese_portion:
+                        if not has_english:
                             is_valid = True
                             error_msg = ''
                 
@@ -491,7 +456,7 @@ def export_translated_sentences(
                     for i in range(switch_index, len(translation_words)):
                         word = translation_words[i]
                         is_unknown = word in ['UNKNOWN', 'UNK', '']
-                        is_english = word and any(c.isascii() and c.isalpha() for c in word)
+                        is_english = is_english_word(word)
                         
                         if is_unknown or is_english:
                             truncate_at = i
@@ -505,67 +470,70 @@ def export_translated_sentences(
                     # Validate switch word itself is valid Cantonese
                     if switch_index >= len(translation_words):
                         is_valid = False
-                        error_msg = f"Switch index {switch_index} out of bounds after truncation"
+                        error_msg = f"Code switched word itself is unable to be translated..."
                     else:
-                        switch_word = translation_words[switch_index]
-                        is_switch_broken = switch_word in ['UNKNOWN', 'UNK', ''] or (switch_word and any(c.isascii() and c.isalpha() for c in switch_word))
-                        if is_switch_broken:
-                            is_valid = False
-                            error_msg = f"Switch word '{switch_word}' is not valid Cantonese"
+                        raise ValueError("Error validating translated code switched sentence, this isn't an issue with switch index being removed...")
                 
                 if is_valid:
                     valid_count += 1
                     
-                    # Add POS tagging for valid translation
-                    # Mixed-language handling: Even though truncation attempts to remove English words,
-                    # we defensively handle mixed-language scenarios because:
-                    # 1. Truncation only scans from switch_index onwards - if no error is found, no truncation occurs
-                    # 2. Edge cases or bugs in truncation logic may allow English words to remain
-                    # 3. The 'ENG' tag marks words that shouldn't be present but acknowledges their existence
-                    #    rather than causing POS tagging to fail
+                    # Add POS tagging for translation
                     fallback_words = []  # Track which words got fallback tags
                     try:
                         translation_words = translation.split()
                         pos_tags = []
                         
+                        # Track word count for this sentence
+                        total_words += len(translation_words)
+                        
                         for word in translation_words:
-                            # Check if word is English (contains ASCII letters)
-                            if word and any(c.isascii() and c.isalpha() for c in word):
-                                # Mark English words with 'ENG' tag (defensive measure for edge cases)
-                                pos_tags.append('ENG')
-                                fallback_words.append((word, 'ENG'))
-                            else:
-                                # Try to POS tag Cantonese word
-                                try:
-                                    tagged_word = pos_tag_cantonese(word)
-                                    word_pos = extract_pos_sequence(tagged_word)
-                                    if word_pos:
-                                        pos_tags.extend(word_pos)
-                                        # Track fallback tags
-                                        for tag in word_pos:
-                                            if tag in ['X', 'UNK', 'ENG']:
-                                                fallback_words.append((word, tag))
+                            # POS tag Cantonese word
+                            try:
+                                tagged_word = pos_tag_cantonese(word)
+                                word_pos = extract_pos_sequence(tagged_word)
+                                if word_pos:
+                                    pos_tags.extend(word_pos)
+                                    # Track fallback tags
+                                    has_fallback = False
+                                    for tag in word_pos:
+                                        if tag in ['X', 'UNK', 'ENG']:
+                                            fallback_words.append((word, tag))
+                                            has_fallback = True
+                                    
+                                    if has_fallback:
+                                        words_with_fallback_pos += len(word_pos)
                                     else:
-                                        pos_tags.append('UNK')
-                                        fallback_words.append((word, 'UNK'))
-                                except Exception:
+                                        words_with_real_pos += len(word_pos)
+                                else:
                                     pos_tags.append('UNK')
                                     fallback_words.append((word, 'UNK'))
+                                    words_with_fallback_pos += 1
+                            except Exception:
+                                pos_tags.append('UNK')
+                                fallback_words.append((word, 'UNK'))
+                                words_with_fallback_pos += 1
                         
                         pos_seq = ' '.join(pos_tags) if pos_tags else ''
                         
                         # If POS sequence is still empty despite having translation, mark all as unknown
                         if not pos_seq and translation:
-                            pos_seq = ' '.join(['UNK'] * len(translation_words))
+                            num_unk = len(translation_words)
+                            pos_seq = ' '.join(['UNK'] * num_unk)
                             fallback_words = [(word, 'UNK') for word in translation_words]
+                            # Adjust word-level counts if we added UNK tags
+                            if num_unk > len(fallback_words) - num_unk:
+                                additional_fallbacks = num_unk - len([w for w, t in fallback_words if t == 'UNK'])
+                                words_with_fallback_pos += additional_fallbacks
                             
                     except Exception as e:
                         logger.warning(f"Error POS tagging translation at row {idx}: {e}")
                         # Fallback: create UNK tags for each word
                         translation_words = translation.split()
-                        pos_seq = ' '.join(['UNK'] * len(translation_words)) if translation_words else ''
+                        num_words = len(translation_words)
+                        pos_seq = ' '.join(['UNK'] * num_words) if translation_words else ''
                         # Track all words as UNK
                         fallback_words = [(word, 'UNK') for word in translation_words]
+                        words_with_fallback_pos += num_words
                     
                     # A sentence is successful only if it has NO fallback tags (all real POS tags)
                     pos_has_real_tags = len(fallback_words) == 0
@@ -661,16 +629,24 @@ def export_translated_sentences(
         df_save = sort_dataframe(df_save)
         df_save.to_csv(csv_path, index=False, encoding='utf-8-sig')
         
-        # Update stats from the FILTERED DataFrame (what's actually saved)
+        # Update stats from the FILTERED DataFrame
         stats['translation_valid'] = valid_count
         stats['translation_invalid'] = invalid_count
         stats['final_with_translation'] = len(df_valid)
-        stats['final_with_pos'] = pos_success_count  # Only count real POS tags, not fallbacks
+        stats['final_with_pos'] = pos_success_count  # Only count real POS tags
         stats['final_with_any_pos'] = len(df_valid[df_valid['translated_pos'] != ''])  # Includes UNK/ENG fallbacks
         
+        # Word-level statistics
+        stats['total_words'] = total_words
+        stats['words_with_real_pos'] = words_with_real_pos
+        stats['words_with_fallback_pos'] = words_with_fallback_pos
+        
         if stats['final_with_translation'] != stats['final_with_pos']:
-            logger.warning(f"POS tagging: {stats['final_with_pos']}/{stats['final_with_translation']} got real tags, "
+            word_fallback_pct = (stats['words_with_fallback_pos'] / stats['total_words'] * 100) if stats['total_words'] > 0 else 0
+            logger.warning(f"POS tagging (sentence-level): {stats['final_with_pos']}/{stats['final_with_translation']} got real tags, "
                           f"{stats['final_with_any_pos'] - stats['final_with_pos']} used fallbacks (X/UNK/ENG)")
+            logger.warning(f"POS tagging (word-level): {stats['words_with_fallback_pos']}/{stats['total_words']} words "
+                          f"with fallback tags ({word_fallback_pct:.1f}%)")
         
         # Generate summary report
         summary_path = os.path.join(config.get_preprocessing_results_dir(), 'translation_summary.txt')
@@ -710,7 +686,15 @@ def export_translated_sentences(
                 f.write(f"  ✓ All translations have real POS tags\n")
             
             pos_success_rate = (stats['final_with_pos'] / stats['final_with_translation'] * 100) if stats['final_with_translation'] > 0 else 0
-            f.write(f"  Real POS tagging success rate: {pos_success_rate:.1f}%\n\n")
+            f.write(f"  Real POS tagging success rate (sentence-level): {pos_success_rate:.1f}%\n\n")
+            
+            f.write("Stage 5b: Word-Level POS Tagging Statistics\n")
+            f.write(f"  Total words in translations: {stats.get('total_words', 0)}\n")
+            f.write(f"  Words with real POS tags: {stats.get('words_with_real_pos', 0)}\n")
+            f.write(f"  Words with fallback POS tags (X/UNK/ENG): {stats.get('words_with_fallback_pos', 0)}\n")
+            
+            word_pos_success_rate = (stats.get('words_with_real_pos', 0) / stats.get('total_words', 1) * 100) if stats.get('total_words', 0) > 0 else 0
+            f.write(f"  Word-level POS success rate: {word_pos_success_rate:.1f}%\n\n")
             
             f.write("="*80 + "\n")
             f.write("FINAL RESULTS\n")
@@ -726,7 +710,8 @@ def export_translated_sentences(
             f.write("="*80 + "\n")
         
         logger.info(f"Translation complete: {valid_count} valid, {invalid_count} invalid out of {len(df)} total")
-        logger.info(f"POS tagging: {pos_success_count} with real tags, {stats.get('final_with_any_pos', 0) - pos_success_count} with fallbacks")
+        logger.info(f"POS tagging (sentence-level): {pos_success_count} with real tags, {stats.get('final_with_any_pos', 0) - pos_success_count} with fallbacks")
+        logger.info(f"POS tagging (word-level): {stats.get('words_with_real_pos', 0)}/{stats.get('total_words', 0)} words with real tags ({(stats.get('words_with_real_pos', 0)/stats.get('total_words', 1)*100):.1f}%)")
         logger.info(f"Saved translated sentences: '{csv_path}' - {len(df_valid)} sentences")
         logger.info(f"Generated summary report: '{summary_path}'")
         
@@ -747,6 +732,9 @@ def export_translated_sentences(
             'final_with_translation': 0,
             'final_with_pos': 0,
             'final_with_any_pos': 0,
+            'total_words': 0,
+            'words_with_real_pos': 0,
+            'words_with_fallback_pos': 0,
             'min_cantonese_words': config.get_analysis_min_cantonese_words() if hasattr(config, 'get_analysis_min_cantonese_words') else 0
         }
     
@@ -957,9 +945,41 @@ def generate_preprocessing_report(
         if final_trans > 0:
             report_data.append({
                 'section': 'Translation',
-                'metric': 'Real POS tagging success rate (%)',
+                'metric': 'Real POS tagging success rate - sentence-level (%)',
                 'value': round(pos_coverage / final_trans * 100, 2) if final_trans > 0 else 0,
-                'details': 'Percentage with real POS tags (not fallbacks)'
+                'details': 'Percentage of sentences with all real POS tags'
+            })
+        
+        # Word-level POS statistics
+        total_words = translation_stats.get('total_words', 0)
+        if total_words > 0:
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Total words in translations',
+                'value': total_words,
+                'details': ''
+            })
+            
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Words with real POS tags',
+                'value': translation_stats.get('words_with_real_pos', 0),
+                'details': 'Excludes X/UNK/ENG'
+            })
+            
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Words with fallback POS tags',
+                'value': translation_stats.get('words_with_fallback_pos', 0),
+                'details': 'X, UNK, or ENG tags'
+            })
+            
+            word_success_rate = (translation_stats.get('words_with_real_pos', 0) / total_words * 100) if total_words > 0 else 0
+            report_data.append({
+                'section': 'Translation',
+                'metric': 'Real POS tagging success rate - word-level (%)',
+                'value': round(word_success_rate, 2),
+                'details': 'Percentage of words with real POS tags'
             })
     else:
         report_data.append({

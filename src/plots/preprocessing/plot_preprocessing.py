@@ -145,11 +145,14 @@ def plot_matrix_language_distribution(
     
     plt.tight_layout()
     
-    output_path = os.path.join(figures_dir, 'matrix_language_distribution.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = os.path.join(figures_dir, 'matrix_language_distribution.png')
+    output_path_pdf = os.path.join(figures_dir, 'matrix_language_distribution.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved matrix language distribution plot to {output_path}")
+    logger.info(f"Saved matrix language distribution plot to {output_path_png} and {output_path_pdf}")
 
 
 def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
@@ -212,11 +215,14 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     
     plt.tight_layout()
     
-    output_path = os.path.join(figures_dir, 'switch_position.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = os.path.join(figures_dir, 'switch_position.png')
+    output_path_pdf = os.path.join(figures_dir, 'switch_position.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved switch position plot to {output_path}")
+    logger.info(f"Saved switch position plot to {output_path_png} and {output_path_pdf}")
 
 
 def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
@@ -281,11 +287,14 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     
     plt.tight_layout()
     
-    output_path = os.path.join(figures_dir, 'participant_variation.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = os.path.join(figures_dir, 'participant_variation.png')
+    output_path_pdf = os.path.join(figures_dir, 'participant_variation.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved participant variation plot to {output_path}")
+    logger.info(f"Saved participant variation plot to {output_path_png} and {output_path_pdf}")
 
 
 def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
@@ -357,9 +366,12 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     
     plt.tight_layout()
     
-    output_path = os.path.join(figures_dir, 'language_ratio_distribution.png')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = os.path.join(figures_dir, 'language_ratio_distribution.png')
+    output_path_pdf = os.path.join(figures_dir, 'language_ratio_distribution.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved Cantonese to English ratio distribution plot to {output_path}")
+    logger.info(f"Saved Cantonese to English ratio distribution plot to {output_path_png} and {output_path_pdf}")
 

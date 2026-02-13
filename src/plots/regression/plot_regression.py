@@ -41,10 +41,13 @@ def plot_roc_curves(results: Dict[str, Dict], y_test, output_dir: Path):
     plt.grid(alpha=0.3)
     plt.tight_layout()
     
-    roc_path = output_dir / "roc_curves.png"
-    plt.savefig(roc_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    roc_path_png = output_dir / "roc_curves.png"
+    roc_path_pdf = output_dir / "roc_curves.pdf"
+    plt.savefig(roc_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(roc_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    logger.info(f"Saved ROC curves to {roc_path}")
+    logger.info(f"Saved ROC curves to {roc_path_png} and {roc_path_pdf}")
 
 
 def plot_model_comparison(results: Dict[str, Dict], output_dir: Path):
@@ -81,10 +84,13 @@ def plot_model_comparison(results: Dict[str, Dict], output_dir: Path):
     ax.grid(alpha=0.3, axis='y')
     plt.tight_layout()
     
-    comp_path = output_dir / "model_comparison.png"
-    plt.savefig(comp_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    comp_path_png = output_dir / "model_comparison.png"
+    comp_path_pdf = output_dir / "model_comparison.pdf"
+    plt.savefig(comp_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(comp_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
-    logger.info(f"Saved model comparison plot to {comp_path}")
+    logger.info(f"Saved model comparison plot to {comp_path_png} and {comp_path_pdf}")
 
 
 def plot_all_regression_results(results: Dict[str, Dict], y_test, output_dir: Path):

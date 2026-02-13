@@ -12,6 +12,7 @@ from tqdm import tqdm
 import pycantonese
 
 from ..utils.data_helpers import parse_pattern_segments
+from ..utils.text_validation import remove_punctuation
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,13 @@ class NLLBTranslator:
                 
                 if not english_text.strip():
                     logger.warning(f"Empty or whitespace-only English text in segment, skipping")
+                    continue
+                
+                # Remove punctuation before translation
+                english_text = remove_punctuation(english_text)
+                
+                if not english_text.strip():
+                    logger.warning(f"English segment became empty after punctuation removal, skipping")
                     continue
                 
                 cantonese_translation = self.translate_english_to_cantonese(english_text)

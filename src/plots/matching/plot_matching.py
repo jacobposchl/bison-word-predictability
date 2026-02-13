@@ -113,13 +113,16 @@ def plot_matches_per_sentence_distribution(window_datasets: list, output_dir: st
     
     plt.tight_layout()
     
-    output_path = Path(output_dir) / 'matches_per_sentence_distribution.png'
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = Path(output_dir) / 'matches_per_sentence_distribution.png'
+    output_path_pdf = Path(output_dir) / 'matches_per_sentence_distribution.pdf'
+    output_path_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved matches per sentence distribution plot to: {output_path}")
-    return str(output_path)
+    logger.info(f"Saved matches per sentence distribution plot to: {output_path_png} and {output_path_pdf}")
+    return str(output_path_png)
 
 
 def plot_similarity_threshold_analysis(window_datasets: list, output_dir: str) -> str:
@@ -222,13 +225,16 @@ def plot_similarity_threshold_analysis(window_datasets: list, output_dir: str) -
     
     plt.tight_layout()
     
-    output_path = Path(output_dir) / 'similarity_threshold_analysis.png'
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = Path(output_dir) / 'similarity_threshold_analysis.png'
+    output_path_pdf = Path(output_dir) / 'similarity_threshold_analysis.pdf'
+    output_path_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved similarity score histogram to: {output_path}")
-    return str(output_path)
+    logger.info(f"Saved similarity score histogram to: {output_path_png} and {output_path_pdf}")
+    return str(output_path_png)
 
 
 def plot_similarity_by_group(window_datasets: list, output_dir: str) -> str:
@@ -346,13 +352,16 @@ def plot_similarity_by_group(window_datasets: list, output_dir: str) -> str:
     
     plt.tight_layout()
     
-    output_path = Path(output_dir) / 'similarity_by_group.png'
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = Path(output_dir) / 'similarity_by_group.png'
+    output_path_pdf = Path(output_dir) / 'similarity_by_group.pdf'
+    output_path_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved similarity by group histogram to: {output_path}")
-    return str(output_path)
+    logger.info(f"Saved similarity by group histogram to: {output_path_png} and {output_path_pdf}")
+    return str(output_path_png)
 
 
 def plot_levenshtein_similarity_distribution(window_datasets: list, output_dir: str) -> list:
@@ -454,13 +463,16 @@ def plot_levenshtein_similarity_distribution(window_datasets: list, output_dir: 
         
         plt.tight_layout()
         
-        output_path = Path(output_dir) / f'levenshtein_similarity_distribution_window_{window_size}.png'
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        # Save both PNG and PDF
+        output_path_png = Path(output_dir) / f'levenshtein_similarity_distribution_window_{window_size}.png'
+        output_path_pdf = Path(output_dir) / f'levenshtein_similarity_distribution_window_{window_size}.pdf'
+        output_path_png.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
         plt.close()
         
-        logger.info(f"  Saved window {window_size} plot to: {output_path}")
-        output_paths.append(str(output_path))
+        logger.info(f"  Saved window {window_size} plot to: {output_path_png} and {output_path_pdf}")
+        output_paths.append(str(output_path_png))
     
     return output_paths
 
@@ -575,13 +587,16 @@ def plot_similarity_violin_by_group(window_datasets: list, output_dir: str) -> l
         
         plt.tight_layout()
         
-        output_path = Path(output_dir) / f'similarity_violin_by_group_window_{window_size}.png'
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        # Save both PNG and PDF
+        output_path_png = Path(output_dir) / f'similarity_violin_by_group_window_{window_size}.png'
+        output_path_pdf = Path(output_dir) / f'similarity_violin_by_group_window_{window_size}.pdf'
+        output_path_png.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
         plt.close()
         
-        logger.info(f"  Saved window {window_size} plot to: {output_path}")
-        output_paths.append(str(output_path))
+        logger.info(f"  Saved window {window_size} plot to: {output_path_png} and {output_path_pdf}")
+        output_paths.append(str(output_path_png))
     
     return output_paths
 
@@ -702,11 +717,14 @@ def plot_match_ranking_distribution(window_datasets: list, output_dir: str) -> s
     
     plt.tight_layout()
     
-    output_path = Path(output_dir) / 'match_ranking_distribution.png'
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Save both PNG and PDF
+    output_path_png = Path(output_dir) / 'match_ranking_distribution.png'
+    output_path_pdf = Path(output_dir) / 'match_ranking_distribution.pdf'
+    output_path_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    logger.info(f"Saved match ranking distribution plot to: {output_path}")
-    return str(output_path)
+    logger.info(f"Saved match ranking distribution plot to: {output_path_png} and {output_path_pdf}")
+    return str(output_path_png)
 
