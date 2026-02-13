@@ -697,7 +697,11 @@ def export_translated_sentences(
         
         logger.info(f"Translation complete: {valid_count} valid, {invalid_count} invalid out of {len(df)} total")
         logger.info(f"POS tagging (sentence-level): {pos_success_count} with real tags, {stats.get('final_with_any_pos', 0) - pos_success_count} with fallbacks")
-        logger.info(f"POS tagging (word-level): {stats.get('words_with_real_pos', 0)}/{stats.get('total_words', 0)} words with real tags ({(stats.get('words_with_real_pos', 0)/stats.get('total_words', 1)*100):.1f}%)")
+        total_words = stats.get('total_words', 0)
+        if total_words > 0:
+            logger.info(f"POS tagging (word-level): {stats.get('words_with_real_pos', 0)}/{total_words} words with real tags ({(stats.get('words_with_real_pos', 0)/total_words*100):.1f}%)")
+        else:
+            logger.info(f"POS tagging (word-level): No words processed")
         logger.info(f"Saved translated sentences: '{csv_path}' - {len(df_valid)} sentences")
         logger.info(f"Generated summary report: '{summary_path}'")
         
