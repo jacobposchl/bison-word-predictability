@@ -471,9 +471,8 @@ def export_translated_sentences(
                     if switch_index >= len(translation_words):
                         is_valid = False
                         error_msg = f"Code switched word itself is unable to be translated..."
-                    else:
-                        raise ValueError("Error validating translated code switched sentence, this isn't an issue with switch index being removed...")
-                
+
+
                 if is_valid:
                     valid_count += 1
                     
