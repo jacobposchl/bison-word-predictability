@@ -249,7 +249,7 @@ def find_window_matches(
     window_size: int = 1,
     similarity_threshold: float = 0.4,
     mono_pos_cache: Optional[Dict[int, List[str]]] = None
-) -> Tuple[List[Dict], int, int, bool]:
+) -> Tuple[List[Dict], int, int, bool, List[float]]:
     """
     Find monolingual sentences matching POS window around switch point.
     
@@ -288,13 +288,13 @@ def find_window_matches(
     pattern = code_switched_sentence.get('pattern', '')
     
     if switch_index < 0 or not translated_pos:
-        return [], 0, 0
+        return [], 0, 0, False, []
     
     # Parse POS sequence
     pos_sequence = translated_pos.split()
     
     if not pos_sequence:
-        return [], 0, 0, False
+        return [], 0, 0, False, []
     
     # Validate switch_index is within bounds
     if switch_index >= len(pos_sequence):
@@ -304,7 +304,7 @@ def find_window_matches(
             f"may have failed. The first {switch_index} Cantonese words should be preserved exactly. "
             f"Skipping this sentence."
         )
-        return [], 0, 0, False
+        return [], 0, 0, False, []
     
     # Extract POS window around switch point
     window_start = max(0, switch_index - window_size)
@@ -312,7 +312,7 @@ def find_window_matches(
     pos_window = pos_sequence[window_start:window_end]
     
     if not pos_window:
-        return [], 0, 0, False
+        return [], 0, 0, False, []
     
     # Check if window was cut off (ideal size is 2*window_size + 1)
     ideal_window_size = 2 * window_size + 1
