@@ -45,43 +45,95 @@ def plot_surprisal_distributions(
     """
     setup_plot_style()
     
-    # Filter for complete calculations only (all tokens valid)
-    valid_df = results_df[results_df['calculation_success'] == True].copy()
-    complete_df = valid_df[
-        (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
-        (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
-    ].copy()
-    
-    # Determine which columns to use
-    if context_length is not None:
-        cs_col = f'cs_surprisal_context_{context_length}'
-        mono_col = f'mono_surprisal_context_{context_length}'
+    # Check if data is in long format (with is_switch column) or wide format
+    if 'is_switch' in results_df.columns:
+        # Long format: is_switch = 1 for CS, 0 for mono
+        # Determine which surprisal column to use
+        if context_length is not None:
+            surprisal_col = f'surprisal_context_{context_length}'
+        else:
+            # Try to find context length columns, or fall back to surprisal_context_0
+            context_cols = [col for col in results_df.columns if 'surprisal_context_' in col]
+            if context_cols:
+                surprisal_col = context_cols[0]
+                import re
+                match = re.search(r'context_(\d+)', surprisal_col)
+                if match:
+                    context_length = int(match.group(1))
+            else:
+                print("WARNING: No surprisal values found")
+                return
+        
+        # Filter to rows with valid surprisal values
+        complete_df = results_df[pd.notna(results_df[surprisal_col])].copy()
+        
+        if len(complete_df) == 0:
+            print(f"WARNING: No valid surprisal values found for {surprisal_col}")
+            return
+        
+        # Separate CS and mono
+        cs_data = complete_df[complete_df['is_switch'] == 1][surprisal_col].values
+        mono_data = complete_df[complete_df['is_switch'] == 0][surprisal_col].values
+        
     else:
-        # Try to find context length columns, or fall back to old column names
-        context_cols = [col for col in complete_df.columns if 'cs_surprisal_context_' in col]
-        if context_cols:
-            import re
-            match = re.search(r'context_(\d+)', context_cols[0])
-            if match:
-                context_length = int(match.group(1))
-                cs_col = f'cs_surprisal_context_{context_length}'
-                mono_col = f'mono_surprisal_context_{context_length}'
+        # Wide format (legacy): separate columns for CS and mono
+        # Filter for complete calculations only if columns exist
+        if 'calculation_success' in results_df.columns:
+            valid_df = results_df[results_df['calculation_success'] == True].copy()
+        else:
+            valid_df = results_df.copy()
+        
+        if 'cs_num_valid_tokens' in valid_df.columns and 'mono_num_valid_tokens' in valid_df.columns:
+            complete_df = valid_df[
+                (valid_df['cs_num_valid_tokens'] == valid_df['cs_num_tokens']) &
+                (valid_df['mono_num_valid_tokens'] == valid_df['mono_num_tokens'])
+            ].copy()
+        else:
+            complete_df = valid_df.copy()
+        
+        # Determine which columns to use
+        if context_length is not None:
+            cs_col = f'cs_surprisal_context_{context_length}'
+            mono_col = f'mono_surprisal_context_{context_length}'
+        else:
+            # Try to find context length columns, or fall back to old column names
+            context_cols = [col for col in complete_df.columns if 'cs_surprisal_context_' in col]
+            if context_cols:
+                import re
+                match = re.search(r'context_(\d+)', context_cols[0])
+                if match:
+                    context_length = int(match.group(1))
+                    cs_col = f'cs_surprisal_context_{context_length}'
+                    mono_col = f'mono_surprisal_context_{context_length}'
+                else:
+                    cs_col = 'cs_surprisal_total'
+                    mono_col = 'mono_surprisal_total'
             else:
                 cs_col = 'cs_surprisal_total'
                 mono_col = 'mono_surprisal_total'
-        else:
-            cs_col = 'cs_surprisal_total'
-            mono_col = 'mono_surprisal_total'
+        
+        # Filter to rows with valid surprisal values
+        complete_df = complete_df[
+            pd.notna(complete_df[cs_col]) &
+            pd.notna(complete_df[mono_col])
+        ].copy()
+        
+        # Prepare data for plotting
+        cs_data = complete_df[cs_col].values
+        mono_data = complete_df[mono_col].values
     
-    # Filter to rows with valid surprisal values
-    complete_df = complete_df[
-        pd.notna(complete_df[cs_col]) &
-        pd.notna(complete_df[mono_col])
-    ].copy()
+    if len(cs_data) == 0 or len(mono_data) == 0:
+        print("WARNING: No data available for plotting")
+        return
     
-    # Prepare data for plotting
-    cs_data = complete_df[cs_col].values
-    mono_data = complete_df[mono_col].values
+    # Calculate n_comparisons properly based on format
+    if 'is_switch' in results_df.columns:
+        # For long format, count unique sent_id values that have both CS and mono
+        cs_ids = set(complete_df[complete_df['is_switch'] == 1]['sent_id'].values)
+        mono_ids = set(complete_df[complete_df['is_switch'] == 0]['sent_id'].values)
+        n_comparisons = len(cs_ids & mono_ids)
+    else:
+        n_comparisons = min(len(cs_data), len(mono_data))
     
     # Create DataFrames for plotting
     cs_df = pd.DataFrame({'surprisal': cs_data, 'type': 'Code-Switched'})
@@ -113,9 +165,9 @@ def plot_surprisal_distributions(
         title_parts.append(f'{model_type.capitalize()} Model')
     if window_size:
         title_parts.append(f'Window Size {window_size}')
-    if context_length:
+    if context_length is not None:
         title_parts.append(f'Context Length {context_length}')
-    title_parts.append(f'(n={len(complete_df)} complete comparisons)')
+    title_parts.append(f'(n={n_comparisons} comparisons)')
     
     ax.set_xlabel('Surprisal', fontsize=13, fontweight='medium')
     ax.set_ylabel('Density', fontsize=13, fontweight='medium')
@@ -240,34 +292,81 @@ def plot_difference_histogram(
     CS translations have systematically higher or lower surprisal.
     
     Args:
-        results_df: DataFrame with surprisal_difference column (or context-specific)
+        results_df: DataFrame with surprisal_difference column (or context-specific) or in long format with is_switch
         output_path: Path to save the figure
         context_length: Context length to use. If None, tries to find any context length column or uses old column names.
     """
     setup_plot_style()
     
-    # Filter for complete calculations only
-    complete_df = results_df[results_df['calculation_success'] == True].copy()
-    
-    # Determine which column to use
-    if context_length is not None:
-        diff_col = f'surprisal_difference_context_{context_length}'
+    # Check if data is in long format (with is_switch column) or wide format
+    if 'is_switch' in results_df.columns:
+        # Long format: calculate differences by matching sent_id pairs
+        # Determine which surprisal column to use
+        if context_length is not None:
+            surprisal_col = f'surprisal_context_{context_length}'
+        else:
+            # Try to find context length columns
+            context_cols = [col for col in results_df.columns if 'surprisal_context_' in col]
+            if context_cols:
+                surprisal_col = context_cols[0]
+                import re
+                match = re.search(r'context_(\d+)', surprisal_col)
+                if match:
+                    context_length = int(match.group(1))
+            else:
+                print("WARNING: No surprisal values found")
+                return
+        
+        # Filter to rows with valid surprisal values
+        valid_df = results_df[pd.notna(results_df[surprisal_col])].copy()
+        
+        # Separate CS and mono
+        cs_df = valid_df[valid_df['is_switch'] == 1][['sent_id', surprisal_col]].set_index('sent_id')
+        mono_df = valid_df[valid_df['is_switch'] == 0][['sent_id', surprisal_col]].set_index('sent_id')
+        
+        # Find common sent_ids
+        common_ids = cs_df.index.intersection(mono_df.index)
+        
+        if len(common_ids) == 0:
+            print("WARNING: No matched pairs found for difference calculation")
+            return
+        
+        # Calculate differences
+        differences = (cs_df.loc[common_ids, surprisal_col] - mono_df.loc[common_ids, surprisal_col]).values
+        complete_df = pd.DataFrame({'difference': differences})
+        diff_col = 'difference'
+        
     else:
-        # Try to find context length columns, or fall back to old column names
-        context_cols = [col for col in complete_df.columns if 'surprisal_difference_context_' in col]
-        if context_cols:
-            import re
-            match = re.search(r'context_(\d+)', context_cols[0])
-            if match:
-                context_length = int(match.group(1))
-                diff_col = f'surprisal_difference_context_{context_length}'
+        # Wide format (legacy): use pre-calculated difference column
+        # Filter for complete calculations only if column exists
+        if 'calculation_success' in results_df.columns:
+            complete_df = results_df[results_df['calculation_success'] == True].copy()
+        else:
+            complete_df = results_df.copy()
+        
+        # Determine which column to use
+        if context_length is not None:
+            diff_col = f'surprisal_difference_context_{context_length}'
+        else:
+            # Try to find context length columns, or fall back to old column names
+            context_cols = [col for col in complete_df.columns if 'surprisal_difference_context_' in col]
+            if context_cols:
+                import re
+                match = re.search(r'context_(\d+)', context_cols[0])
+                if match:
+                    context_length = int(match.group(1))
+                    diff_col = f'surprisal_difference_context_{context_length}'
+                else:
+                    diff_col = 'surprisal_difference'
             else:
                 diff_col = 'surprisal_difference'
-        else:
-            diff_col = 'surprisal_difference'
+        
+        # Filter to rows with valid difference values
+        complete_df = complete_df[pd.notna(complete_df[diff_col])].copy()
     
-    # Filter to rows with valid difference values
-    complete_df = complete_df[pd.notna(complete_df[diff_col])].copy()
+    if len(complete_df) == 0:
+        print("WARNING: No valid difference values found")
+        return
     
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(11, 7))
@@ -287,10 +386,15 @@ def plot_difference_histogram(
     ax.axvline(mean_diff, color='#333333', linestyle='-', linewidth=2.5,
               label=f'Mean: {mean_diff:.2f}')
     
+    # Build title
+    title = 'Distribution of Surprisal Differences'
+    if context_length is not None:
+        title += f'\nContext Length {context_length}'
+    title += f'\n(n={len(complete_df)} comparisons)'
+    
     ax.set_xlabel('Surprisal Difference (CS - Mono, bits)', fontsize=13, fontweight='medium')
     ax.set_ylabel('Count', fontsize=13, fontweight='medium')
-    ax.set_title(f'Distribution of Surprisal Differences\n(n={len(complete_df)} complete comparisons)',
-                fontsize=15, fontweight='bold', pad=20)
+    ax.set_title(title, fontsize=15, fontweight='bold', pad=20)
     ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11, framealpha=0.95)
     ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
     ax.set_axisbelow(True)

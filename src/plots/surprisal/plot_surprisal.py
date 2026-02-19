@@ -11,7 +11,8 @@ import seaborn as sns
 from pathlib import Path
 import logging
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ def _load_all_surprisal_data(results_base: Path) -> dict:
             df = pd.read_csv(results_csv)
             
             # Extract all context lengths from column names
-            cs_cols = [col for col in df.columns if col.startswith('cs_surprisal_context_')]
-            for col in cs_cols:
+            surprisal_cols = [col for col in df.columns if col.startswith('surprisal_context_')]
+            for col in surprisal_cols:
                 match = re.search(r'context_(\d+)', col)
                 if match:
                     context_length = int(match.group(1))
@@ -196,17 +197,27 @@ def plot_surprisal_distributions_by_context(
         if context_length in datasets[window_size]:
             df = datasets[window_size][context_length]
             
-            # Extract CS surprisal for this context
-            cs_col = f'cs_surprisal_context_{context_length}'
-            mono_col = f'mono_surprisal_context_{context_length}'
-            
-            if cs_col in df.columns:
-                cs_values = df[cs_col].dropna()
-                all_cs_surprisals.extend(cs_values.tolist())
-            
-            if mono_col in df.columns:
-                mono_values = df[mono_col].dropna()
-                all_mono_surprisals.extend(mono_values.tolist())
+            # Check if data is in long or wide format
+            if 'is_switch' in df.columns:
+                # Long format
+                surprisal_col = f'surprisal_context_{context_length}'
+                if surprisal_col in df.columns:
+                    cs_values = df[df['is_switch'] == 1][surprisal_col].dropna()
+                    mono_values = df[df['is_switch'] == 0][surprisal_col].dropna()
+                    all_cs_surprisals.extend(cs_values.tolist())
+                    all_mono_surprisals.extend(mono_values.tolist())
+            else:
+                # Wide format (legacy)
+                cs_col = f'cs_surprisal_context_{context_length}'
+                mono_col = f'mono_surprisal_context_{context_length}'
+                
+                if cs_col in df.columns:
+                    cs_values = df[cs_col].dropna()
+                    all_cs_surprisals.extend(cs_values.tolist())
+                
+                if mono_col in df.columns:
+                    mono_values = df[mono_col].dropna()
+                    all_mono_surprisals.extend(mono_values.tolist())
     
     if not all_cs_surprisals or not all_mono_surprisals:
         logger.warning(f"No surprisal values found for context length {context_length}")
@@ -296,14 +307,31 @@ def plot_surprisal_differences_by_context(
         if context_length in datasets[window_size]:
             df = datasets[window_size][context_length]
             
-            # Filter for complete calculations
-            complete_df = df[df['calculation_success'] == True].copy()
-            
-            # Extract difference for this context
-            diff_col = f'surprisal_difference_context_{context_length}'
-            if diff_col in complete_df.columns:
-                diff_values = complete_df[diff_col].dropna()
-                all_differences.extend(diff_values.tolist())
+            # Check if data is in long or wide format
+            if 'is_switch' in df.columns:
+                # Long format: calculate differences by matching sent_id pairs
+                surprisal_col = f'surprisal_context_{context_length}'
+                if surprisal_col in df.columns:
+                    valid_df = df[pd.notna(df[surprisal_col])].copy()
+                    cs_df = valid_df[valid_df['is_switch'] == 1][['sent_id', surprisal_col]].set_index('sent_id')
+                    mono_df = valid_df[valid_df['is_switch'] == 0][['sent_id', surprisal_col]].set_index('sent_id')
+                    common_ids = cs_df.index.intersection(mono_df.index)
+                    if len(common_ids) > 0:
+                        differences = (cs_df.loc[common_ids, surprisal_col] - mono_df.loc[common_ids, surprisal_col]).values
+                        all_differences.extend(differences.tolist())
+            else:
+                # Wide format (legacy)
+                # Filter for complete calculations if column exists
+                if 'calculation_success' in df.columns:
+                    complete_df = df[df['calculation_success'] == True].copy()
+                else:
+                    complete_df = df.copy()
+                
+                # Extract difference for this context
+                diff_col = f'surprisal_difference_context_{context_length}'
+                if diff_col in complete_df.columns:
+                    diff_values = complete_df[diff_col].dropna()
+                    all_differences.extend(diff_values.tolist())
     
     if not all_differences:
         logger.warning(f"No difference values found for context length {context_length}")
@@ -460,5 +488,206 @@ def plot_surprisal_distributions_matrix(
     plt.close()
     
     logger.info(f"Saved surprisal distribution matrix plot to: {output_path} and {output_path_pdf}")
+    return str(output_path)
+
+
+def _categorize_pos_tag(pos_tag: str) -> str:
+    """
+    Categorize POS tag into Verb, Noun, or Other.
+    
+    Args:
+        pos_tag: Universal Dependencies POS tag
+        
+    Returns:
+        Category: 'Verb', 'Noun', or 'Other'
+    """
+    if pd.isna(pos_tag) or not isinstance(pos_tag, str):
+        return 'Other'
+    
+    pos_upper = pos_tag.upper()
+    
+    if pos_upper in ['VERB', 'AUX']:
+        return 'Verb'
+    elif pos_upper in ['NOUN', 'PROPN']:
+        return 'Noun'
+    else:
+        return 'Other'
+
+
+def plot_pos_distribution_at_switch_points(
+    results_base: Path,
+    output_path: Path,
+    model_type: str = "autoregressive"
+) -> str:
+    """
+    Plot distribution of POS tags at switch points across groups and sentence types.
+    
+    Creates a faceted stacked bar chart with:
+    - One subplot per group (Heritage, Homeland, Immersed)
+    - Two bars per subplot (Code-Switched vs Monolingual)
+    - Each bar shows percentage composition of 3 POS categories (Verb, Noun, Other)
+    
+    Args:
+        results_base: Base directory containing surprisal results (window_* subdirectories)
+        output_path: Path to save the figure
+        model_type: Model type (autoregressive or masked)
+        
+    Returns:
+        Path to saved figure
+    """
+    logger.info("Creating POS distribution plot at switch points...")
+    
+    # Load all data from all windows and context lengths
+    datasets = _load_all_surprisal_data(results_base)
+    
+    if not datasets:
+        logger.warning("No valid datasets found")
+        return ""
+    
+    # Collect all POS tags organized by group and sentence type
+    pos_data = {
+        'Heritage': {'Code-Switched': [], 'Monolingual': []},
+        'Homeland': {'Code-Switched': [], 'Monolingual': []},
+        'Immersed': {'Code-Switched': [], 'Monolingual': []}
+    }
+    
+    # Aggregate data from all windows and contexts
+    for window_size in sorted(datasets.keys()):
+        for context_length in sorted(datasets[window_size].keys()):
+            df = datasets[window_size][context_length]
+            
+            # Filter for successful calculations
+            df = df[df['switch_pos'].notna()].copy()
+            
+            for group in ['Heritage', 'Homeland', 'Immersed']:
+                group_df = df[df['group'] == group]
+                
+                # Code-switched (is_switch == 1)
+                cs_pos = group_df[group_df['is_switch'] == 1]['switch_pos'].tolist()
+                pos_data[group]['Code-Switched'].extend(cs_pos)
+                
+                # Monolingual (is_switch == 0)
+                mono_pos = group_df[group_df['is_switch'] == 0]['switch_pos'].tolist()
+                pos_data[group]['Monolingual'].extend(mono_pos)
+    
+    # Calculate percentage distributions with 3 categories
+    distribution_data = []
+    
+    for group in ['Heritage', 'Homeland', 'Immersed']:
+        for sentence_type in ['Code-Switched', 'Monolingual']:
+            pos_tags = pos_data[group][sentence_type]
+            
+            # Categorize all POS tags
+            categorized = [_categorize_pos_tag(tag) for tag in pos_tags]
+            counter = Counter(categorized)
+            total = sum(counter.values())
+            
+            if total > 0:
+                for category in ['Verb', 'Noun', 'Other']:
+                    count = counter.get(category, 0)
+                    percentage = (count / total * 100)
+                    distribution_data.append({
+                        'group': group,
+                        'sentence_type': sentence_type,
+                        'pos_category': category,
+                        'count': count,
+                        'percentage': percentage
+                    })
+    
+    if not distribution_data:
+        logger.warning("No POS distribution data found")
+        return ""
+    
+    distribution_df = pd.DataFrame(distribution_data)
+    
+    # Create single plot with all groups side-by-side
+    fig, ax = plt.subplots(figsize=(3.5, 3))
+    
+    groups = ['Heritage', 'Homeland', 'Immersed']
+    categories = ['Verb', 'Noun', 'Other']
+    
+    # Define distinct colors for the 3 categories (same as preprocessing)
+    colors = {
+        'Verb': '#E74C3C',      # Red
+        'Noun': '#3498DB',      # Blue  
+        'Other': '#95A5A6'      # Gray
+    }
+    
+    # Prepare for grouped bar chart
+    bar_width = 0.35
+    spacing = 0.8  # Space between groups
+    
+    for group_idx, group in enumerate(groups):
+        group_data = distribution_df[distribution_df['group'] == group]
+        
+        # Get data for Code-Switched and Monolingual
+        for sent_idx, sent_type in enumerate(['Code-Switched', 'Monolingual']):
+            sent_data = group_data[group_data['sentence_type'] == sent_type]
+            
+            # Get percentages for each category
+            percentages = {}
+            for cat in categories:
+                cat_data = sent_data[sent_data['pos_category'] == cat]
+                percentages[cat] = cat_data['percentage'].values[0] if len(cat_data) > 0 else 0
+            
+            # Calculate x position
+            x_pos = group_idx * (2 * bar_width + spacing) + sent_idx * bar_width
+            
+            # Create stacked bars
+            bottom = 0
+            for cat in categories:
+                ax.bar(x_pos, percentages[cat], bar_width, 
+                      bottom=bottom, 
+                      color=colors[cat],
+                      edgecolor='white',
+                      linewidth=1)
+                bottom += percentages[cat]
+    
+    # Customize plot
+    ax.set_ylabel('% of POS Tags at Switch Point', fontsize=9, fontweight='medium')
+    ax.set_ylim(0, 100)
+    
+    # Set x-axis ticks at the center of each group's pair of bars
+    group_centers = [i * (2 * bar_width + spacing) + bar_width/2 for i in range(len(groups))]
+    ax.set_xticks(group_centers)
+    ax.set_xticklabels(groups, fontsize=9, fontweight='medium')
+    
+    ax.tick_params(axis='both', labelsize=8, length=3)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    
+    # Professional styling matching preprocessing plots
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
+    
+    # Add legend to the right side
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=colors[cat], edgecolor='white', linewidth=1, label=cat) 
+               for cat in categories]
+    
+    ax.legend(handles=handles, loc='center left', 
+             bbox_to_anchor=(1, 0.9),
+             frameon=True, fontsize=8, 
+             fancybox=True, shadow=True, framealpha=0.95)
+    
+    # Title
+    ax.set_title('Part of Speech Distribution by Group', 
+                fontsize=10, fontweight='bold', pad=10)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path_pdf = output_path.with_suffix('.pdf')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Saved POS distribution plot to: {output_path} and {output_path_pdf}")
+    
     return str(output_path)
 

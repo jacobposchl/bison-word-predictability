@@ -10,6 +10,8 @@ import pandas as pd
 import seaborn as sns
 import logging
 import os
+from collections import Counter
+from typing import List
 
 from ...utils.data_helpers import (
     get_english_word_count,
@@ -49,12 +51,12 @@ def plot_matrix_language_distribution(
                 'Total': len(group_sentences)
             }
     
-    # Create figure with better styling
-    fig, ax = plt.subplots(figsize=(11, 7))
+    # Create figure with single-column format
+    fig, ax = plt.subplots(figsize=(3.5, 4))
     
     # Prepare data for stacked bar chart
     x = np.arange(len(groups))
-    width = 0.45  # Narrower bars to make room for labels
+    width = 0.6
     
     cantonese_counts = [group_matrix_counts.get(g, {}).get('Cantonese', 0) for g in groups]
     english_counts = [group_matrix_counts.get(g, {}).get('English', 0) for g in groups]
@@ -78,70 +80,30 @@ def plot_matrix_language_distribution(
                 label='Equal', color=colors['Equal'], edgecolor='white', linewidth=1.5, alpha=0.9)
     
     # Styling
-    ax.set_xlabel('Speaker Group', fontsize=14, fontweight='medium')
-    ax.set_ylabel('Number of Sentences', fontsize=14, fontweight='medium')
-    ax.set_title('Matrix Language Distribution by Speaker Group', 
-                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('Speaker Group', fontsize=9, fontweight='medium')
+    ax.set_ylabel('Number of Sentences', fontsize=9, fontweight='medium')
+    ax.set_title('Matrix Language Distribution', 
+                fontsize=10, fontweight='bold', pad=10)
     ax.set_xticks(x)
-    ax.set_xticklabels(groups, fontsize=14)
+    ax.set_xticklabels(groups, fontsize=8)
+    ax.tick_params(axis='both', labelsize=8)
     
-    # Improve legend
-    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
-             fontsize=14, framealpha=0.95)
+    # Legend to the right
+    ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5),
+             frameon=True, fancybox=True, shadow=True, 
+             fontsize=8, framealpha=0.95)
     
-    # Better grid styling
-    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    # Grid styling
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     
-    # Remove top and right spines for cleaner look
+    # Professional styling
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
     ax.spines['left'].set_color('#d0d0d0')
     ax.spines['bottom'].set_color('#d0d0d0')
-    
-    # Add value labels on bars with better positioning
-    for i, group in enumerate(groups):
-        total = group_matrix_counts.get(group, {}).get('Total', 0)
-        if total > 0:
-            # Calculate percentages for each segment
-            cant_pct = (cantonese_counts[i] / total * 100) if total > 0 else 0
-            eng_pct = (english_counts[i] / total * 100) if total > 0 else 0
-            equal_pct = (equal_counts[i] / total * 100) if total > 0 else 0
-            
-            # Add total label at top
-            ax.text(i, total + total*0.02, f'n={total}', ha='center', va='bottom', 
-                   fontsize=12, fontweight='medium')
-            
-            # All percentage labels positioned to the right of bars with brackets
-            # Cantonese segment
-            if cantonese_counts[i] > 0:
-                cant_y_pos = cantonese_counts[i] / 2
-                # Draw bracket line from bar to text
-                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
-                       [cant_y_pos, cant_y_pos, cant_y_pos], 
-                       color='#333333', linewidth=1.2, alpha=0.7)
-                ax.text(i + width/2 + 0.08, cant_y_pos, f'{cant_pct:.0f}%', 
-                       ha='left', va='center', fontsize=12, fontweight='medium')
-            
-            # English segment
-            if english_counts[i] > 0:
-                eng_y_pos = cantonese_counts[i] + english_counts[i] / 2
-                # Draw bracket line from bar to text
-                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
-                       [eng_y_pos, eng_y_pos, eng_y_pos], 
-                       color='#333333', linewidth=1.2, alpha=0.7)
-                ax.text(i + width/2 + 0.08, eng_y_pos, f'{eng_pct:.0f}%', 
-                       ha='left', va='center', fontsize=12, fontweight='medium')
-            
-            # Equal segment
-            if equal_counts[i] > 0:
-                equal_y_pos = cantonese_counts[i] + english_counts[i] + equal_counts[i] / 2
-                # Draw bracket line from bar to text
-                ax.plot([i + width/2, i + width/2 + 0.05, i + width/2 + 0.05], 
-                       [equal_y_pos, equal_y_pos, equal_y_pos], 
-                       color='#333333', linewidth=1.2, alpha=0.7)
-                ax.text(i + width/2 + 0.08, equal_y_pos, f'{equal_pct:.0f}%', 
-                       ha='left', va='center', fontsize=12, fontweight='medium')
     
     plt.tight_layout()
     
@@ -174,8 +136,8 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
         # Filter out any NaN values
         df = df[df['switch_position'].notna()].copy()
     
-    # Create figure (single plot)
-    fig, ax = plt.subplots(figsize=(11, 7))
+    # Create figure (single-column format)
+    fig, ax = plt.subplots(figsize=(3.5, 4))
     
     # ColorBrewer YlOrBr palette
     cb_colors = sns.color_palette("YlOrBr", 3)
@@ -196,20 +158,22 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     # Set x-axis limits
     ax.set_xlim(left=min_pos - 0.5, right=50)
     
-    # Set x-axis ticks every 5 positions
-    ax.set_xticks(range(0, 51, 5))
-    ax.tick_params(axis='both', labelsize=14)
+    # Set x-axis ticks every 10 positions for cleaner look
+    ax.set_xticks(range(0, 51, 10))
+    ax.tick_params(axis='both', labelsize=8)
     
-    ax.set_xlabel('Switch Position (word index)', fontsize=14, fontweight='medium')
-    ax.set_ylabel('Count', fontsize=14, fontweight='medium')
-    ax.set_title('Distribution of Code-Switch Positions', 
-                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('Switch Position (word index)', fontsize=9, fontweight='medium')
+    ax.set_ylabel('Count', fontsize=9, fontweight='medium')
+    ax.set_title('Code-Switch Position Distribution', 
+                fontsize=10, fontweight='bold', pad=10)
     ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
-             fontsize=14, framealpha=0.95)
-    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+             fontsize=7, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
     ax.spines['left'].set_color('#d0d0d0')
     ax.spines['bottom'].set_color('#d0d0d0')
     
@@ -243,8 +207,8 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     cb_colors = sns.color_palette("YlOrBr", 3)
     group_colors = {'Homeland': cb_colors[0], 'Heritage': cb_colors[1], 'Immersed': cb_colors[2]}
     
-    # Create figure
-    fig, ax = plt.subplots(figsize=(11, 7))
+    # Create figure (single-column format)
+    fig, ax = plt.subplots(figsize=(3.5, 4))
     
     # Box plot by group (without outliers)
     data_for_box = [participant_counts[participant_counts['group'] == group]['num_sentences'].values 
@@ -272,16 +236,19 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
             for item in bp[element]:
                 item.set_color('#333333')
     
-    ax.set_ylabel('Number of Code-Switched Sentences', fontsize=14, fontweight='medium')
-    ax.set_xlabel('Speaker Group', fontsize=14, fontweight='medium')
-    ax.set_title('Participant-Level Variation in Code-Switching', fontsize=18, fontweight='bold', pad=20)
-    ax.set_xticklabels(labels_for_box, fontsize=14)
+    ax.set_ylabel('Number of CS Sentences', fontsize=9, fontweight='medium')
+    ax.set_xlabel('Speaker Group', fontsize=9, fontweight='medium')
+    ax.set_title('Participant Variation', fontsize=10, fontweight='bold', pad=10)
+    ax.set_xticklabels(labels_for_box, fontsize=8)
+    ax.tick_params(axis='both', labelsize=8)
     
     # Professional styling
-    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
     ax.spines['left'].set_color('#d0d0d0')
     ax.spines['bottom'].set_color('#d0d0d0')
     
@@ -331,8 +298,8 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     cb_colors = sns.color_palette("YlOrBr", 3)
     colors = {'Homeland': cb_colors[0], 'Heritage': cb_colors[1], 'Immersed': cb_colors[2]}
     
-    # Create figure
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Create figure (single-column format)
+    fig, ax = plt.subplots(figsize=(3.5, 4))
     
     # Plot KDE (kernel density estimation) for smoother distributions
     # Use lower alpha for better visibility of overlapping distributions
@@ -344,23 +311,26 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
                        color=colors.get(group, cb_colors[2]), ax=ax, linewidth=2.5, 
                        alpha=0.3, fill=True, common_norm=False)
     
-    ax.set_xlabel('Cantonese to English Word Ratio', fontsize=14, fontweight='medium')
-    ax.set_ylabel('Density', fontsize=14, fontweight='medium')
-    ax.set_title('Cantonese to English Word Ratio Per Code-Switched Sentence', 
-                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('Cantonese:English Ratio', fontsize=9, fontweight='medium')
+    ax.set_ylabel('Density', fontsize=9, fontweight='medium')
+    ax.set_title('Language Ratio Distribution', 
+                fontsize=10, fontweight='bold', pad=10)
     
-    # Set x-axis ticks every 5 units
-    x_min = int(df['ratio_clipped'].min() // 5) * 5
-    x_max = int(df['ratio_clipped'].max() // 5 + 1) * 5
-    ax.set_xticks(range(x_min, x_max + 1, 5))
-    ax.tick_params(axis='both', labelsize=14)
+    # Set x-axis ticks every 10 units
+    x_min = int(df['ratio_clipped'].min() // 10) * 10
+    x_max = int(df['ratio_clipped'].max() // 10 + 1) * 10
+    ax.set_xticks(range(x_min, x_max + 1, 10))
+    ax.tick_params(axis='both', labelsize=8)
     
-    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
-             fontsize=14, framealpha=0.95)
-    ax.grid(axis='y', alpha=0.2, linestyle='--', linewidth=0.8)
+    ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5),
+             frameon=True, fancybox=True, shadow=True, 
+             fontsize=8, framealpha=0.95)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
     ax.spines['left'].set_color('#d0d0d0')
     ax.spines['bottom'].set_color('#d0d0d0')
     
@@ -374,4 +344,184 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     plt.close()
     
     logger.info(f"Saved Cantonese to English ratio distribution plot to {output_path_png} and {output_path_pdf}")
+
+
+def plot_pos_distribution(
+    mono_csv_path: str,
+    cs_csv_path: str,
+    figures_dir: str,
+    top_n: int = 15
+) -> None:
+    """
+    Plot POS tag distribution across groups (Heritage, Homeland, Immersed).
+    
+    Creates a faceted stacked bar chart with one subplot per group.
+    Within each subplot: two stacked bars (Code-Switched vs Monolingual).
+    Each bar shows the percentage composition of 3 POS categories: Verb, Noun, Other.
+    
+    Args:
+        mono_csv_path: Path to cantonese_monolingual_WITHOUT_fillers.csv
+        cs_csv_path: Path to cantonese_translated_WITHOUT_fillers.csv
+        figures_dir: Directory to save figures
+        top_n: Not used (kept for backward compatibility)
+    """
+    os.makedirs(figures_dir, exist_ok=True)
+    
+    logger.info("Loading POS data...")
+    mono_df = pd.read_csv(mono_csv_path)
+    cs_df = pd.read_csv(cs_csv_path)
+    
+    # Helper function to parse POS tags
+    def parse_pos_tags(pos_string) -> List[str]:
+        if pd.isna(pos_string) or not isinstance(pos_string, str):
+            return []
+        return pos_string.split()
+    
+    # Helper function to categorize POS tags into 3 categories
+    def categorize_pos_tag(pos_tag: str) -> str:
+        """Map POS tags to Verb, Noun, or Other."""
+        if pos_tag in ['VERB', 'AUX']:
+            return 'Verb'
+        elif pos_tag in ['NOUN', 'PROPN']:
+            return 'Noun'
+        else:
+            return 'Other'
+    
+    # Calculate POS distributions for each group and sentence type
+    results = []
+    groups = ['Heritage', 'Homeland', 'Immersed']
+    
+    for group in groups:
+        # Process monolingual sentences
+        mono_group = mono_df[mono_df['group'] == group]
+        mono_pos_tags = []
+        for pos_string in mono_group['pos']:
+            mono_pos_tags.extend(parse_pos_tags(pos_string))
+        
+        # Categorize and count
+        mono_categorized = [categorize_pos_tag(tag) for tag in mono_pos_tags]
+        mono_counter = Counter(mono_categorized)
+        mono_total = sum(mono_counter.values())
+        
+        for pos_category, count in mono_counter.items():
+            results.append({
+                'group': group,
+                'sentence_type': 'Monolingual',
+                'pos_category': pos_category,
+                'count': count,
+                'percentage': (count / mono_total * 100) if mono_total > 0 else 0
+            })
+        
+        # Process code-switched sentences
+        cs_group = cs_df[cs_df['group'] == group]
+        cs_pos_tags = []
+        for pos_string in cs_group['translated_pos']:
+            cs_pos_tags.extend(parse_pos_tags(pos_string))
+        
+        # Categorize and count
+        cs_categorized = [categorize_pos_tag(tag) for tag in cs_pos_tags]
+        cs_counter = Counter(cs_categorized)
+        cs_total = sum(cs_counter.values())
+        
+        for pos_category, count in cs_counter.items():
+            results.append({
+                'group': group,
+                'sentence_type': 'Code-Switched',
+                'pos_category': pos_category,
+                'count': count,
+                'percentage': (count / cs_total * 100) if cs_total > 0 else 0
+            })
+    
+    distribution_df = pd.DataFrame(results)
+    
+    logger.info(f"Creating POS distribution plot (3 categories: Verb, Noun, Other)...")
+    
+    # Create single plot with grouped bars (single-column format)
+    fig, ax = plt.subplots(figsize=(3.5, 4))
+    
+    # Use distinct, colorblind-friendly colors for the 3 categories
+    colors = {
+        'Verb': '#E74C3C',      # Red
+        'Noun': '#3498DB',      # Blue
+        'Other': '#95A5A6'      # Gray
+    }
+    categories = ['Verb', 'Noun', 'Other']
+    groups = ['Heritage', 'Homeland', 'Immersed']
+    
+    # Set up bar positions
+    bar_width = 0.12
+    spacing = 0.05
+    
+    # Plot grouped stacked bars
+    for group_idx, group in enumerate(groups):
+        group_data = distribution_df[distribution_df['group'] == group]
+        
+        # Get data for Code-Switched and Monolingual
+        for sent_idx, sent_type in enumerate(['Code-Switched', 'Monolingual']):
+            sent_data = group_data[group_data['sentence_type'] == sent_type]
+            
+            # Get percentages for each category
+            percentages = {}
+            for cat in categories:
+                cat_data = sent_data[sent_data['pos_category'] == cat]
+                percentages[cat] = cat_data['percentage'].values[0] if len(cat_data) > 0 else 0
+            
+            # Calculate x position
+            x_pos = group_idx * (2 * bar_width + spacing) + sent_idx * bar_width
+            
+            # Create stacked bars
+            bottom = 0
+            for cat in categories:
+                ax.bar(x_pos, percentages[cat], bar_width, 
+                      bottom=bottom, 
+                      color=colors[cat],
+                      edgecolor='white',
+                      linewidth=1)
+                bottom += percentages[cat]
+    
+    # Customize plot
+    ax.set_ylabel('% of POS Categories', fontsize=9, fontweight='medium')
+    ax.set_ylim(0, 100)
+    
+    # Set x-axis ticks at the center of each group's pair of bars
+    group_centers = [i * (2 * bar_width + spacing) + bar_width/2 for i in range(len(groups))]
+    ax.set_xticks(group_centers)
+    ax.set_xticklabels(groups, fontsize=8, fontweight='medium')
+    
+    ax.tick_params(axis='both', labelsize=8, length=3)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    
+    # Professional styling matching other preprocessing plots
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
+    
+    # Add legend to the right
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=colors[cat], edgecolor='white', linewidth=1, label=cat) 
+               for cat in categories]
+    
+    ax.legend(handles=handles, loc='center left', 
+             bbox_to_anchor=(1.02, 0.5),
+             frameon=True, fontsize=8, 
+             fancybox=True, shadow=True, framealpha=0.95)
+    
+    # Title
+    ax.set_title('POS Distribution by Group', 
+                fontsize=10, fontweight='bold', pad=10)
+    
+    plt.tight_layout()
+    
+    # Save both PNG and PDF
+    output_path_png = os.path.join(figures_dir, 'pos_distribution_by_group.png')
+    output_path_pdf = os.path.join(figures_dir, 'pos_distribution_by_group.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Saved POS distribution plot to {output_path_png} and {output_path_pdf}")
 

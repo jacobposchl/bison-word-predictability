@@ -26,7 +26,8 @@ from src.plots.preprocessing.plot_preprocessing import (
     plot_matrix_language_distribution,
     plot_switch_position,
     plot_participant_variation,
-    plot_code_switch_density
+    plot_code_switch_density,
+    plot_pos_distribution
 )
 from src.plots.matching.plot_matching import (
     plot_matches_per_sentence_distribution,
@@ -44,9 +45,9 @@ from src.plots.surprisal.plot_surprisal import (
     plot_surprisal_distributions as plot_combined_surprisal_distributions,
     plot_surprisal_distributions_by_context,
     plot_surprisal_differences_by_context,
-    plot_surprisal_distributions_matrix
+    plot_surprisal_distributions_matrix,
+    plot_pos_distribution_at_switch_points
 )
-from src.plots.regression.plot_regression import plot_all_regression_results
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -102,6 +103,15 @@ def generate_preprocessing_figures(config: Config):
     # 4. Code-switch density
     logger.info("  4. Code-switch density...")
     plot_code_switch_density(code_switched, figures_dir)
+    
+    # 5. POS tag distribution
+    logger.info("  5. POS tag distribution...")
+    mono_csv = preprocessing_dir / "cantonese_monolingual_WITHOUT_fillers.csv"
+    cs_csv = preprocessing_dir / "cantonese_translated_WITHOUT_fillers.csv"
+    if mono_csv.exists() and cs_csv.exists():
+        plot_pos_distribution(str(mono_csv), str(cs_csv), figures_dir, top_n=15)
+    else:
+        logger.warning(f"  Skipping POS distribution - CSV files not found")
     
     logger.info(f"\nAll preprocessing figures saved to: {figures_dir}")
     return True
@@ -182,6 +192,15 @@ def generate_surprisal_figures(config: Config, model_type: str):
     plot_surprisal_distributions_matrix(
         results_base=results_base,
         output_path=matrix_output_path,
+        model_type=model_type
+    )
+    
+    # Generate POS distribution plot at switch points
+    logger.info("Generating POS distribution plot at switch points...")
+    pos_output_path = figures_base / "pos_distribution_at_switch_points.png"
+    plot_pos_distribution_at_switch_points(
+        results_base=results_base,
+        output_path=pos_output_path,
         model_type=model_type
     )
     
