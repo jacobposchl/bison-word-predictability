@@ -214,7 +214,11 @@ def export_interviewer_sentences(
         })
     
     df = pd.DataFrame(csv_data)
-    df = sort_dataframe(df)
+    
+    # Sort interviewer sentences by participant_id and start_time
+    # Note: interviewer sentences don't have 'group' column, so we don't use sort_dataframe
+    if len(df) > 0:
+        df = df.sort_values(by=['participant_id', 'start_time']).reset_index(drop=True)
     
     # Create output directory if it doesn't exist
     csv_dir = os.path.dirname(csv_interviewer_path)
