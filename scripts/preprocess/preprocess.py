@@ -31,6 +31,7 @@ from src.data.data_export import (
     export_all_sentences_to_csv,
     export_cantonese_monolingual,
     export_translated_sentences,
+    export_interviewer_sentences,
     generate_preprocessing_report
 )
 
@@ -69,21 +70,31 @@ def main():
         data_path = config.get_data_path()
         min_sentence_words = config.get_min_sentence_words()
         csv_all_sentences_path = config.get_csv_all_sentences_path()
+        csv_interviewer_path = config.get_csv_interviewer_path()
         
         logger.info("Processing EAF files...")
-        all_sentences = process_all_files(data_path=data_path)
+        all_sentences, interviewer_sentences = process_all_files(data_path=data_path)
         
         if not all_sentences:
             logger.error("No sentences were processed. Check your data path and file format.")
             sys.exit(1)
         
-        logger.info(f"Processed {len(all_sentences)} total sentences")
+        logger.info(f"Processed {len(all_sentences)} total participant sentences")
+        logger.info(f"Processed {len(interviewer_sentences)} total interviewer sentences")
         
         # Export ALL sentences (monolingual + code-switched) for context retrieval
         logger.info("Exporting all sentences...")
         csv_all_sentences_df, preprocessing_stats = export_all_sentences_to_csv(
             all_sentences,
             csv_all_sentences_path,
+            min_sentence_words=min_sentence_words
+        )
+        
+        # Export interviewer sentences (IR tier)
+        logger.info("Exporting interviewer sentences...")
+        interviewer_df, interviewer_stats = export_interviewer_sentences(
+            interviewer_sentences,
+            csv_interviewer_path,
             min_sentence_words=min_sentence_words
         )
         
@@ -119,7 +130,8 @@ def main():
             preprocessing_stats,
             monolingual_stats,
             translation_stats,
-            report_path
+            report_path,
+            interviewer_stats=interviewer_stats
         )
         
         logger.info("Preprocessing complete!")

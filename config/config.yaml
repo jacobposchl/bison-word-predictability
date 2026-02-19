@@ -97,4 +97,7 @@ output:
   
   # Output filename for translated code-switched sentences
   csv_cantonese_translated: "cantonese_translated_WITHOUT_fillers.csv"
+  
+  # Output filename for interviewer sentences (IR tier)
+  csv_interviewer: "interviewer.csv"
 

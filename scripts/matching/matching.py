@@ -86,6 +86,17 @@ def main():
         
         all_sentences_df = pd.read_csv(all_sentences_csv)
         
+        # Load interviewer sentences (for discourse context)
+        interviewer_csv = preprocessing_dir / config.get('output.csv_interviewer')
+        interviewer_df = None
+        
+        if interviewer_csv.exists():
+            interviewer_df = pd.read_csv(interviewer_csv)
+            logger.info(f"Loaded {len(interviewer_df)} interviewer sentences for context")
+        else:
+            logger.warning(f"Interviewer CSV not found: {interviewer_csv}")
+            logger.warning("Context will only include participant sentences (interviewer turns excluded)")
+        
 
         translator = NLLBTranslator(
             model_name=config.get_translation_model(),
@@ -140,7 +151,8 @@ def main():
                 window_results,
                 all_sentences_df,
                 translator,
-                window_size=window_size
+                window_size=window_size,
+                interviewer_df=interviewer_df
             )
             
             if len(analysis_df) == 0:

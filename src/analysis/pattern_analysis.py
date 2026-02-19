@@ -235,7 +235,7 @@ def build_patterns_with_fillers(sentence_data: Dict) -> Dict:
     return sentence_data
 
 
-def process_all_files( data_path: str ) -> List[Dict]:
+def process_all_files( data_path: str ) -> Tuple[List[Dict], List[Dict]]:
     """
     Process all EAF files in the data directory.
     
@@ -243,16 +243,22 @@ def process_all_files( data_path: str ) -> List[Dict]:
         data_path: Path to directory containing EAF files
         
     Returns:
-        List of sentence data dictionaries
+        Tuple of (participant_sentences, interviewer_sentences)
+        - participant_sentences: List of sentence data dictionaries from participant tiers
+        - interviewer_sentences: List of sentence data dictionaries from IR (interviewer) tiers
     """
 
     eaf_files = get_all_eaf_files(data_path)
     all_sentence_patterns = []
+    all_interviewer_sentences = []
     
     logger.info(f"Found {len(eaf_files)} EAF files to process")
     
     for eaf_file in tqdm(eaf_files, desc="Processing EAF files"):
         file_path = os.path.join(data_path, eaf_file)
+        
+        # Extract participant ID from filename (e.g., "ACH2001_interview..." -> "ACH2001")
+        participant_id_from_file = eaf_file.split('_')[0]
         
         try:
             eaf = load_eaf_file(file_path)
@@ -294,12 +300,38 @@ def process_all_files( data_path: str ) -> List[Dict]:
                     
                     all_sentence_patterns.append(sentence_data)
             
+            # Process IR (interviewer) tier if it exists
+            tier_names = eaf.get_tier_names()
+            if 'IR' in tier_names:
+                try:
+                    ir_annotations = eaf.get_annotation_data_for_tier('IR')
+                    
+                    # Process each IR annotation
+                    for ir_annotation in ir_annotations:
+                        ir_sentence_data = process_sentence_from_main_tier(ir_annotation)
+                        
+                        if ir_sentence_data and len(ir_sentence_data['items']) > 0:
+                            # Tag with participant ID from filename (who is being interviewed)
+                            ir_sentence_data['participant_id'] = participant_id_from_file
+                            ir_sentence_data['file_name'] = eaf_file
+                            
+                            # Build patterns with filler detection
+                            ir_sentence_data = build_patterns_with_fillers(ir_sentence_data)
+                            
+                            all_interviewer_sentences.append(ir_sentence_data)
+                            
+                except KeyError:
+                    # IR tier listed but couldn't access - log and continue
+                    logger.debug(f"IR tier found but couldn't access in {eaf_file}")
+                    pass
+            
         except Exception as e:
             logger.error(f"Error processing {eaf_file}: {e}")
             continue
     
-    logger.info(f"Total sentences collected: {len(all_sentence_patterns)}")
+    logger.info(f"Total participant sentences collected: {len(all_sentence_patterns)}")
+    logger.info(f"Total interviewer sentences collected: {len(all_interviewer_sentences)}")
     
-    return all_sentence_patterns
+    return all_sentence_patterns, all_interviewer_sentences
 
 

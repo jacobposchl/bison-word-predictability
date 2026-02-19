@@ -159,6 +159,88 @@ def _add_pos_to_dataframe(df: pd.DataFrame, sentence_col: str, pos_col: str) -> 
     return df
 
 
+def export_interviewer_sentences(
+    interviewer_sentences: List[Dict],
+    csv_interviewer_path: str,
+    min_sentence_words: int = 2
+) -> Tuple[pd.DataFrame, Dict]:
+    """
+    Export interviewer (IR tier) sentences to CSV.
+    
+    This function processes interviewer sentences extracted from the IR tier,
+    applying the same cleaning and filtering as participant sentences.
+    
+    Args:
+        interviewer_sentences: List of interviewer sentence data dictionaries
+        csv_interviewer_path: Output path for interviewer CSV
+        min_sentence_words: Minimum number of words (after filler removal)
+        
+    Returns:
+        Tuple of (DataFrame with interviewer sentences, statistics dictionary)
+    """
+    
+    logger.info(f"Exporting interviewer sentences to CSV...")
+    
+    # Remove FILLER_ONLY sentences
+    total_sentences = len(interviewer_sentences)
+    sentences_without_filler_only = [s for s in interviewer_sentences if s.get('pattern', '') != 'FILLER_ONLY']
+    filler_only_count = total_sentences - len(sentences_without_filler_only)
+    
+    logger.info(f"Removed {filler_only_count} filler-only interviewer sentences")
+    
+    # Calculate total filler words removed
+    total_filler_words = sum(s.get('filler_count', 0) for s in sentences_without_filler_only)
+    sentences_with_fillers = sum(1 for s in sentences_without_filler_only if s.get('has_fillers', False))
+    
+    logger.info(f"Filler removal: {total_filler_words} filler words removed from {sentences_with_fillers} interviewer sentences")
+    
+    # Filter by min_sentence_words AFTER filler removal
+    filtered_sentences = filter_by_min_words(sentences_without_filler_only, min_sentence_words)
+    logger.info(f"Filtered to {len(filtered_sentences)} interviewer sentences with at least {min_sentence_words} words")
+    
+    # Create DataFrame with interviewer sentences
+    csv_data = []
+    
+    for s in filtered_sentences:
+        reconstructed = s.get('reconstructed_text_without_fillers', s.get('reconstructed_text', ''))
+        
+        csv_data.append({
+            'start_time': s['start_time'],
+            'end_time': s['end_time'],
+            'reconstructed_sentence': reconstructed,
+            'sentence_original': s['text'],
+            'pattern': s.get('pattern', ''),
+            'participant_id': s.get('participant_id', '')
+        })
+    
+    df = pd.DataFrame(csv_data)
+    df = sort_dataframe(df)
+    
+    # Create output directory if it doesn't exist
+    csv_dir = os.path.dirname(csv_interviewer_path)
+    if csv_dir and not os.path.exists(csv_dir):
+        os.makedirs(csv_dir, exist_ok=True)
+    
+    # Save CSV
+    df.to_csv(csv_interviewer_path, index=False, encoding='utf-8-sig')
+    
+    logger.info(f"Saved interviewer dataset:")
+    logger.info(f"  '{csv_interviewer_path}' - {len(df)} sentences")
+    
+    # Calculate statistics
+    stats = {
+        'total_processed': len(interviewer_sentences),
+        'filler_only_removed': filler_only_count,
+        'after_filler_only_removal': len(sentences_without_filler_only),
+        'total_filler_words_removed': total_filler_words,
+        'sentences_with_fillers': sentences_with_fillers,
+        'after_min_words_filter': len(filtered_sentences),
+        'filtered_out': len(sentences_without_filler_only) - len(filtered_sentences),
+    }
+    
+    return df, stats
+
+
 def export_cantonese_monolingual(
     all_sentences: List[Dict],
     config,
@@ -752,7 +834,8 @@ def generate_preprocessing_report(
     preprocessing_stats: Dict,
     monolingual_stats: Dict,
     translation_stats: Dict,
-    output_path: str
+    output_path: str,
+    interviewer_stats: Dict = None
 ) -> None:
     """
     Generate a CSV report summarizing preprocessing and translation statistics.
@@ -762,6 +845,7 @@ def generate_preprocessing_report(
         monolingual_stats: Statistics from export_cantonese_monolingual
         translation_stats: Statistics from export_translated_sentences
         output_path: Path to save the CSV report
+        interviewer_stats: Statistics from export_interviewer_sentences (optional)
     """
     report_data = []
     
@@ -842,6 +926,42 @@ def generate_preprocessing_report(
         'value': preprocessing_stats.get('equal_matrix', 0),
         'details': ''
     })
+    
+    if interviewer_stats:
+        report_data.append({
+            'section': 'Interviewer',
+            'metric': 'Total interviewer sentences processed',
+            'value': interviewer_stats.get('total_processed', 0),
+            'details': 'From IR tier'
+        })
+        
+        report_data.append({
+            'section': 'Interviewer',
+            'metric': 'Filler-only sentences removed',
+            'value': interviewer_stats.get('filler_only_removed', 0),
+            'details': ''
+        })
+        
+        report_data.append({
+            'section': 'Interviewer',
+            'metric': 'After filler-only removal',
+            'value': interviewer_stats.get('after_filler_only_removal', 0),
+            'details': ''
+        })
+        
+        report_data.append({
+            'section': 'Interviewer',
+            'metric': 'Total filler words removed',
+            'value': interviewer_stats.get('total_filler_words_removed', 0),
+            'details': f"From {interviewer_stats.get('sentences_with_fillers', 0)} sentences"
+        })
+        
+        report_data.append({
+            'section': 'Interviewer',
+            'metric': 'After min_words filter',
+            'value': interviewer_stats.get('after_min_words_filter', 0),
+            'details': f"Filtered out: {interviewer_stats.get('filtered_out', 0)}"
+        })
     
     # Section 2: Translation Statistics
     if translation_stats.get('initial_total', 0) > 0:

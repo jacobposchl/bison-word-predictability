@@ -21,21 +21,53 @@ logger = logging.getLogger(__name__)
 CONTEXT_SENTENCE_DELIMITER = ' ||| '
 
 
-def _build_participant_index(all_sentences_df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+def _build_participant_index(
+    all_sentences_df: pd.DataFrame,
+    interviewer_df: Optional[pd.DataFrame] = None
+) -> Dict[str, pd.DataFrame]:
     """
     Build an index of sentences grouped by participant for faster lookups.
     
+    Merges participant sentences with interviewer sentences (if provided) for each participant,
+    creating a chronological discourse order that includes both speaker types.
+    
     Args:
-        all_sentences_df: DataFrame with all sentences
+        all_sentences_df: DataFrame with all participant sentences
+        interviewer_df: DataFrame with interviewer sentences (optional)
         
     Returns:
         Dictionary mapping participant_id to sorted DataFrame of their sentences
+        (including interviewer sentences if provided)
     """
 
     index = {}
     for participant_id, group_df in all_sentences_df.groupby('participant_id'):
-        # Sort by start_time for efficient lookups
-        index[participant_id] = group_df.sort_values('start_time').reset_index(drop=True)
+        # Make a copy to avoid modifying original
+        participant_sentences = group_df.copy()
+        participant_sentences['speaker_type'] = 'participant'
+        
+        # If interviewer data is provided, merge it
+        if interviewer_df is not None:
+            # Filter interviewer sentences for this participant
+            interviewer_sentences = interviewer_df[interviewer_df['participant_id'] == participant_id].copy()
+            
+            if len(interviewer_sentences) > 0:
+                interviewer_sentences['speaker_type'] = 'interviewer'
+                
+                # Merge participant and interviewer sentences
+                merged_df = pd.concat([participant_sentences, interviewer_sentences], ignore_index=True)
+                
+                # Sort by start_time for chronological discourse order
+                merged_df = merged_df.sort_values('start_time', kind='stable').reset_index(drop=True)
+                
+                index[participant_id] = merged_df
+            else:
+                # No interviewer sentences for this participant
+                index[participant_id] = participant_sentences.sort_values('start_time').reset_index(drop=True)
+        else:
+            # No interviewer data provided, use only participant sentences
+            index[participant_id] = participant_sentences.sort_values('start_time').reset_index(drop=True)
+    
     return index
 
 
@@ -273,7 +305,8 @@ def create_analysis_dataset(
     window_results: Dict,
     all_sentences_df: pd.DataFrame = None,
     translator = None,
-    window_size: int = None
+    window_size: int = None,
+    interviewer_df: Optional[pd.DataFrame] = None
 ) -> tuple[pd.DataFrame, Dict]:
     """
     Create analysis dataset from pre-computed window matching results.
@@ -292,6 +325,7 @@ def create_analysis_dataset(
         all_sentences_df: DataFrame with all sentences for context retrieval
         translator: NLLBTranslator for translating CS context
         window_size: Window size to use (if None, uses first window size from config)
+        interviewer_df: DataFrame with interviewer sentences (optional, for discourse context)
         
     Returns:
         Tuple of (DataFrame, context_stats) where:
@@ -414,7 +448,8 @@ def create_analysis_dataset(
             analysis_df,
             all_sentences_df,
             translator,
-            config
+            config,
+            interviewer_df=interviewer_df
         )
     
     # Keep both cs_participant and matched_participant for downstream analysis
@@ -427,18 +462,21 @@ def add_context_to_analysis_dataset(
     analysis_df: pd.DataFrame,
     all_sentences_df: pd.DataFrame,
     translator,
-    config
+    config,
+    interviewer_df: Optional[pd.DataFrame] = None
 ) -> tuple[pd.DataFrame, Dict]:
     """
     Add discourse context columns to analysis dataset.
     
-    Retrieves k previous sentences from same speaker and translates CS context.
+    Retrieves k previous sentences from same speaker session (including interviewer turns if available)
+    and translates CS context.
     
     Args:
         analysis_df: Analysis dataset with CS and mono sentence info
         all_sentences_df: Full DataFrame with all sentences
         translator: NLLBTranslator instance
         config: Config object
+        interviewer_df: DataFrame with interviewer sentences (optional, enables cross-speaker context)
         
     Returns:
         Tuple of (DataFrame, context_stats) where:
@@ -460,9 +498,11 @@ def add_context_to_analysis_dataset(
     
     logger.info(f"Context settings: {num_context} previous sentences, min quality {min_quality}")
     
-    # Build participant index for faster lookups
+    # Build participant index for faster lookups (includes interviewer sentences if provided)
     logger.info("Building participant index for faster context retrieval...")
-    participant_index = _build_participant_index(all_sentences_df)
+    if interviewer_df is not None:
+        logger.info(f"Including {len(interviewer_df)} interviewer sentences in context")
+    participant_index = _build_participant_index(all_sentences_df, interviewer_df)
     logger.info(f"Indexed sentences for {len(participant_index)} participants")
     
     # Collect all context sentences first (before translation)

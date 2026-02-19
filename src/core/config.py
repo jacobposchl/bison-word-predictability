@@ -137,6 +137,12 @@ class Config:
         processed_dir = self.get_preprocessing_results_dir()
         return os.path.join(processed_dir, filename)
     
+    def get_csv_interviewer_path(self) -> str:
+        """Get output path for interviewer sentences (IR tier)."""
+        filename = self.get('output.csv_interviewer')
+        processed_dir = self.get_preprocessing_results_dir()
+        return os.path.join(processed_dir, filename)
+    
     def get_translation_model(self) -> str:
         """Get NLLB model name."""
         return self.get('translation.model')
