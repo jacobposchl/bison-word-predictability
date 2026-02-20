@@ -6,21 +6,11 @@ This script calculates surprisal values at switch indices of both:
 2. Matched monolingual Cantonese baseline sentences
 
 Usage:
-    # With context (default)
     python scripts/surprisal/surprisal.py --model masked
-    
-    # Without context
-    python scripts/surprisal/surprisal.py --model autoregressive --no-context
-    
-    # Compare both modes
-    python scripts/surprisal/surprisal.py --model masked --compare-context
+    python scripts/surprisal/surprisal.py --model autoregressive
     
     Required arguments:
         --model: Type of model - "masked" for BERT-style or "autoregressive" for GPT-style
-        
-    Optional arguments:
-        --no-context: Disable discourse context
-        --compare-context: Run both with and without context for comparison
 """
 
 import sys
@@ -54,17 +44,6 @@ def parse_arguments():
         choices=['masked', 'autoregressive'],
         help='Type of model - "masked" for BERT-style or "autoregressive" for GPT-style'
     )
-    parser.add_argument(
-        "--no-context",
-        action='store_true',
-        help="Disable discourse context"
-    )
-    parser.add_argument(
-        "--compare-context",
-        action='store_true',
-        help="Run both with-context and without-context analyses for comparison"
-    )
-    
     return parser.parse_args()
 
 
@@ -193,19 +172,9 @@ def main():
         config=config
     )
     
-    # Determine context usage mode
-    if args.compare_context:
-        # Run both with and without context
-        context_modes = [False, True]
-        mode_names = ['without_context', 'with_context']
-    elif args.no_context:
-        # No context (when --no-context is specified)
-        context_modes = [False]
-        mode_names = ['without_context']
-    else:
-        # Use context (default behavior)
-        context_modes = [True]
-        mode_names = ['with_context']
+    # Always use context
+    context_modes = [True]
+    mode_names = ['with_context']
     
     # Process each window size dataset
     for dataset_path in window_datasets:
@@ -232,21 +201,14 @@ def main():
             print(f"  Running {mode_label} analysis...")
             
             # Setup mode-specific output directories
-            if len(context_modes) > 1:
-                mode_results_dir = window_results_dir / mode_name
-                mode_results_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                mode_results_dir = window_results_dir
+            mode_results_dir = window_results_dir
             
             # Get context lengths from config
-            if use_context:
-                context_lengths = config.get('context.context_lengths', None)
-                if context_lengths is None:
-                    raise ValueError("context.context_lengths must be specified in config when use_context=True")
-                if not isinstance(context_lengths, list) or len(context_lengths) == 0:
-                    raise ValueError("context.context_lengths must be a non-empty list")
-            else:
-                context_lengths = []
+            context_lengths = config.get('context.context_lengths', None)
+            if context_lengths is None:
+                raise ValueError("context.context_lengths must be specified in config when use_context=True")
+            if not isinstance(context_lengths, list) or len(context_lengths) == 0:
+                raise ValueError("context.context_lengths must be a non-empty list")
             
             results_df = calculate_surprisal_for_dataset(
                 analysis_df=analysis_df,
@@ -269,7 +231,7 @@ def main():
             
             # Generate and save statistics report
             primary_context_length = context_lengths[0] if context_lengths else None
-            if primary_context_length:
+            if primary_context_length is not None:
                 stats_dict = all_stats[primary_context_length]
             
             context_clipped_count = getattr(surprisal_calc, 'context_clipped_count', None)

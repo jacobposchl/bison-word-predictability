@@ -13,49 +13,10 @@ from scipy import stats
 from tqdm import tqdm
 import pycantonese
 import logging
-import torch
 
 from src.experiments.surprisal_calculator import MaskedLMSurprisalCalculator, AutoregressiveLMSurprisalCalculator
 
 logger = logging.getLogger(__name__)
-
-NEUTRAL_CONTEXTS = ['係', '的', '我', '你', '在', '有', '是', '了']
-
-
-def get_word_frequency(word: str, model, tokenizer, device) -> float:
-    word = str(word).strip()
-    if not word or pd.isna(word):
-        return np.nan
-    
-    try:
-        log_probs = []
-        
-        for context in NEUTRAL_CONTEXTS:
-            text = f"{context} {word}"
-            inputs = tokenizer(text, return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                outputs = model(**inputs)
-                logits = outputs.logits
-            
-            input_ids = inputs.input_ids[0]
-            word_token_start = len(tokenizer(context, add_special_tokens=False).input_ids) + 1
-            
-            token_log_probs = []
-            for i in range(word_token_start, len(input_ids)):
-                token_logits = logits[0, i-1, :]
-                log_prob_dist = torch.log_softmax(token_logits, dim=-1)
-                token_log_prob = log_prob_dist[input_ids[i]].item()
-                token_log_probs.append(token_log_prob)
-            
-            if token_log_probs:
-                log_probs.append(np.mean(token_log_probs))
-        
-        return np.mean(log_probs) if log_probs else np.nan
-        
-    except Exception as e:
-        logger.warning(f"Failed to calculate model-based frequency for '{word}': {e}")
-        return np.nan
 
 
 def calculate_surprisal_for_dataset(
@@ -95,10 +56,8 @@ def calculate_surprisal_for_dataset(
             - surprisal_difference_context_{N}: cs_surprisal - mono_surprisal
             - cs_word: Word at switch point in CS translation
             - cs_word_length: Number of characters in CS word
-            - cs_word_frequency: Word frequency from pycantonese corpus
             - mono_word: Word at matched position in mono sentence
             - mono_word_length: Number of characters in mono word
-            - mono_word_frequency: Word frequency from pycantonese corpus
             
         Note: Rows with failed calculations (NaN surprisal values) are automatically filtered out.
     """
@@ -213,21 +172,9 @@ def calculate_surprisal_for_dataset(
         # Store word-level metadata (same for all context lengths)
         result['cs_word'] = cs_word_info['word']
         result['cs_word_length'] = cs_word_info['num_chars']
-        result['cs_word_frequency'] = get_word_frequency(
-            cs_word_info['word'], 
-            surprisal_calc.model, 
-            surprisal_calc.tokenizer,
-            surprisal_calc.device
-        ) if pd.notna(cs_word_info['word']) else np.nan
         
         result['mono_word'] = mono_word_info['word']
         result['mono_word_length'] = mono_word_info['num_chars']
-        result['mono_word_frequency'] = get_word_frequency(
-            mono_word_info['word'],
-            surprisal_calc.model,
-            surprisal_calc.tokenizer,
-            surprisal_calc.device
-        ) if pd.notna(mono_word_info['word']) else np.nan
         
         # Calculate surprisal for each context length
         if context_lengths:
@@ -405,8 +352,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
         'switch_pos',
         'is_propn',
         'single_worded',
-        'word_frequency',
-        'word',
+        'word','
         'sentence',
         'context'
     ])
