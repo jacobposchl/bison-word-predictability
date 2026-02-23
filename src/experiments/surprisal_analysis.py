@@ -352,7 +352,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
         'switch_pos',
         'is_propn',
         'single_worded',
-        'word','
+        'word',
         'sentence',
         'context'
     ])
