@@ -32,7 +32,7 @@ def _compute_token_surprisal_and_entropy(
     """
     Compute surprisal and Shannon entropy (both in bits) for a target token.
 
-    Uses log_softmax for numerical stability (log-sum-exp trick internally).
+    Uses log_softmax for numerical stability (log-sum-exp internally).
     Never performs a probability->log conversion, avoiding float32 underflow.
 
     Args:
@@ -72,7 +72,7 @@ def _compute_token_surprisal_and_entropy(
     return surprisal, entropy, was_capped
 
 
-# Delimiter used to separate context sentences (must match analysis_dataset.py)
+# Delimiter used to separate context sentences
 CONTEXT_SENTENCE_DELIMITER = ' ||| '
 
 class MaskedLMSurprisalCalculator:
