@@ -223,12 +223,20 @@ def main():
             long_results_df = convert_surprisal_results_to_long(results_df)
             long_results_df.to_csv(results_csv_path, index=False)
             
+            # Export low-probability token events for this window
+            low_prob_csv = window_results_dir / "low_prob_events.csv"
+            n_low_prob = surprisal_calc.export_low_prob_events(str(low_prob_csv))
+            if n_low_prob > 0:
+                print(f"    Flagged {n_low_prob} low-prob token events → {low_prob_csv}")
+            else:
+                print(f"    No low-prob token events.")
+
             # Compute statistics for each context length
             all_stats = {}
             for ctx_len in context_lengths:
                 stats_dict = compute_statistics(results_df, context_length=ctx_len)
                 all_stats[ctx_len] = stats_dict
-            
+
             # Generate and save statistics report
             primary_context_length = context_lengths[0] if context_lengths else None
             if primary_context_length is not None:
