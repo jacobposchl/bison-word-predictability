@@ -217,9 +217,14 @@ class MaskedLMSurprisalCalculator:
         # Calculate how many tokens we can use for post-switch words
         available_for_postswitch = self.max_length - required_token_count
 
+        _left_clipped = False
+        _right_trimmed = False
+
         if required_token_count > self.max_length:
             # Clip context from the left to fit
             self.context_clipped_count += 1
+            _left_clipped = True
+            _right_trimmed = len(words) > word_index + 1  # post-switch words exist but can't be added
 
             preswitch_words = words[:word_index + 1]
             preswitch_text = "".join(preswitch_words)
@@ -251,6 +256,7 @@ class MaskedLMSurprisalCalculator:
             full_sentence = required_text
             adjusted_word_index = len(context_words) + word_index
             full_words = required_words
+            _right_trimmed = len(words) > word_index + 1
         else:
             # We have room for some/all post-switch words
             postswitch_words = words[word_index + 1:]
@@ -273,7 +279,8 @@ class MaskedLMSurprisalCalculator:
                     else:
                         break
 
-                if len(postswitch_to_use) < len(postswitch_words):
+                _right_trimmed = len(postswitch_to_use) < len(postswitch_words)
+                if _right_trimmed:
                     trimmed_count = len(postswitch_words) - len(postswitch_to_use)
                     logger.debug(f"Trimmed {trimmed_count}/{len(postswitch_words)} post-switch words to fit within {self.max_length} token limit")
 
@@ -282,6 +289,15 @@ class MaskedLMSurprisalCalculator:
                 adjusted_word_index = len(context_words) + word_index
 
         target_word = words[word_index]
+
+        if _left_clipped and _right_trimmed:
+            _truncation = 'both'
+        elif _left_clipped:
+            _truncation = 'left_clipped'
+        elif _right_trimmed:
+            _truncation = 'right_trimmed'
+        else:
+            _truncation = 'clean'
 
         token_indices, token_strings = self._align_word_to_tokens(full_sentence, full_words, adjusted_word_index)
 
@@ -295,6 +311,7 @@ class MaskedLMSurprisalCalculator:
                 'tokens': [],
                 'token_surprisals': [],
                 'num_chars': len(target_word) if target_word else 0,
+                'truncation': _truncation,
                 'num_valid_tokens': 0
             }
 
@@ -352,6 +369,7 @@ class MaskedLMSurprisalCalculator:
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
             'num_chars': len(target_word) if target_word else 0,
+            'truncation': _truncation,
             'num_valid_tokens': len(valid_surprisals)
         }
 
@@ -510,9 +528,14 @@ class AutoregressiveLMSurprisalCalculator:
         # Calculate how many tokens we can use for post-switch words
         available_for_postswitch = self.max_length - required_token_count
 
+        _left_clipped = False
+        _right_trimmed = False
+
         if required_token_count > self.max_length:
             # Clip context from the left to fit
             self.context_clipped_count += 1
+            _left_clipped = True
+            _right_trimmed = len(words) > word_index + 1  # post-switch words exist but can't be added
 
             preswitch_words = words[:word_index + 1]
             preswitch_text = "".join(preswitch_words)
@@ -544,6 +567,7 @@ class AutoregressiveLMSurprisalCalculator:
             full_sentence_for_alignment = required_text
             adjusted_word_index = len(context_words) + word_index
             full_words_for_alignment = required_words
+            _right_trimmed = len(words) > word_index + 1
         else:
             # Add as many post-switch words as fit
             postswitch_words = words[word_index + 1:]
@@ -564,13 +588,23 @@ class AutoregressiveLMSurprisalCalculator:
                     else:
                         break
 
-                if len(postswitch_to_use) < len(postswitch_words):
+                _right_trimmed = len(postswitch_to_use) < len(postswitch_words)
+                if _right_trimmed:
                     trimmed_count = len(postswitch_words) - len(postswitch_to_use)
                     logger.debug(f"Trimmed {trimmed_count}/{len(postswitch_words)} post-switch words to fit within {self.max_length} token limit")
 
                 full_sentence_for_alignment = "".join(required_words + postswitch_to_use)
                 adjusted_word_index = len(context_words) + word_index
                 full_words_for_alignment = required_words + postswitch_to_use
+
+        if _left_clipped and _right_trimmed:
+            _truncation = 'both'
+        elif _left_clipped:
+            _truncation = 'left_clipped'
+        elif _right_trimmed:
+            _truncation = 'right_trimmed'
+        else:
+            _truncation = 'clean'
 
         # Align target word to tokens (using full sentence to get correct tokenization)
         token_indices, token_strings = self._align_word_to_tokens(
@@ -591,6 +625,7 @@ class AutoregressiveLMSurprisalCalculator:
                 'tokens': [],
                 'token_surprisals': [],
                 'num_chars': len(target_word) if target_word else 0,
+                'truncation': _truncation,
                 'num_valid_tokens': 0
             }
 
@@ -669,6 +704,7 @@ class AutoregressiveLMSurprisalCalculator:
             'tokens': token_strings,
             'token_surprisals': token_surprisals,
             'num_chars': len(target_word) if target_word else 0,
+            'truncation': _truncation,
             'num_valid_tokens': len(valid_surprisals)
         }
 

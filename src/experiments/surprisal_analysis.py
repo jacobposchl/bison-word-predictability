@@ -207,14 +207,18 @@ def calculate_surprisal_for_dataset(
                     
                     result[f'cs_surprisal_context_{context_len}'] = cs_result['surprisal']
                     result[f'cs_entropy_context_{context_len}'] = cs_result['entropy']
+                    result[f'cs_truncation_context_{context_len}'] = cs_result['truncation']
                     result[f'mono_surprisal_context_{context_len}'] = mono_result['surprisal']
                     result[f'mono_entropy_context_{context_len}'] = mono_result['entropy']
+                    result[f'mono_truncation_context_{context_len}'] = mono_result['truncation']
                     result[f'surprisal_difference_context_{context_len}'] = cs_result['surprisal'] - mono_result['surprisal']
                 else:
                     result[f'cs_surprisal_context_{context_len}'] = np.nan
                     result[f'cs_entropy_context_{context_len}'] = np.nan
+                    result[f'cs_truncation_context_{context_len}'] = 'no_context'
                     result[f'mono_surprisal_context_{context_len}'] = np.nan
                     result[f'mono_entropy_context_{context_len}'] = np.nan
+                    result[f'mono_truncation_context_{context_len}'] = 'no_context'
                     result[f'surprisal_difference_context_{context_len}'] = np.nan
         
         results.append(result)
@@ -318,6 +322,20 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
     else:
         long_df['single_worded'] = np.nan
 
+    # Add word_in_context: 1 if target word appears as substring of context, else 0
+    if 'word' in long_df.columns and 'context' in long_df.columns:
+        long_df['word_in_context'] = long_df.apply(
+            lambda row: int(
+                pd.notna(row.get('context')) and
+                str(row.get('context', '')).strip() not in ('N/A', '') and
+                pd.notna(row.get('word')) and
+                str(row['word']) in str(row['context'])
+            ),
+            axis=1
+        )
+    else:
+        long_df['word_in_context'] = 0
+
     drop_cols = [
         col for col in long_df.columns
         if col == 'similarity' or col == 'participant' or col.startswith('surprisal_difference_context_') or col.startswith('surprisal_difference_')
@@ -343,6 +361,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
     for ctx in context_numbers:
         ordered_cols.append(f'surprisal_context_{ctx}')
         ordered_cols.append(f'entropy_context_{ctx}')
+        ordered_cols.append(f'truncation_context_{ctx}')
 
     ordered_cols.extend([
         'word_length',
@@ -353,6 +372,7 @@ def convert_surprisal_results_to_long(results_df: pd.DataFrame) -> pd.DataFrame:
         'is_propn',
         'single_worded',
         'word',
+        'word_in_context',
         'sentence',
         'context'
     ])
@@ -489,62 +509,3 @@ def compute_statistics(results_df: pd.DataFrame, context_length: int) -> Dict:
     
     return stats_dict
 
-
-def print_statistics_summary(stats_dict: Dict):
-    """
-    Print a formatted summary of statistical results.
-    
-    Args:
-        stats_dict: Dictionary from compute_statistics()
-    """
-    print("\n" + "="*80)
-    print("SURPRISAL COMPARISON STATISTICS")
-    print("="*80)
-    
-    print(f"\nSample Size:")
-    print(f"  Total comparisons: {stats_dict['n_total']}")
-    if stats_dict.get('n_filtered', 0) > 0:
-        print(f"  Filtered out (failed calculations): {stats_dict['n_filtered']} ({stats_dict['n_filtered']/stats_dict['n_total']:.1%})")
-    print(f"  Valid calculations: {stats_dict['n_valid']}")
-    print(f"  Complete calculations: {stats_dict['n_complete']} (all tokens valid)")
-    print(f"  Success rate: {stats_dict['success_rate']:.1%}")
-    print(f"  Complete rate: {stats_dict['complete_rate']:.1%}")
-    
-    # Show context usage if available
-    if 'n_with_context' in stats_dict:
-        print(f"\nContext Usage:")
-        print(f"  Calculations with context: {stats_dict['n_with_context']}")
-        print(f"  Calculations without context: {stats_dict['n_without_context']}")
-    
-    if stats_dict['n_complete'] == 0:
-        print("\nNo complete calculations to report.")
-        print("(Complete = both CS and mono words have all tokens successfully calculated)")
-        return
-    
-    print(f"\nCode-Switched Translation Surprisal:")
-    print(f"  Mean:   {stats_dict['cs_surprisal_mean']:.4f}")
-    print(f"  Median: {stats_dict['cs_surprisal_median']:.4f}")
-    print(f"  Std:    {stats_dict['cs_surprisal_std']:.4f}")
-    
-    print(f"\nMonolingual Baseline Surprisal:")
-    print(f"  Mean:   {stats_dict['mono_surprisal_mean']:.4f}")
-    print(f"  Median: {stats_dict['mono_surprisal_median']:.4f}")
-    print(f"  Std:    {stats_dict['mono_surprisal_std']:.4f}")
-    
-    print(f"\nDifference (CS - Monolingual):")
-    print(f"  Mean:   {stats_dict['difference_mean']:.4f}")
-    print(f"  Median: {stats_dict['difference_median']:.4f}")
-    print(f"  Std:    {stats_dict['difference_std']:.4f}")
-    
-    print(f"\nPaired t-test:")
-    print(f"  t-statistic: {stats_dict['ttest_statistic']:.4f}")
-    print(f"  p-value:     {stats_dict['ttest_pvalue']:.6f}")
-    sig_marker = "***" if stats_dict['ttest_pvalue'] < 0.001 else \
-                 "**" if stats_dict['ttest_pvalue'] < 0.01 else \
-                 "*" if stats_dict['ttest_pvalue'] < 0.05 else "ns"
-    print(f"  Significance: {sig_marker}")
-    
-    print(f"\nEffect Size:")
-    print(f"  Cohen's d: {stats_dict['cohens_d']:.4f}")
-    
-    print("\n" + "="*80)
