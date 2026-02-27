@@ -28,7 +28,8 @@ from src.plots.preprocessing.plot_preprocessing import (
     plot_participant_variation,
     plot_code_switch_density,
     plot_pos_distribution,
-    plot_participant_sentence_counts
+    plot_participant_sentence_counts,
+    plot_sentence_pipeline_pie
 )
 from src.plots.matching.plot_matching import (
     plot_matches_per_sentence_distribution,
@@ -117,6 +118,14 @@ def generate_preprocessing_figures(config: Config):
     # 6. Participant sentence counts (all sentence types)
     logger.info("  6. Participant sentence counts...")
     plot_participant_sentence_counts(all_sentences_df, figures_dir)
+
+    # 7. Sentence pipeline pie chart
+    logger.info("  7. Sentence pipeline pie chart...")
+    report_csv = preprocessing_dir / "preprocessing_report.csv"
+    if report_csv.exists():
+        plot_sentence_pipeline_pie(str(report_csv), figures_dir)
+    else:
+        logger.warning("  Skipping sentence pipeline pie - preprocessing_report.csv not found")
 
     logger.info(f"\nAll preprocessing figures saved to: {figures_dir}")
     return True

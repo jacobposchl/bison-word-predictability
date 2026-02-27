@@ -101,3 +101,33 @@ output:
   # Output filename for interviewer sentences (IR tier)
   csv_interviewer: "interviewer.csv"
 
+# Figure color palette — edit here to change colors across all plots
+figures:
+  colors:
+    # Sentence / language type
+    code_switched:    "#E74C3C"  # Red
+    mono_cantonese:   "#3498DB"  # Blue
+    mono_english:     "#27AE60"  # Green
+
+    # Speaker groups
+    homeland:  "#E67E22"  # Orange
+    heritage:  "#9B59B6"  # Purple
+    immersed:  "#16A085"  # Teal
+
+    # Matrix language (language-associated, reuses sentence-type hues)
+    matrix_cantonese: "#3498DB"  # Blue
+    matrix_english:   "#27AE60"  # Green
+    matrix_equal:     "#95A5A6"  # Gray
+
+    # Part-of-speech categories
+    verb:      "#E74C3C"  # Red
+    noun:      "#3498DB"  # Blue
+    pos_other: "#95A5A6"  # Gray
+
+    # Pipeline / filtering
+    filtered_out: "#95A5A6"  # Gray
+    retained:     "#BDC3C7"  # Light gray
+
+    # Single-series accent (histograms, etc.)
+    accent: "#E67E22"  # Orange
+

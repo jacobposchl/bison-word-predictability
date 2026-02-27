@@ -20,10 +20,31 @@ from ...utils.data_helpers import (
 
 logger = logging.getLogger(__name__)
 
+# Fallback palette — mirrors config.yaml figures.colors.
+# These values are only used when no colors dict is passed in.
+_DEFAULT_COLORS: dict = {
+    'code_switched':    '#E74C3C',
+    'mono_cantonese':   '#3498DB',
+    'mono_english':     '#27AE60',
+    'homeland':         '#E67E22',
+    'heritage':         '#9B59B6',
+    'immersed':         '#16A085',
+    'matrix_cantonese': '#3498DB',
+    'matrix_english':   '#27AE60',
+    'matrix_equal':     '#95A5A6',
+    'verb':             '#E74C3C',
+    'noun':             '#3498DB',
+    'pos_other':        '#95A5A6',
+    'filtered_out':     '#95A5A6',
+    'retained':         '#BDC3C7',
+    'accent':           '#E67E22',
+}
+
 
 def plot_matrix_language_distribution(
     df: pd.DataFrame,
-    figures_dir: str
+    figures_dir: str,
+    colors: dict = None
 ) -> None:
     """
     Plot matrix language distribution for code-switching data.
@@ -62,22 +83,17 @@ def plot_matrix_language_distribution(
     english_counts = [group_matrix_counts.get(g, {}).get('English', 0) for g in groups]
     equal_counts = [group_matrix_counts.get(g, {}).get('Equal', 0) for g in groups]
     
-    # ColorBrewer YlOrBr palette (Yellow-Orange-Brown)
-    cb_colors = sns.color_palette("YlOrBr", 3)
-    colors = {
-        'Cantonese': cb_colors[0],  # Light yellow
-        'English': cb_colors[1],     # Orange
-        'Equal': cb_colors[2]        # Brown
-    }
-    
+    if colors is None:
+        colors = _DEFAULT_COLORS
+
     # Create stacked bars with better styling
-    p1 = ax.bar(x, cantonese_counts, width, label='Cantonese', 
-                color=colors['Cantonese'], edgecolor='white', linewidth=1.5, alpha=0.9)
-    p2 = ax.bar(x, english_counts, width, bottom=cantonese_counts, label='English', 
-                color=colors['English'], edgecolor='white', linewidth=1.5, alpha=0.9)
-    p3 = ax.bar(x, equal_counts, width, 
-                bottom=np.array(cantonese_counts) + np.array(english_counts), 
-                label='Equal', color=colors['Equal'], edgecolor='white', linewidth=1.5, alpha=0.9)
+    p1 = ax.bar(x, cantonese_counts, width, label='Cantonese',
+                color=colors['matrix_cantonese'], edgecolor='white', linewidth=1.5, alpha=0.9)
+    p2 = ax.bar(x, english_counts, width, bottom=cantonese_counts, label='English',
+                color=colors['matrix_english'], edgecolor='white', linewidth=1.5, alpha=0.9)
+    p3 = ax.bar(x, equal_counts, width,
+                bottom=np.array(cantonese_counts) + np.array(english_counts),
+                label='Equal', color=colors['matrix_equal'], edgecolor='white', linewidth=1.5, alpha=0.9)
     
     # Styling
     ax.set_xlabel('Speaker Group', fontsize=9, fontweight='medium')
@@ -117,7 +133,7 @@ def plot_matrix_language_distribution(
     logger.info(f"Saved matrix language distribution plot to {output_path_png} and {output_path_pdf}")
 
 
-def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
+def plot_switch_position(df: pd.DataFrame, figures_dir: str, colors: dict = None) -> None:
     """
     Plot distribution of code-switch positions in sentences (raw word positions).
     
@@ -139,9 +155,9 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     # Create figure (single-column format)
     fig, ax = plt.subplots(figsize=(3.5, 4))
     
-    # ColorBrewer YlOrBr palette
-    cb_colors = sns.color_palette("YlOrBr", 3)
-    
+    if colors is None:
+        colors = _DEFAULT_COLORS
+
     # Set up integer bins (one bin per position) for accurate representation
     min_pos = int(df['switch_position'].min())
     max_pos = min(int(df['switch_position'].max()), 50)  # Cap at 50 for visualization
@@ -149,7 +165,7 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     
     # Plot single distribution for all switch positions (all groups combined)
     sns.histplot(data=df, x='switch_position', bins=bins, kde=True,
-                color=cb_colors[1], ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
+                color=colors['accent'], ax=ax, alpha=0.7, edgecolor='white', linewidth=1.5)
     
     # Add vertical line at x=2 to show minimum cutoff
     ax.axvline(x=2, color='#333333', linestyle='--', linewidth=2, alpha=0.7,
@@ -189,7 +205,7 @@ def plot_switch_position(df: pd.DataFrame, figures_dir: str) -> None:
     logger.info(f"Saved switch position plot to {output_path_png} and {output_path_pdf}")
 
 
-def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
+def plot_participant_variation(df: pd.DataFrame, figures_dir: str, colors: dict = None) -> None:
     """
     Plot participant-level variation in code-switching behavior.
     
@@ -202,10 +218,11 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     # Count sentences per participant
     participant_counts = df.groupby(['participant_id', 'group']).size().reset_index(name='num_sentences')
     
+    if colors is None:
+        colors = _DEFAULT_COLORS
+
     groups = ['Homeland', 'Heritage', 'Immersed']
-    # ColorBrewer YlOrBr palette
-    cb_colors = sns.color_palette("YlOrBr", 3)
-    group_colors = {'Homeland': cb_colors[0], 'Heritage': cb_colors[1], 'Immersed': cb_colors[2]}
+    group_colors = {'Homeland': colors['homeland'], 'Heritage': colors['heritage'], 'Immersed': colors['immersed']}
     
     # Create figure (single-column format)
     fig, ax = plt.subplots(figsize=(3.5, 4))
@@ -225,7 +242,7 @@ def plot_participant_variation(df: pd.DataFrame, figures_dir: str) -> None:
     
     # Color each box by group
     for i, patch in enumerate(bp['boxes']):
-        patch.set_facecolor(group_colors.get(labels_for_box[i], cb_colors[0]))
+        patch.set_facecolor(group_colors.get(labels_for_box[i], colors['homeland']))
         patch.set_alpha(0.8)
         patch.set_edgecolor('white')
         patch.set_linewidth(1.5)
@@ -387,14 +404,18 @@ def plot_participant_sentence_counts(df: pd.DataFrame, figures_dir: str) -> None
     x = np.arange(len(counts))
     width = 0.25
 
-    cb_colors = sns.color_palette("YlOrBr", 3)
+    colors = {
+        'English':             '#3498DB',  # Blue
+        'Monolingual Cantonese': '#E74C3C',  # Red
+        'Code-switched':       '#27AE60',  # Green
+    }
 
-    ax.bar(x - width, counts['English'], width, label='English',
-           color=cb_colors[0], alpha=0.9, edgecolor='white', linewidth=1.5)
+    ax.bar(x - width, counts['English'], width, label='Monolingual English',
+           color=colors['English'], alpha=0.9, edgecolor='white', linewidth=1.5)
     ax.bar(x, counts['Monolingual Cantonese'], width, label='Monolingual Cantonese',
-           color=cb_colors[1], alpha=0.9, edgecolor='white', linewidth=1.5)
+           color=colors['Monolingual Cantonese'], alpha=0.9, edgecolor='white', linewidth=1.5)
     ax.bar(x + width, counts['Code-switched'], width, label='Code-switched',
-           color=cb_colors[2], alpha=0.9, edgecolor='white', linewidth=1.5)
+           color=colors['Code-switched'], alpha=0.9, edgecolor='white', linewidth=1.5)
 
     ax.set_xlabel('Participant ID', fontsize=9, fontweight='medium')
     ax.set_ylabel('Number of Sentences', fontsize=9, fontweight='medium')
@@ -424,6 +445,94 @@ def plot_participant_sentence_counts(df: pd.DataFrame, figures_dir: str) -> None
     plt.close()
 
     logger.info(f"Saved participant sentence counts plot to {output_path_png} and {output_path_pdf}")
+
+
+def plot_sentence_pipeline_pie(report_csv_path: str, figures_dir: str) -> None:
+    """
+    Plot a nested donut chart showing the sentence preprocessing pipeline.
+
+    Inner ring: retained (after filler & min-word filtering) vs filtered out.
+    Outer ring: of the retained sentences — Code-Switched, Monolingual Cantonese, Other.
+    The two rings are aligned so the 'filtered out' arc occupies the same angular position.
+
+    Args:
+        report_csv_path: Path to preprocessing_report.csv
+        figures_dir: Directory to save figures
+    """
+    os.makedirs(figures_dir, exist_ok=True)
+
+    report_df = pd.read_csv(report_csv_path)
+
+    def get_metric(name):
+        row = report_df[report_df['metric'] == name]
+        return int(row['value'].values[0]) if len(row) > 0 else 0
+
+    total_initial   = get_metric('Total sentences processed')
+    after_filtering = get_metric('After min_words filter')
+    code_switched   = get_metric('Code-switched sentences')
+    mono_cantonese  = get_metric('Monolingual Cantonese')
+
+    filtered_out = total_initial - after_filtering
+    mono_eng        = after_filtering - code_switched - mono_cantonese
+
+    color_cs      = '#E74C3C'  # Red   — Code-Switched
+    color_cant    = '#3498DB'  # Blue  — Monolingual Cantonese
+    color_eng     = '#27AE60'  # Green — Monolingual English
+    color_filtered = '#95A5A6' # Gray  — Filtered out
+    color_retained = '#BDC3C7' # Light gray — After filtering (inner)
+
+    # Inner ring: [retained, filtered_out] — both start at 90° clockwise
+    inner_sizes  = [after_filtering, filtered_out]
+    inner_colors = [color_retained, color_filtered]
+
+    # Outer ring: CS + Mono Cant + mono_eng occupy the same arc as "retained",
+    # then filtered_out occupies the same arc as the inner filtered_out slice.
+    outer_sizes  = [code_switched, mono_cantonese, mono_eng, filtered_out]
+    outer_colors = [color_cs, color_cant, color_eng, color_filtered]
+
+    fig, ax = plt.subplots(figsize=(4.5, 5))
+
+    wedge_kw = dict(edgecolor='white', linewidth=2)
+
+    ax.pie(outer_sizes, radius=1.0, colors=outer_colors,
+           startangle=90, counterclock=False,
+           wedgeprops=dict(width=0.35, **wedge_kw))
+
+    ax.pie(inner_sizes, radius=0.65, colors=inner_colors,
+           startangle=90, counterclock=False,
+           wedgeprops=dict(width=0.35, **wedge_kw))
+
+    # Centre annotation
+    ax.text(0,  0.08, f'n={total_initial:,}', ha='center', va='center',
+            fontsize=9, fontweight='bold', color='#333333')
+    ax.text(0, -0.12, 'Initial', ha='center', va='center',
+            fontsize=7, color='#666666')
+
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor=color_retained,  label=f'After filtering       (n={after_filtering:,})'),
+        Patch(facecolor=color_filtered,  label=f'Filtered out          (n={filtered_out:,})'),
+        Patch(facecolor=color_cs,        label=f'Code-Switched    (n={code_switched:,})'),
+        Patch(facecolor=color_cant,      label=f'Mono Cantonese   (n={mono_cantonese:,})'),
+        Patch(facecolor=color_eng,       label=f'Mono English        (n={mono_eng:,})'),
+    ]
+    ax.legend(handles=legend_handles,
+              loc='lower center', bbox_to_anchor=(0.5, -0.2),
+              ncol=2, frameon=True, fancybox=True, shadow=True,
+              fontsize=7.5, framealpha=0.95)
+
+    ax.set_title('Sentence Pipeline\n(inner: filtering · outer: sentence type)',
+                 fontsize=10, fontweight='bold', pad=12)
+
+    plt.tight_layout()
+
+    output_path_png = os.path.join(figures_dir, 'sentence_pipeline_pie.png')
+    output_path_pdf = os.path.join(figures_dir, 'sentence_pipeline_pie.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
+    plt.close()
+
+    logger.info(f"Saved sentence pipeline pie chart to {output_path_png} and {output_path_pdf}")
 
 
 def plot_pos_distribution(

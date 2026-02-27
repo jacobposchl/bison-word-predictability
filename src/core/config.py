@@ -171,4 +171,8 @@ class Config:
     def get_analysis_num_workers(self) -> Optional[int]:
         """Get number of CPU cores to leave free. Returns None to use all available cores."""
         return self.get('analysis.parallel.num_workers', None)
+
+    def get_figure_colors(self) -> Dict[str, str]:
+        """Get the figure color palette as a flat dict of name → hex string."""
+        return self.get('figures.colors')
     

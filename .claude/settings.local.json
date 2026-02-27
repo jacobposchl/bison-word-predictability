@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"get_annotation_data_for_tier\\\\|pympi\\\\|\\\\.eaf\")"
+    ]
+  }
+}
