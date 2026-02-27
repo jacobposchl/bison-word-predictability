@@ -13,7 +13,7 @@ library(sjPlot)
 
 # Change from "autoregressive/" to "masked/" for masked surprisal data results. 
 surprisal_results <- read.csv(
-  "autoregressive/window_1/surprisal_results.csv",
+  "masked/window_1/surprisal_results.csv",
   header = TRUE,
   stringsAsFactors = TRUE
 )
@@ -146,7 +146,7 @@ anova(model_surp_single_no_propn, model_ent_single_no_propn, test = "Chisq")
 # ============================================================
 
 model_int <- glmer(
-  is_switch ~ 1+ word_length + pos_category + surprisal_context_3 * group + (1 | participant_id),
+  is_switch ~ 1+ word_length + pos_category + surprisal_context_0 * group + (1 | participant_id),
   data = surprisal_results_excl_multi_propn,
   family = binomial,
   control = glmerControl(optimizer = "bobyqa")
@@ -160,7 +160,7 @@ sjPlot::tab_model(model_int, show.se = TRUE, show.stat = TRUE)
 # ============================================================
 
 model_surp_excl_ctx <- glmer(
-  is_switch ~ word_length + group + pos_category + surprisal_context_3 * group + (1 | participant_id),
+  is_switch ~ word_length + group + pos_category + surprisal_context_0 * group + (1 | participant_id),
   data = surprisal_results_excl_multi_propn_word_in_ctx,
   family = binomial
 )

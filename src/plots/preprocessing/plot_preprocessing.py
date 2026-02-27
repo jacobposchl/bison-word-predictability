@@ -346,6 +346,86 @@ def plot_code_switch_density(df: pd.DataFrame, figures_dir: str) -> None:
     logger.info(f"Saved Cantonese to English ratio distribution plot to {output_path_png} and {output_path_pdf}")
 
 
+def plot_participant_sentence_counts(df: pd.DataFrame, figures_dir: str) -> None:
+    """
+    Plot sentence counts by participant and type (English, Monolingual Cantonese, Code-switched).
+
+    Args:
+        df: DataFrame with all sentences (must have 'participant_id' and 'pattern' columns)
+        figures_dir: Directory to save figures
+    """
+    os.makedirs(figures_dir, exist_ok=True)
+
+    def categorize_sentence(pattern):
+        if pd.isna(pattern):
+            return 'Other'
+        pattern_str = str(pattern)
+        has_c = 'C' in pattern_str
+        has_e = 'E' in pattern_str
+        if has_c and has_e:
+            return 'Code-switched'
+        elif has_c and not has_e:
+            return 'Monolingual Cantonese'
+        elif has_e and not has_c:
+            return 'English'
+        else:
+            return 'Other'
+
+    df = df.copy()
+    df['sentence_type'] = df['pattern'].apply(categorize_sentence)
+
+    counts = df.groupby(['participant_id', 'sentence_type']).size().unstack(fill_value=0)
+
+    for cat in ['English', 'Monolingual Cantonese', 'Code-switched']:
+        if cat not in counts.columns:
+            counts[cat] = 0
+
+    counts = counts.sort_index()
+
+    fig, ax = plt.subplots(figsize=(16, 4))
+
+    x = np.arange(len(counts))
+    width = 0.25
+
+    cb_colors = sns.color_palette("YlOrBr", 3)
+
+    ax.bar(x - width, counts['English'], width, label='English',
+           color=cb_colors[0], alpha=0.9, edgecolor='white', linewidth=1.5)
+    ax.bar(x, counts['Monolingual Cantonese'], width, label='Monolingual Cantonese',
+           color=cb_colors[1], alpha=0.9, edgecolor='white', linewidth=1.5)
+    ax.bar(x + width, counts['Code-switched'], width, label='Code-switched',
+           color=cb_colors[2], alpha=0.9, edgecolor='white', linewidth=1.5)
+
+    ax.set_xlabel('Participant ID', fontsize=9, fontweight='medium')
+    ax.set_ylabel('Number of Sentences', fontsize=9, fontweight='medium')
+    ax.set_title('Sentence Counts by Participant and Type', fontsize=10, fontweight='bold', pad=10)
+    ax.set_xticks(x)
+    ax.set_xticklabels(counts.index, rotation=45, ha='right', fontsize=7)
+    ax.tick_params(axis='both', labelsize=8)
+
+    ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True,
+              fontsize=8, framealpha=0.95)
+
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    ax.spines['left'].set_color('#d0d0d0')
+    ax.spines['bottom'].set_color('#d0d0d0')
+
+    plt.tight_layout()
+
+    output_path_png = os.path.join(figures_dir, 'participant_sentence_counts.png')
+    output_path_pdf = os.path.join(figures_dir, 'participant_sentence_counts.pdf')
+    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
+    plt.close()
+
+    logger.info(f"Saved participant sentence counts plot to {output_path_png} and {output_path_pdf}")
+
+
 def plot_pos_distribution(
     mono_csv_path: str,
     cs_csv_path: str,

@@ -27,7 +27,8 @@ from src.plots.preprocessing.plot_preprocessing import (
     plot_switch_position,
     plot_participant_variation,
     plot_code_switch_density,
-    plot_pos_distribution
+    plot_pos_distribution,
+    plot_participant_sentence_counts
 )
 from src.plots.matching.plot_matching import (
     plot_matches_per_sentence_distribution,
@@ -112,7 +113,11 @@ def generate_preprocessing_figures(config: Config):
         plot_pos_distribution(str(mono_csv), str(cs_csv), figures_dir, top_n=15)
     else:
         logger.warning(f"  Skipping POS distribution - CSV files not found")
-    
+
+    # 6. Participant sentence counts (all sentence types)
+    logger.info("  6. Participant sentence counts...")
+    plot_participant_sentence_counts(all_sentences_df, figures_dir)
+
     logger.info(f"\nAll preprocessing figures saved to: {figures_dir}")
     return True
 
