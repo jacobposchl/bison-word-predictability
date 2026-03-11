@@ -447,13 +447,45 @@ def plot_participant_sentence_counts(df: pd.DataFrame, figures_dir: str) -> None
     logger.info(f"Saved participant sentence counts plot to {output_path_png} and {output_path_pdf}")
 
 
+def _save_pie(labels, sizes, colors, filename_stem, figures_dir) -> None:
+    """Shared helper: render a pie chart and save as PNG + PDF."""
+    total = sum(sizes)
+    _, ax = plt.subplots(figsize=(4.5, 4.5))
+
+    wedges, _ = ax.pie(
+        sizes,
+        colors=colors,
+        startangle=90,
+        counterclock=False,
+        wedgeprops=dict(edgecolor='white', linewidth=1.5),
+        radius=1.15,
+    )
+
+    for wedge, label, size in zip(wedges, labels, sizes):
+        pct = size / total * 100
+        if pct < 3:
+            continue
+        angle = (wedge.theta1 + wedge.theta2) / 2
+        x = 0.82 * np.cos(np.radians(angle))
+        y = 0.82 * np.sin(np.radians(angle))
+        ax.text(x, y, f'{label}\n{pct:.1f}%\n(n={size:,})',
+                ha='center', va='center',
+                fontsize=6.5, fontweight='bold', color='white',
+                linespacing=1.4)
+
+    for ext, kw in [('.png', dict(dpi=300)), ('.pdf', dict(format='pdf'))]:
+        plt.savefig(os.path.join(figures_dir, filename_stem + ext),
+                    bbox_inches='tight', **kw)
+    plt.close()
+
+
 def plot_sentence_pipeline_pie(report_csv_path: str, figures_dir: str) -> None:
     """
-    Plot a nested donut chart showing the sentence preprocessing pipeline.
+    Plot three pie chart variants of the sentence preprocessing pipeline.
 
-    Inner ring: retained (after filler & min-word filtering) vs filtered out.
-    Outer ring: of the retained sentences — Code-Switched, Monolingual Cantonese, Other.
-    The two rings are aligned so the 'filtered out' arc occupies the same angular position.
+    Variant 1 — CS Cantonese-dominant only (CS English + CS Equal → Filtered out)
+    Variant 2 — CS Cantonese-dominant + CS English-dominant (CS Equal → Filtered out)
+    Variant 3 — CS Cantonese-dominant + CS Equal (CS English-dominant → Filtered out)
 
     Args:
         report_csv_path: Path to preprocessing_report.csv
@@ -467,72 +499,32 @@ def plot_sentence_pipeline_pie(report_csv_path: str, figures_dir: str) -> None:
         row = report_df[report_df['metric'] == name]
         return int(row['value'].values[0]) if len(row) > 0 else 0
 
-    total_initial   = get_metric('Total sentences processed')
-    after_filtering = get_metric('After min_words filter')
-    code_switched   = get_metric('Code-switched sentences')
+    total_initial  = get_metric('Total sentences processed')
     mono_cantonese  = get_metric('Monolingual Cantonese')
+    mono_english    = get_metric('Monolingual English')
+    cs_final        = get_metric('Final with translation')  # CS sentences passing all filters
 
-    filtered_out = total_initial - after_filtering
-    mono_eng        = after_filtering - code_switched - mono_cantonese
+    color_cs_cant  = '#27AE60'  # Green — CS Cantonese-dominant
+    color_cant     = '#E74C3C'  # Red   — Mono Cantonese
+    color_eng      = '#3498DB'  # Blue  — Mono English
+    color_filtered = '#95A5A6'  # Gray  — Filtered out
 
-    color_cs      = '#E74C3C'  # Red   — Code-Switched
-    color_cant    = '#3498DB'  # Blue  — Monolingual Cantonese
-    color_eng     = '#27AE60'  # Green — Monolingual English
-    color_filtered = '#95A5A6' # Gray  — Filtered out
-    color_retained = '#BDC3C7' # Light gray — After filtering (inner)
+    # Everything not in the three retained slices goes to filtered out
+    filtered_out = total_initial - cs_final - mono_cantonese - mono_english
+    logger.debug(
+        "Pie breakdown: CS=%d, MonoCant=%d, MonoEng=%d, FilteredOut=%d, Total=%d",
+        cs_final, mono_cantonese, mono_english, filtered_out,
+        cs_final + mono_cantonese + mono_english + filtered_out
+    )
+    _save_pie(
+        labels=['CS Cantonese\nDominant', 'Mono Cantonese', 'Mono English', 'Filtered out'],
+        sizes=[cs_final, mono_cantonese, mono_english, filtered_out],
+        colors=[color_cs_cant, color_cant, color_eng, color_filtered],
+        filename_stem='sentence_pipeline_pie',
+        figures_dir=figures_dir,
+    )
 
-    # Inner ring: [retained, filtered_out] — both start at 90° clockwise
-    inner_sizes  = [after_filtering, filtered_out]
-    inner_colors = [color_retained, color_filtered]
-
-    # Outer ring: CS + Mono Cant + mono_eng occupy the same arc as "retained",
-    # then filtered_out occupies the same arc as the inner filtered_out slice.
-    outer_sizes  = [code_switched, mono_cantonese, mono_eng, filtered_out]
-    outer_colors = [color_cs, color_cant, color_eng, color_filtered]
-
-    fig, ax = plt.subplots(figsize=(4.5, 5))
-
-    wedge_kw = dict(edgecolor='white', linewidth=2)
-
-    ax.pie(outer_sizes, radius=1.0, colors=outer_colors,
-           startangle=90, counterclock=False,
-           wedgeprops=dict(width=0.35, **wedge_kw))
-
-    ax.pie(inner_sizes, radius=0.65, colors=inner_colors,
-           startangle=90, counterclock=False,
-           wedgeprops=dict(width=0.35, **wedge_kw))
-
-    # Centre annotation
-    ax.text(0,  0.08, f'n={total_initial:,}', ha='center', va='center',
-            fontsize=9, fontweight='bold', color='#333333')
-    ax.text(0, -0.12, 'Initial', ha='center', va='center',
-            fontsize=7, color='#666666')
-
-    from matplotlib.patches import Patch
-    legend_handles = [
-        Patch(facecolor=color_retained,  label=f'After filtering       (n={after_filtering:,})'),
-        Patch(facecolor=color_filtered,  label=f'Filtered out          (n={filtered_out:,})'),
-        Patch(facecolor=color_cs,        label=f'Code-Switched    (n={code_switched:,})'),
-        Patch(facecolor=color_cant,      label=f'Mono Cantonese   (n={mono_cantonese:,})'),
-        Patch(facecolor=color_eng,       label=f'Mono English        (n={mono_eng:,})'),
-    ]
-    ax.legend(handles=legend_handles,
-              loc='lower center', bbox_to_anchor=(0.5, -0.2),
-              ncol=2, frameon=True, fancybox=True, shadow=True,
-              fontsize=7.5, framealpha=0.95)
-
-    ax.set_title('Sentence Pipeline\n(inner: filtering · outer: sentence type)',
-                 fontsize=10, fontweight='bold', pad=12)
-
-    plt.tight_layout()
-
-    output_path_png = os.path.join(figures_dir, 'sentence_pipeline_pie.png')
-    output_path_pdf = os.path.join(figures_dir, 'sentence_pipeline_pie.pdf')
-    plt.savefig(output_path_png, dpi=300, bbox_inches='tight')
-    plt.savefig(output_path_pdf, format='pdf', bbox_inches='tight')
-    plt.close()
-
-    logger.info(f"Saved sentence pipeline pie chart to {output_path_png} and {output_path_pdf}")
+    logger.info("Saved sentence pipeline pie chart to %s", figures_dir)
 
 
 def plot_pos_distribution(

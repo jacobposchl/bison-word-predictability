@@ -1,13 +1,13 @@
 """
 Identifies rows where surprisal_context_3 differs substantially from
-surprisal_context_0 in the autoregressive window_1 surprisal results.
+surprisal_context_0 for both autoregressive and masked window_1 surprisal results.
 
 This is useful for understanding the coefficient reversal observed in the
 GLMMs: surprisal_context_0 predicts code-switching positively, while
 surprisal_context_3 predicts it negatively.
 
 Outputs a CSV of high-delta cases sorted by absolute difference, with
-relevant metadata for qualitative inspection.
+relevant metadata for qualitative inspection, and a .txt of top-3 examples.
 
 Usage:
     python scripts/context_surprisal_diff.py
@@ -25,23 +25,27 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-INPUT_CSV  = "results/surprisal/autoregressive/window_1/surprisal_results.csv"
-OUTPUT_CSV = "results/surprisal/autoregressive/window_1/context_surprisal_diff.csv"
 DEFAULT_Z_THRESHOLD = 2.0
 
-KEEP_COLS = [
-    "sent_id", "is_switch", "participant_id", "group",
-    "word", "switch_pos", "is_propn", "single_worded",
-    "word_length", "normalized_switch_point", "word_in_context",
-    "surprisal_context_0", "surprisal_context_1",
-    "surprisal_context_2", "surprisal_context_3",
-    "entropy_context_0",   "entropy_context_3",
-    "sentence", "context", "original_sentence",
+MODELS = [
+    {
+        "label":      "Autoregressive / window_1",
+        "input_csv":  "results/surprisal/autoregressive/window_1/surprisal_results.csv",
+        "output_csv": "results/surprisal/autoregressive/window_1/context_surprisal_diff.csv",
+        "output_txt": "results/surprisal/autoregressive/window_1/context_surprisal_examples.txt",
+    },
+    {
+        "label":      "Masked / window_1",
+        "input_csv":  "results/surprisal/masked/window_1/surprisal_results.csv",
+        "output_csv": "results/surprisal/masked/window_1/context_surprisal_diff.csv",
+        "output_txt": "results/surprisal/masked/window_1/context_surprisal_examples.txt",
+    },
 ]
 
 
-def main(z_threshold: float, switch_only: bool) -> None:
-    df = pd.read_csv(INPUT_CSV)
+def main(label: str, input_csv: str, output_csv: str, output_txt: str,
+         z_threshold: float, switch_only: bool) -> None:
+    df = pd.read_csv(input_csv)
 
     # ── Filtering ─────────────────────────────────────────────────────────────
     # Exclude proper nouns
@@ -64,27 +68,45 @@ def main(z_threshold: float, switch_only: bool) -> None:
     std_delta  = df["delta_c3_c0"].std()
     df["z_delta"] = (df["delta_c3_c0"] - mean_delta) / std_delta
 
-    df["context_effect"] = df["delta_c3_c0"].apply(
-        lambda x: "decreased_with_context" if x < 0 else "increased_with_context"
+    df["context_effect"] = df.apply(
+        lambda r: (
+            "Sig Increase" if r["z_delta"] >= z_threshold
+            else "Sig Decrease" if r["z_delta"] <= -z_threshold
+            else "No Sig"
+        ),
+        axis=1,
     )
 
     # ── Filter ────────────────────────────────────────────────────────────────
-    flagged = df[df["z_delta"].abs() >= z_threshold].copy()
+    flagged = df[df["context_effect"] != "No Sig"].copy()
     flagged = flagged.sort_values("abs_delta", ascending=False)
 
-    # ── Build output ──────────────────────────────────────────────────────────
-    computed = ["delta_c3_c0", "abs_delta", "z_delta", "context_effect"]
-    out_cols = [c for c in KEEP_COLS if c in flagged.columns] + computed
-    flagged[out_cols].to_csv(OUTPUT_CSV, index=False)
+    # ── Build output: flagged rows + their sent_id pairs, interleaved ─────────
+    paired_df = df[df["sent_id"].isin(flagged["sent_id"].unique())].copy()
+    sent_max = flagged.groupby("sent_id")["abs_delta"].max()
+    paired_df["_group_rank"] = paired_df["sent_id"].map(sent_max)
+    paired_df["_is_flagged"] = (paired_df["context_effect"] != "No Sig").astype(int)
+    paired_df = paired_df.sort_values(
+        ["_group_rank", "sent_id", "_is_flagged", "abs_delta"],
+        ascending=[False, True, False, False],
+    ).drop(columns=["_group_rank", "_is_flagged"])
+
+    out_cols = [
+        "sent_id", "context_effect", "is_switch", "word", "switch_pos",
+        "surprisal_context_0", "surprisal_context_3",
+        "sentence", "context", "delta_c3_c0", "z_delta",
+    ]
+    out_cols = [c for c in out_cols if c in paired_df.columns]
+    paired_df[out_cols].to_csv(output_csv, index=False)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total = len(df)
     n_flagged = len(flagged)
 
     print("=" * 60)
-    print("CONTEXT SURPRISAL DIFFERENCE ANALYSIS")
+    print(f"CONTEXT SURPRISAL DIFFERENCE ANALYSIS  [{label}]")
     print("=" * 60)
-    print(f"  Input            : {INPUT_CSV}")
+    print(f"  Input            : {input_csv}")
     print(f"  Total rows       : {total}")
     print(f"  Z-threshold      : |z| >= {z_threshold}")
     print(f"  Mean delta       : {mean_delta:.3f}  bits")
@@ -129,14 +151,66 @@ def main(z_threshold: float, switch_only: bool) -> None:
     print()
 
     print("Distribution split by is_switch:")
-    for label, group_df in df.groupby("is_switch"):
-        name = "switch" if label == 1 else "non-switch"
+    for label_i, group_df in df.groupby("is_switch"):
+        name = "switch" if label_i == 1 else "non-switch"
         d = group_df["delta_c3_c0"].describe(percentiles=[0.25, 0.50, 0.75])
         print(f"  {name} (n={len(group_df)}):")
         print(d.round(3).rename(index=lambda s: f"    {s}").to_string())
         print()
 
-    print(f"Output written to: {OUTPUT_CSV}")
+    # ── Absolute surprisal levels by switch status ────────────────────────────
+    print("Absolute surprisal levels by switch status (mean ± std):")
+    abs_levels = (
+        df.groupby("is_switch")[["surprisal_context_0", "surprisal_context_3"]]
+        .agg(["mean", "std"])
+    )
+    abs_levels.index = abs_levels.index.map({0: "non-switch", 1: "switch"})
+    for group_name, row in abs_levels.iterrows():
+        c0_mean, c0_std = row[("surprisal_context_0", "mean")], row[("surprisal_context_0", "std")]
+        c3_mean, c3_std = row[("surprisal_context_3", "mean")], row[("surprisal_context_3", "std")]
+        delta = c3_mean - c0_mean
+        print(f"  {group_name}:")
+        print(f"    context_0  : {c0_mean:.3f} ± {c0_std:.3f} bits")
+        print(f"    context_3  : {c3_mean:.3f} ± {c3_std:.3f} bits")
+        print(f"    shift      : {delta:+.3f} bits")
+        print()
+
+    print(f"Output written to  : {output_csv}")
+
+    # ── Write top-3 examples to .txt ──────────────────────────────────────────
+    topx = flagged[flagged["is_switch"] == 1].head(25)
+    lines = []
+    for i, (_, cs_row) in enumerate(topx.iterrows(), start=1):
+        pair = df[(df["sent_id"] == cs_row["sent_id"]) & (df["is_switch"] == 0)]
+
+        lines.append(f"EXAMPLE {i}:")
+        lines.append("")
+        lines.append("CS-Sentence")
+        lines.append(f"Switch Word: {cs_row['word']}")
+        lines.append(f"Code-switched Sentence: {cs_row['sentence']}")
+        lines.append(f"Context: {cs_row['context']}")
+        lines.append(f"Surprisal w/ Context 0: {cs_row['surprisal_context_0']:.3f}")
+        lines.append(f"Surprisal w/ Context 3: {cs_row['surprisal_context_3']:.3f}")
+        lines.append("")
+        lines.append("Paired-Unilingual-Sentence")
+        if not pair.empty:
+            uni_row = pair.iloc[0]
+            lines.append(f"Switch Word: {uni_row['word']}")
+            lines.append(f"Unilingual Sentence: {uni_row['sentence']}")
+            lines.append(f"Context: {uni_row['context']}")
+            lines.append(f"Surprisal w/ Context 0: {uni_row['surprisal_context_0']:.3f}")
+            lines.append(f"Surprisal w/ Context 3: {uni_row['surprisal_context_3']:.3f}")
+        else:
+            lines.append("  (no paired unilingual row found for this sent_id)")
+        if i < len(topx):
+            lines.append("")
+            lines.append("─" * 60)
+            lines.append("")
+
+    with open(output_txt, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"Examples written to : {output_txt}")
+    print()
 
 
 if __name__ == "__main__":
@@ -152,4 +226,13 @@ if __name__ == "__main__":
         help="Restrict analysis to code-switch words only (is_switch == 1)"
     )
     args = parser.parse_args()
-    main(z_threshold=args.z_threshold, switch_only=args.switch_only)
+
+    for model in MODELS:
+        main(
+            label=model["label"],
+            input_csv=model["input_csv"],
+            output_csv=model["output_csv"],
+            output_txt=model["output_txt"],
+            z_threshold=args.z_threshold,
+            switch_only=args.switch_only,
+        )

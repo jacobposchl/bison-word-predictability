@@ -69,6 +69,15 @@ surprisal_results_excl_multi_propn_word_in_ctx <- surprisal_results %>%
 # 1) Models on full dataset
 # ============================================================
 
+# Control Model
+model_control <- glmer(
+  is_switch ~ word_length + group + pos_category + (1 | participant_id),
+  data = surprisal_results,
+  family = binomial
+)
+summary(model_control)
+sjPlot::tab_model(model_control, show.se = TRUE, show.stat = TRUE)
+
 # Surprisal-only model
 model_surp_c0 <- glmer(
   is_switch ~ word_length + group + pos_category + surprisal_context_0 + (1 | participant_id),
@@ -159,6 +168,15 @@ surprisal_single_no_propn <- surprisal_results %>%
   ungroup()
 
 
+# Control Model
+model_control <- glmer(
+  is_switch ~ word_length + group + pos_category + (1 | participant_id),
+  data = surprisal_single_no_propn,
+  family = binomial
+)
+summary(model_control)
+sjPlot::tab_model(model_control, show.se = TRUE, show.stat = TRUE)
+
 # surprisal model
 model_surp_single_no_propn_c0 <- glmer(
   is_switch ~ word_length + group + pos_category + surprisal_context_2 + (1 | participant_id),
@@ -170,7 +188,7 @@ summary(model_surp_single_no_propn_c0)
 sjPlot::tab_model(model_surp_single_no_propn_c0, show.se = TRUE, show.stat = TRUE)
 
 model_surp_single_no_propn_c0 <- glmer(
-  is_switch ~ word_length + group + pos_category + surprisal_context_0 + surprisal_context_1 + (1 | participant_id),
+  is_switch ~ word_length + group + pos_category + surprisal_context_0 + (1 | participant_id),
   data = surprisal_single_no_propn,
   family = binomial,
   control = glmerControl(optimizer = "bobyqa")

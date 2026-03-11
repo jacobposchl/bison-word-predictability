@@ -3,7 +3,8 @@
     "allow": [
       "Bash(xargs grep -l \"get_annotation_data_for_tier\\\\|pympi\\\\|\\\\.eaf\")",
       "Bash(python3 -c \":*)",
-      "Bash(python scripts/context_surprisal_diff.py)"
+      "Bash(python scripts/context_surprisal_diff.py)",
+      "Bash(python -c \"import pycantonese; help\\(pycantonese.segment\\)\")"
     ]
   }
 }

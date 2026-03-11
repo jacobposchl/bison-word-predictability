@@ -9,6 +9,7 @@ This script illustrates:
 Modify the INPUT VARIABLES section to choose which CS dataset row(s) to demo.
 """
 
+import re
 import sys
 import pandas as pd
 from pathlib import Path
@@ -31,7 +32,9 @@ from src.analysis.matching_algorithm import (
 
 # Row index/indices into the code-switched sentences dataset (0-based).
 # Set to a single int to run one sentence, or a list of ints for multiple.
-CS_ROW_INDICES = 252, 294, 360, 378
+# Set to None to auto-select qualifying rows, or a single int / tuple of ints
+# to manually specify rows.
+CS_ROW_INDICES = None
 
 WINDOW_SIZE = 1           # Window size for matching
 SIMILARITY_THRESHOLD = 0.4  # Levenshtein similarity threshold
@@ -261,6 +264,91 @@ def run_demo_for_row(row, monolingual_sentences, mono_pos_cache, window_size, si
     print("=" * 80)
 
 
+def _is_single_worded(pattern) -> bool:
+    """Return True if the pattern indicates a single English word switch (CX-E1...)."""
+    if not pattern or (isinstance(pattern, float) and pd.isna(pattern)):
+        return False
+    return bool(re.match(r'^C\d+-E1(?:-|$)', str(pattern)))
+
+
+def _get_switch_pos(row: dict) -> str:
+    """Return the POS tag of the switched word."""
+    pos_seq = str(row.get('translated_pos', '')).split()
+    try:
+        switch_idx = int(row.get('switch_index', 0))
+    except (ValueError, TypeError):
+        return ''
+    return pos_seq[switch_idx] if 0 <= switch_idx < len(pos_seq) else ''
+
+
+def find_qualifying_indices(
+    cs_df: pd.DataFrame,
+    monolingual_sentences: list,
+    mono_pos_cache: dict,
+    window_size: int,
+    similarity_threshold: float,
+    max_results: int = 4,
+) -> list:
+    """
+    Auto-select CS row indices that satisfy the demo criteria:
+      1. Single-worded code-switch (pattern matches C<n>-E1...)
+      2. Switched word is not a proper noun (PROPN)
+      3. At least 1 monolingual candidate with Levenshtein similarity < threshold
+      4. At least 2 window matches from the same group but a different speaker,
+         both with similarity >= threshold
+    """
+    qualifying = []
+    print("\nAuto-selecting qualifying CS rows...")
+
+    for idx, row in cs_df.iterrows():
+        row_dict = row.to_dict()
+
+        if not _is_single_worded(row_dict.get('pattern')):
+            continue
+        if _get_switch_pos(row_dict) == 'PROPN':
+            continue
+
+        group = row_dict.get('group', '')
+        participant_id = row_dict.get('participant_id', '')
+
+        cs_sent_dict = {
+            'code_switch_original': row_dict.get('code_switch_original', ''),
+            'cantonese_translation': row_dict.get('cantonese_translation', ''),
+            'translated_pos': row_dict.get('translated_pos', ''),
+            'switch_index': int(row_dict.get('switch_index', 0)),
+            'participant_id': participant_id,
+            'group': group,
+            'start_time': float(row_dict.get('start_time', 0)),
+            'pattern': row_dict.get('pattern', 'C-E'),
+        }
+
+        matches, _, _, _, all_scores = find_window_matches(
+            cs_sent_dict,
+            monolingual_sentences,
+            window_size=window_size,
+            similarity_threshold=similarity_threshold,
+            mono_pos_cache=mono_pos_cache,
+        )
+
+        # Criterion 3: at least one sentence scored below threshold
+        if not any(s < similarity_threshold for s in all_scores):
+            continue
+
+        # Criterion 4: at least two matches from same group, different speaker
+        same_group_diff_speaker = [
+            m for m in matches
+            if m['match_sentence'].get('group') == group
+            and m['match_sentence'].get('participant_id') != participant_id
+        ]
+        if len(same_group_diff_speaker) >= 2:
+            qualifying.append(idx)
+
+        if len(qualifying) >= max_results:
+            break
+
+    return qualifying
+
+
 def main():
     """Run matching demo for the specified CS dataset row(s)."""
 
@@ -283,9 +371,6 @@ def main():
     cs_df = pd.read_csv(cs_csv)
     print(f"Dataset has {len(cs_df)} rows (indices 0 – {len(cs_df) - 1})")
 
-    # Resolve which row indices to run
-    indices = [CS_ROW_INDICES] if isinstance(CS_ROW_INDICES, int) else list(CS_ROW_INDICES)
-
     # Load monolingual sentences (shared across all rows)
     monolingual_csv = preprocessing_dir / config.get('output.csv_cantonese_mono_without_fillers')
     if not monolingual_csv.exists():
@@ -301,6 +386,21 @@ def main():
     # Build POS cache (shared across all rows)
     print("\nBuilding POS cache...")
     mono_pos_cache = build_monolingual_pos_cache(monolingual_sentences)
+
+    # Resolve which row indices to run
+    if CS_ROW_INDICES is None:
+        indices = find_qualifying_indices(
+            cs_df, monolingual_sentences, mono_pos_cache,
+            WINDOW_SIZE, SIMILARITY_THRESHOLD
+        )
+        if not indices:
+            print("\nNo qualifying rows found with the current criteria.")
+            return
+        print(f"Auto-selected row indices: {indices}")
+    elif isinstance(CS_ROW_INDICES, int):
+        indices = [CS_ROW_INDICES]
+    else:
+        indices = list(CS_ROW_INDICES)
 
     # Run demo for each requested row
     for idx in indices:
